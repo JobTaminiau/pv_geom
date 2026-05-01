@@ -1,0 +1,9 @@
+# Compute-only overlay for Coiled runs.
+compute:
+  backend: coiled
+  coiled:
+    name: pv-geom
+    n_workers: 40
+    worker_memory: "8GiB"
+    worker_cpu: 4
+    software: pv-geom-runtime-2026-05

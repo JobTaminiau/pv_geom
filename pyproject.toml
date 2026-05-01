@@ -1,0 +1,83 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pv-geom"
+version = "0.1.0"
+description = "Geometric attribute extraction for solar PV polygons from LiDAR."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Job Taminiau", email = "jt@freefutures.org" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: Other/Proprietary License",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "pyarrow>=17",
+    "geopandas>=0.14",
+    "shapely>=2.0",
+    "pyproj>=3.6",
+    "pyogrio>=0.9",
+    "scikit-learn>=1.5",
+    "laspy[lazrs]>=2.5",
+    "fsspec>=2024.10",
+    "s3fs>=2024.10",
+    "pydantic>=2.6",
+    "pyyaml>=6",
+    "typer>=0.12",
+    "rich>=13.7",
+    "dask>=2025.10",
+    "distributed>=2025.10",
+    "coiled>=1.128",
+]
+
+[project.optional-dependencies]
+# pdal Python bindings need the system PDAL library; install via conda on Windows.
+# Worker images on Coiled should pull this in.
+pdal = ["pdal>=3.4"]
+whitebox = ["whitebox>=2.3"]
+dev = [
+    "pytest>=8",
+    "pytest-cov>=5",
+    "ruff>=0.7",
+    "mypy>=1.10",
+]
+
+[project.scripts]
+pv-geom = "pv_geom.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pv_geom"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+extend-exclude = [".venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "integration: integration test that hits S3 (gated by RUN_INTEGRATION env var)",
+    "slow: long-running test",
+]

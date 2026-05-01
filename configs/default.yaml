@@ -1,0 +1,62 @@
+# pv_geom default configuration. Mirrors PRD §9.2.
+crs:
+  target: EPSG:6404           # NAD83(2011) / Arizona Central (ftUS); confirm against tile index
+
+panel_plane:
+  erosion_m: 0.15
+  ransac_threshold_m: 0.05
+  min_inlier_frac: 0.6
+  max_iter: 200
+  min_density_pts_per_m2: 4
+  tilt_floor_deg: 1.0
+  uncertainty_method: bootstrap   # bootstrap | covariance
+  bootstrap_samples: 50
+
+multi_plane:
+  enabled: true
+  secondary_min_frac: 0.20
+  ew_rack_azimuth_tol_deg: 25
+  ew_rack_tilt_tol_deg: 5
+
+roof_plane:
+  enabled: true
+  buffer_m: 3.0
+  buffer_max_m: 5.0
+  min_points: 100
+  rmse_max_m: 0.10
+
+heights:
+  ground_search_radius_m: 10.0
+  use_whitebox_dem: false
+
+mounting_rules:
+  R1: { panel_roof_angle_deg_max: 5.0, height_above_roof_m_max: 0.5 }
+  R2: { panel_roof_angle_deg_min: 5.0, height_above_roof_m_max: 1.5,
+        fallback_tilt_deg_min: 5.0, fallback_height_above_ground_m_min: 2.5 }
+  R3: { height_above_ground_m_min: 2.0, aspect_ratio_min: 2.0 }
+  R4: { aspect_ratio_min: 4.0, tilt_deg_max: 35.0, height_above_ground_m_max: 2.0 }
+  R5: { tilt_deg_min: 5.0, height_above_ground_m_max: 2.0 }
+  confidence_margin: 0.5
+
+io:
+  lidar_reader: laspy          # laspy | pdal (pdal needs the [pdal] extra + system libs)
+  s3:
+    requester_pays: false
+    region: us-west-2
+
+compute:
+  backend: local               # local | coiled
+  coiled:
+    name: pv-geom
+    n_workers: 40
+    worker_memory: "8GiB"
+    worker_cpu: 4
+    software: pv-geom-runtime-2026-05
+  local:
+    n_workers: 8
+    threads_per_worker: 2
+
+output:
+  partition_size: 100000
+  write_geoparquet: true
+  also_write_csv: false

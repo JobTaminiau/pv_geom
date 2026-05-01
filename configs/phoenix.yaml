@@ -1,0 +1,20 @@
+# Metro Phoenix overrides. Inherits all unset fields from default.yaml semantics
+# via Pydantic defaults; the loader does NOT merge — supply a complete config or
+# set sparse keys via Pydantic partial loading (see config.py).
+crs:
+  target: EPSG:6404
+
+io:
+  lidar_reader: laspy
+  s3:
+    requester_pays: false
+    region: us-west-2
+
+compute:
+  backend: coiled
+  coiled:
+    name: pv-geom-phoenix
+    n_workers: 40
+    worker_memory: "8GiB"
+    worker_cpu: 4
+    software: pv-geom-runtime-2026-05

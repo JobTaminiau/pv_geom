@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Output / data
+output/
+runs/
+logs/
+*.parquet
+*.laz
+*.las
+*.tif
+*.tiff
+data/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Env / secrets
+.env
+.env.local
+*.pem
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

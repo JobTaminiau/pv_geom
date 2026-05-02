@@ -30,6 +30,9 @@ out_*/
 # Local tool state
 .claude/
 
+# Draft release metadata — un-ignore when ready to publish to Zenodo
+.zenodo.json
+
 # Notebooks
 .ipynb_checkpoints/
 

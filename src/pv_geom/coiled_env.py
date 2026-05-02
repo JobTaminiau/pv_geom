@@ -96,8 +96,16 @@ def make_cluster(cfg: PVGeomConfig) -> "Cluster":
 
 
 def install_pv_geom_on_workers(client, ref: str = "main") -> None:
-    """Install pv_geom on every worker via ``client.run`` (works around
-    Coiled's silent dropping of ``git+`` pip requirements)."""
+    """Install pv_geom on the scheduler AND every worker (works around
+    Coiled's silent dropping of ``git+`` pip requirements).
+
+    The scheduler also needs ``pv_geom`` because Dask deserializes the
+    task graph on it before dispatching: any class/function reference
+    in a delayed task imports ``pv_geom.*`` during ``pickle.loads``.
+    Without this, ``client.compute`` blows up with
+    ``ModuleNotFoundError: No module named 'pv_geom'`` from
+    ``scheduler.update_graph``.
+    """
 
     def _install(ref: str = ref) -> str:
         import subprocess
@@ -109,4 +117,5 @@ def install_pv_geom_on_workers(client, ref: str = "main") -> None:
         )
         return out.decode("utf-8", errors="replace")[-200:]
 
+    client.run_on_scheduler(_install)
     client.run(_install)

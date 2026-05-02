@@ -89,7 +89,7 @@ class MountingRulesConfig(BaseModel):
 
 class S3Config(BaseModel):
     requester_pays: bool = False
-    region: str = "us-west-2"
+    region: str = "us-east-2"
 
 
 class ClassificationConfig(BaseModel):

@@ -220,6 +220,57 @@ def test_resume_without_existing_runs_normally(synth_inputs: dict[str, Path]) ->
     assert len(parts) == 1
 
 
+def test_process_tile_group_missing_primary_tile(synth_inputs: dict[str, Path]) -> None:
+    """If the primary LAZ tile is missing on S3, the worker emits an empty
+    OUTPUT_SCHEMA-conformant table instead of crashing the whole pipeline.
+    Coiled relies on this — pre-warm is skipped there, so 404s surface inside
+    workers rather than being filtered up-front.
+    """
+    import geopandas as gpd
+    from shapely.geometry import box
+
+    from pv_geom.io._localize import RemoteFileMissing
+    from pv_geom.pipeline.tile_task import process_tile_group
+
+    cfg = PVGeomConfig()
+    polys = gpd.GeoDataFrame(
+        {"polygon_id": ["p1"]},
+        geometry=[box(40.0, 40.0, 50.0, 50.0)],
+        crs="EPSG:6341",
+    )
+    footprints = gpd.GeoDataFrame(
+        {"building_id": ["b1"]},
+        geometry=[box(35.0, 35.0, 65.0, 65.0)],
+        crs="EPSG:6341",
+    )
+
+    def _raise_missing(*args, **kwargs):
+        raise RemoteFileMissing("s3://fake/missing.laz not found")
+
+    import pv_geom.pipeline.tile_task as tile_task_mod
+
+    orig = tile_task_mod.read_tile_points
+    tile_task_mod.read_tile_points = _raise_missing
+    try:
+        table = process_tile_group(
+            tile_uri_map={"t1": "s3://fake/missing.laz"},
+            primary_tile_id="t1",
+            polygons=polys,
+            fetch_tile_ids=("t1",),
+            footprints=footprints,
+            cfg=cfg,
+            config_hash="deadbeef",
+            run_id="run1",
+            partition_id=0,
+        )
+    finally:
+        tile_task_mod.read_tile_points = orig
+
+    # Empty table, but with the canonical schema (so pyarrow.concat_tables works).
+    assert len(table) == 0
+    assert set(table.schema.names) == set(OUTPUT_SCHEMA.names)
+
+
 def test_runner_dry_run(synth_inputs: dict[str, Path]) -> None:
     cfg = PVGeomConfig()
     manifest = run_pipeline(

@@ -31,6 +31,7 @@ from pv_geom.geometry.multi_plane import (
 )
 from pv_geom.geometry.plane_fit import bootstrap_uncertainty, fit_plane_ransac
 from pv_geom.geometry.roof_plane import extract_roof_plane
+from pv_geom.io._localize import RemoteFileMissing
 from pv_geom.io.lidar import clip_points_to_polygon, read_tile_points
 from pv_geom.schema import OUTPUT_SCHEMA
 
@@ -251,14 +252,34 @@ def process_tile_group(
     polygon_id_col: str = "polygon_id",
 ) -> pa.Table:
     """Fetch all tiles in ``fetch_tile_ids``, run M3-M5 per polygon, return a table."""
-    # 1) Load all required tiles' points (caller-side caching via io.lidar)
+    # 1) Load all required tiles' points (caller-side caching via io.lidar).
+    # Missing tiles are tolerated so the runner doesn't have to pre-screen
+    # the whole bucket; if the *primary* tile is missing we emit no rows
+    # because a tile group's polygons live on its primary tile by
+    # construction.
+    primary_loaded = False
     chunks: list[np.ndarray] = []
     for tid in fetch_tile_ids:
         uri = tile_uri_map.get(tid)
         if uri is None:
             continue
-        pts, _ = read_tile_points(uri)
+        try:
+            pts, _ = read_tile_points(uri)
+        except RemoteFileMissing:
+            print(f"[tile_task] {uri} missing; skipping")
+            continue
         chunks.append(pts)
+        if tid == primary_tile_id:
+            primary_loaded = True
+
+    if not primary_loaded:
+        print(f"[tile_task] primary tile {primary_tile_id} unavailable; "
+              f"emitting empty table for partition {partition_id}")
+        return pa.table(
+            {f.name: [] for f in OUTPUT_SCHEMA},
+            schema=OUTPUT_SCHEMA,
+        )
+
     all_pts = np.concatenate(chunks, axis=0) if chunks else np.zeros((0, 4))
 
     # 2) Filter classes ONCE for the whole tile group, not per polygon. The

@@ -24,7 +24,7 @@ if TYPE_CHECKING:                                  # pragma: no cover
 # --- Software environment + region ---------------------------------------- #
 
 SOFTWARE_ENV = "pv-geom-2026-05"
-REGION = "us-west-2"                               # matches asu-nsf-phoenix bucket
+REGION = "us-east-2"                               # matches asu-nsf-phoenix bucket
 
 # Conda specification (built via coiled.create_software_environment).
 # We keep it pinned-light: major versions only, so the env survives minor

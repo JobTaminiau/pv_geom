@@ -141,14 +141,21 @@ def run_pipeline(
                 and (out_root / f"part-{partition_id:05d}.parquet").stat().st_size > 0)
     ]
 
-    # Pre-warm the LAZ cache in the main process. With Dask + AWS SSO on
-    # Windows, parallel workers race on the SSO token cache file and crash with
-    # PermissionError; serial pre-localizing avoids that and is essentially
-    # free given workers would download the same tiles anyway. Missing tiles
-    # are logged and dropped from each group's fetch list so they don't crash
-    # the whole pipeline (the bucket has known gaps relative to the index).
+    # Pre-warm the LAZ cache in the main process. The original motivation was
+    # the Dask + AWS SSO race on Windows: parallel workers stomp on the SSO
+    # token cache file and crash with PermissionError, so we serialize the
+    # downloads. The pre-warm also doubles as a cheap way to detect missing
+    # tiles upfront so we can drop them from each group's fetch list before
+    # dispatch (the bucket has known gaps relative to the tile index).
+    #
+    # On Coiled the laptop is not on the data path: workers run in the same
+    # AWS region as the bucket, use IAM roles (no SSO race), and pre-warming
+    # to the laptop would just transfer the data to a machine that won't
+    # consume it. Skip pre-warm there; tile_task.process_tile_group catches
+    # RemoteFileMissing per-tile and degrades gracefully.
     missing_uris: set[str] = set()
-    if pending and use_dask:
+    do_prewarm = pending and use_dask and cfg.compute.backend != "coiled"
+    if do_prewarm:
         unique_uris = sorted({
             tile_uri_map[tid] for _, g in pending
             for tid in g.fetch_tile_ids

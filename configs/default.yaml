@@ -44,7 +44,7 @@ io:
   lidar_reader: laspy          # laspy | pdal (pdal needs the [pdal] extra + system libs)
   s3:
     requester_pays: false
-    region: us-west-2
+    region: us-east-2
   classification:              # ASPRS classes used per role; spike found USGS LPC tiles
     panel_class_primary: 6     #   are class-1/2/7 only (no class 6), so we fall back to
     panel_class_fallback: 1    #   class-1 returns above-ground when class 6 is absent.

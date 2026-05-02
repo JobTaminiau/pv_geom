@@ -2,7 +2,7 @@
 # via Pydantic defaults; the loader does NOT merge — supply a complete config or
 # set sparse keys via Pydantic partial loading (see config.py).
 crs:
-  target: EPSG:6404
+  target: EPSG:6341           # USGS LPC AZ MaricopaPinal 2020 — verified via spike
 
 io:
   lidar_reader: laspy
@@ -17,4 +17,4 @@ compute:
     n_workers: 40
     worker_memory: "8GiB"
     worker_cpu: 4
-    software: pv-geom-runtime-2026-05
+    software: pv-geom-2026-05

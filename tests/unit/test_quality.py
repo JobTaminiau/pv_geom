@@ -19,7 +19,7 @@ def test_full_margin_short_is_zero() -> None:
 
 def test_monotone_in_value() -> None:
     xs = [linear_confidence(v, threshold=5.0, margin=2.0) for v in [3, 4, 5, 6, 7]]
-    assert all(b >= a for a, b in zip(xs, xs[1:], strict=True))
+    assert all(b >= a for a, b in zip(xs, xs[1:], strict=False))
 
 
 def test_zero_margin_is_step() -> None:

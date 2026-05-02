@@ -18,13 +18,20 @@ def test_default_values() -> None:
     cfg = PVGeomConfig.from_yaml(CONFIGS / "default.yaml")
     assert cfg.panel_plane.ransac_threshold_m == 0.05
     assert cfg.panel_plane.tilt_floor_deg == 1.0
-    assert cfg.crs.target.startswith("EPSG:")
+    assert cfg.crs.target == "EPSG:6341"
     assert cfg.mounting_rules.R1.panel_roof_angle_deg_max == 5.0
+    # Spike-derived overrides
+    assert cfg.panel_plane.min_density_pts_per_m2 == 3
+    assert cfg.panel_plane.min_points == 30
+    assert cfg.io.classification.panel_class_primary == 6
+    assert cfg.io.classification.panel_class_fallback == 1
+    assert cfg.io.classification.ground_class == 2
+    assert cfg.io.classification.fallback_height_above_ground_m == 1.5
 
 
 def test_phoenix_overrides() -> None:
     cfg = PVGeomConfig.from_yaml(CONFIGS / "phoenix.yaml")
-    assert cfg.crs.target == "EPSG:6404"
+    assert cfg.crs.target == "EPSG:6341"
     assert cfg.compute.backend == "coiled"
     assert cfg.compute.coiled.name == "pv-geom-phoenix"
 

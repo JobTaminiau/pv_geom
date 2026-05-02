@@ -46,29 +46,49 @@ def validate_config(
 def run(
     polygons: str = typer.Option(..., help="GeoParquet of PV polygons (path or s3://)"),
     lidar_prefix: str = typer.Option(..., help="S3 prefix containing LAZ tiles"),
-    tile_index: str = typer.Option(..., help="GeoParquet/GPKG/SHP tile index"),
+    tile_index: str = typer.Option(..., help="GeoParquet/GPKG/SHP/.zip tile index"),
     footprints: str = typer.Option(..., help="GeoParquet/GPKG/SHP building footprints"),
-    output: str = typer.Option(..., help="Output prefix (s3:// or local path)"),
+    output: str = typer.Option(..., help="Output prefix (local path)"),
     config: Path = typer.Option(..., exists=True, dir_okay=False, readable=True),
-    local: bool = typer.Option(False, help="Use LocalCluster instead of Coiled"),
+    local: bool = typer.Option(False, help="Force compute.backend=local"),
     max_polygons: int | None = typer.Option(None, help="Limit polygon count (dev/smoke)"),
     bbox: tuple[float, float, float, float] | None = typer.Option(
-        None, help="Restrict to bbox: xmin ymin xmax ymax"
+        None, help="Restrict to bbox in target CRS units: xmin ymin xmax ymax"
     ),
     dry_run: bool = typer.Option(False, help="Plan only; write manifest, no compute"),
-    resume: bool = typer.Option(False, help="Skip partitions already written"),
+    resume: bool = typer.Option(
+        False,
+        help="Skip groups whose partition file already exists. Crash-recovery only — same inputs/config.",
+    ),
+    name_template: str = typer.Option(
+        "{name}.laz",
+        help="LAZ filename template using {name} from the tile index id column",
+    ),
+    tile_id_col: str = typer.Option("Name", help="Tile-id column in the tile index"),
+    no_dask: bool = typer.Option(False, help="Run serially instead of via Dask"),
 ) -> None:
-    """Run the pv_geom pipeline."""
+    """Run the pv_geom pipeline end-to-end."""
+    from pv_geom.pipeline.runner import run_pipeline
+
     cfg = PVGeomConfig.from_yaml(config)
     if local:
         cfg.compute.backend = "local"
-    console.print(
-        f"[yellow]TODO[/yellow] runner not implemented yet (M6). "
-        f"Config OK ({cfg.hash()[:12]}); inputs: {polygons=} {lidar_prefix=} "
-        f"{tile_index=} {footprints=} {output=} {max_polygons=} {bbox=} "
-        f"{dry_run=} {resume=}"
+    manifest = run_pipeline(
+        polygons_uri=polygons,
+        tile_index_uri=tile_index,
+        lidar_prefix=lidar_prefix,
+        footprints_uri=footprints,
+        output_uri=output,
+        cfg=cfg,
+        name_template=name_template,
+        tile_id_col=tile_id_col,
+        max_polygons=max_polygons,
+        bbox=tuple(bbox) if bbox else None,
+        dry_run=dry_run,
+        resume=resume,
+        use_dask=not no_dask,
     )
-    raise typer.Exit(code=2)
+    console.print(f"[green]wrote manifest:[/green] {manifest}")
 
 
 @app.command("inspect-tile")

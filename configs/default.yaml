@@ -1,13 +1,15 @@
-# pv_geom default configuration. Mirrors PRD §9.2.
+# pv_geom default configuration. Mirrors PRD §9.2 with spike-derived overrides
+# (see STATUS.md "Three PRD assumptions to update before M3").
 crs:
-  target: EPSG:6404           # NAD83(2011) / Arizona Central (ftUS); confirm against tile index
+  target: EPSG:6341           # NAD83(2011) / UTM zone 12N (metres); USGS LPC AZ tiles
 
 panel_plane:
   erosion_m: 0.15
   ransac_threshold_m: 0.05
   min_inlier_frac: 0.6
   max_iter: 200
-  min_density_pts_per_m2: 4
+  min_density_pts_per_m2: 3   # spike: tiles deliver ~9-11 pts/m^2; 3 is the safe floor
+  min_points: 30              # flat floor (PRD §7.1's area-based formula was too lax)
   tilt_floor_deg: 1.0
   uncertainty_method: bootstrap   # bootstrap | covariance
   bootstrap_samples: 50
@@ -43,6 +45,11 @@ io:
   s3:
     requester_pays: false
     region: us-west-2
+  classification:              # ASPRS classes used per role; spike found USGS LPC tiles
+    panel_class_primary: 6     #   are class-1/2/7 only (no class 6), so we fall back to
+    panel_class_fallback: 1    #   class-1 returns above-ground when class 6 is absent.
+    ground_class: 2
+    fallback_height_above_ground_m: 1.5    # min HAG to keep a class-1 return as panel-candidate
 
 compute:
   backend: local               # local | coiled
@@ -51,7 +58,7 @@ compute:
     n_workers: 40
     worker_memory: "8GiB"
     worker_cpu: 4
-    software: pv-geom-runtime-2026-05
+    software: pv-geom-2026-05
   local:
     n_workers: 8
     threads_per_worker: 2

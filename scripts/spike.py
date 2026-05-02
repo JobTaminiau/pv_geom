@@ -12,6 +12,7 @@
 #   "fsspec>=2024.10",
 #   "s3fs>=2024.10",
 #   "pyarrow>=15",
+#   "pillow>=10",
 # ]
 # ///
 """LiDAR data-quality spike for pv_geom.
@@ -243,63 +244,104 @@ def fit_plane_svd(xyz: np.ndarray) -> tuple[np.ndarray, float, float, float]:
 
 
 def plot_spike(
-    pts_in: np.ndarray,           # (N,4) clipped points x,y,z,class
+    pts_in: np.ndarray,           # (N,4) clipped points x,y,z,class — in LAZ CRS
     polygon_proj: Polygon,
+    polygon_wgs84: Polygon,
+    crs_str: str | None,
     polygon_id: str,
     tilt_deg: float,
     azimuth_deg: float,
     rmse: float,
     out_path: Path,
 ) -> None:
-    """3-panel figure: plan view, side view, residual histogram."""
-    fig = plt.figure(figsize=(13, 4.5), dpi=140)
+    """4-panel figure: aerial+overlay (large, top-left), plan view, side view, residuals."""
+    import matplotlib.patheffects as pe
+    sys.path.insert(0, str(Path(__file__).parent))
+    from _aerial import aerial_basemap
+    from pyproj import Transformer
 
-    # Centre coordinates so axes are tight
+    fig = plt.figure(figsize=(13, 9), dpi=140)
+    gs = fig.add_gridspec(2, 3, width_ratios=[1.6, 1, 1], hspace=0.32, wspace=0.28)
+
+    # ---------------- aerial + polygon + LiDAR (top-left, double width) ----
+    lon_min, lat_min, lon_max, lat_max = polygon_wgs84.bounds
+    margin_deg = 0.00018   # ~15 m at lat 33
+    bbox = (lon_min - margin_deg, lat_min - margin_deg,
+            lon_max + margin_deg, lat_max + margin_deg)
+    print(f"  fetching aerial for bbox {bbox}")
+    img, extent = aerial_basemap(bbox, target_lod=13)
+
+    ax0 = fig.add_subplot(gs[:, 0])
+    ax0.imshow(img, extent=extent, origin="upper", interpolation="bilinear")
+    poly_lon, poly_lat = polygon_wgs84.exterior.xy
+    ax0.plot(poly_lon, poly_lat, color="#FF2D2D", lw=2.2,
+             path_effects=[pe.withStroke(linewidth=4.0, foreground="white")])
+    if crs_str:
+        tr = Transformer.from_crs(crs_str, 4326, always_xy=True)
+    else:
+        tr = Transformer.from_crs(6341, 4326, always_xy=True)
+    plon, plat = tr.transform(pts_in[:, 0], pts_in[:, 1])
+    sc0 = ax0.scatter(plon, plat, c=pts_in[:, 2], cmap="viridis", s=8,
+                      alpha=0.75, edgecolors="none")
+    ax0.set_xlim(extent[0], extent[1])
+    ax0.set_ylim(extent[2], extent[3])
+    ax0.set_xlabel("lon")
+    ax0.set_ylabel("lat")
+    ax0.set_title("aerial (Maricopa 2024 ortho) + polygon + LiDAR returns")
+    ax0.tick_params(labelsize=8)
+    fig.colorbar(sc0, ax=ax0, label="z (m)", shrink=0.7)
+
+    # ---------------- plan view (top-middle) -------------------------------
     x0, y0 = polygon_proj.centroid.x, polygon_proj.centroid.y
     px = pts_in[:, 0] - x0
     py = pts_in[:, 1] - y0
     pz = pts_in[:, 2]
-
     poly_x, poly_y = polygon_proj.exterior.xy
     poly_x = np.array(poly_x) - x0
     poly_y = np.array(poly_y) - y0
 
-    # Plan view, colored by z
-    ax1 = fig.add_subplot(1, 3, 1)
+    ax1 = fig.add_subplot(gs[0, 1])
     sc = ax1.scatter(px, py, c=pz, s=6, cmap="viridis")
     ax1.plot(poly_x, poly_y, "r-", lw=1.5)
     ax1.set_aspect("equal")
-    ax1.set_xlabel("x (centred)")
-    ax1.set_ylabel("y (centred)")
-    ax1.set_title(f"plan view — {len(pts_in)} pts (class 6)")
-    fig.colorbar(sc, ax=ax1, label="z")
+    ax1.set_xlabel("x (centred, m)")
+    ax1.set_ylabel("y (centred, m)")
+    ax1.set_title(f"plan view — {len(pts_in)} pts")
+    fig.colorbar(sc, ax=ax1, label="z (m)")
 
-    # Side view: project onto azimuth direction
+    # ---------------- side view (top-right) --------------------------------
     az_rad = np.radians(azimuth_deg)
     along = px * np.sin(az_rad) + py * np.cos(az_rad)
-    ax2 = fig.add_subplot(1, 3, 2)
+    ax2 = fig.add_subplot(gs[0, 2])
     ax2.scatter(along, pz, s=6, c=pz, cmap="viridis")
-    ax2.set_xlabel("along-azimuth (units of LAZ CRS)")
-    ax2.set_ylabel("z")
-    ax2.set_title(f"side view  |  tilt={tilt_deg:.1f}°  az={azimuth_deg:.1f}°")
+    ax2.set_xlabel("along-azimuth (m)")
+    ax2.set_ylabel("z (m)")
+    ax2.set_title(f"side view  |  tilt={tilt_deg:.1f} deg  az={azimuth_deg:.1f} deg")
     ax2.grid(alpha=0.3)
 
-    # Residuals
+    # ---------------- residuals (bottom-middle) ----------------------------
     centroid = pts_in[:, :3].mean(axis=0)
     centered = pts_in[:, :3] - centroid
     _, _, vt = np.linalg.svd(centered, full_matrices=False)
     normal = vt[-1] * (1 if vt[-1, 2] >= 0 else -1)
     res = centered @ normal
-    ax3 = fig.add_subplot(1, 3, 3)
+    ax3 = fig.add_subplot(gs[1, 1])
     ax3.hist(res, bins=40, color="#1F3A5F")
     ax3.axvline(0, color="k", lw=0.7)
-    ax3.set_xlabel("residual along normal")
+    ax3.set_xlabel("residual along normal (m)")
     ax3.set_ylabel("count")
-    ax3.set_title(f"residuals  |  RMSE={rmse:.3f}")
+    ax3.set_title(f"residuals  |  RMSE={rmse:.3f} m")
     ax3.grid(alpha=0.3)
 
-    fig.suptitle(f"pv_geom spike — polygon {polygon_id}", fontsize=12)
-    fig.tight_layout()
+    # ---------------- z histogram (bottom-right) ---------------------------
+    ax4 = fig.add_subplot(gs[1, 2])
+    ax4.hist(pts_in[:, 2], bins=40, color="#C0502C")
+    ax4.set_xlabel("z (m)")
+    ax4.set_ylabel("count")
+    ax4.set_title("z distribution")
+    ax4.grid(alpha=0.3)
+
+    fig.suptitle(f"pv_geom spike - polygon {polygon_id}", fontsize=13)
     fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
 
@@ -378,7 +420,8 @@ def run_spike(polygon_id: str, tile_uri: str | None, tile_index: str | None) -> 
         print(f"  rmse (m):      {rmse * 0.3048:.3f}")
 
     out_path = OUT / f"spike_{polygon_id.replace('/','_')}.png"
-    plot_spike(in_poly, poly_proj, polygon_id, tilt_deg, azimuth_deg, rmse, out_path)
+    plot_spike(in_poly, poly_proj, polygon_wgs84, crs_str,
+               polygon_id, tilt_deg, azimuth_deg, rmse, out_path)
     print(f"\n# wrote {out_path}")
     return 0
 

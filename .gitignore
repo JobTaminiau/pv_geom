@@ -23,7 +23,12 @@ logs/
 *.las
 *.tif
 *.tiff
+*.log
 data/
+out_*/
+
+# Local tool state
+.claude/
 
 # Notebooks
 .ipynb_checkpoints/

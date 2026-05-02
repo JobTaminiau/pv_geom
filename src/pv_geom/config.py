@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 
 class CRSConfig(BaseModel):
-    target: str = "EPSG:6404"
+    target: str = "EPSG:6341"           # NAD83(2011) / UTM 12N (metres); USGS LPC AZ
 
 
 class PanelPlaneConfig(BaseModel):
@@ -20,7 +20,9 @@ class PanelPlaneConfig(BaseModel):
     ransac_threshold_m: float = 0.05
     min_inlier_frac: float = 0.6
     max_iter: int = 200
-    min_density_pts_per_m2: float = 4.0
+    min_density_pts_per_m2: float = 3.0
+    min_points: int = 30                # flat floor; size-sweep showed ~5 is the precision
+                                        # floor but RANSAC robustness needs ~30 inliers.
     tilt_floor_deg: float = 1.0
     uncertainty_method: Literal["bootstrap", "covariance"] = "bootstrap"
     bootstrap_samples: int = 50
@@ -37,8 +39,10 @@ class RoofPlaneConfig(BaseModel):
     enabled: bool = True
     buffer_m: float = 3.0
     buffer_max_m: float = 5.0
+    buffer_step_m: float = 0.5          # iterative expansion step when ring is too sparse
     min_points: int = 100
-    rmse_max_m: float = 0.10
+    ransac_threshold_m: float = 0.15    # RANSAC inlier distance for the roof fit
+    rmse_max_m: float = 0.10            # rejection threshold on the post-fit inlier RMSE
 
 
 class HeightsConfig(BaseModel):
@@ -88,9 +92,19 @@ class S3Config(BaseModel):
     region: str = "us-west-2"
 
 
+class ClassificationConfig(BaseModel):
+    """ASPRS class assignments. USGS LPC tiles often lack class 6; we fall back
+    to class 1 returns above ground when class 6 is absent."""
+    panel_class_primary: int = 6        # building
+    panel_class_fallback: int = 1       # unclassified
+    ground_class: int = 2
+    fallback_height_above_ground_m: float = 1.5
+
+
 class IOConfig(BaseModel):
     lidar_reader: Literal["pdal", "laspy"] = "laspy"
     s3: S3Config = Field(default_factory=S3Config)
+    classification: ClassificationConfig = Field(default_factory=ClassificationConfig)
 
 
 class CoiledConfig(BaseModel):
@@ -98,7 +112,7 @@ class CoiledConfig(BaseModel):
     n_workers: int = 40
     worker_memory: str = "8GiB"
     worker_cpu: int = 4
-    software: str = "pv-geom-runtime-2026-05"
+    software: str = "pv-geom-2026-05"
 
 
 class LocalConfig(BaseModel):

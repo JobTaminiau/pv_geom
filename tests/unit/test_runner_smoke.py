@@ -45,18 +45,25 @@ def _write_synthetic_laz(
         cx, cy = centroid_xy
         return z_at_centroid - (nx * (xy[:, 0] - cx) + ny * (xy[:, 1] - cy)) / nz
 
-    # Ground (class 2): scattered points across the tile, all at z=0
+    # Ground (class 2): scattered points across the tile at z=0, but NONE
+    # inside the building footprint — LiDAR cannot see the ground through a
+    # roof, and unphysical under-roof ground returns would (correctly) trip
+    # the canopy-evidence detector and reroute the rooftop label.
+    bx0, by0, bx1, by1 = 35.0, 35.0, 65.0, 65.0
     n_ground = 5_000
     g_xy = rng.uniform(
         [tile_extent[0], tile_extent[1]],
         [tile_extent[2], tile_extent[3]],
         size=(n_ground, 2),
     )
-    g_z = np.zeros(n_ground)
-    ground = np.column_stack([g_xy, g_z, np.full(n_ground, 2)])
+    under_building = (
+        (g_xy[:, 0] >= bx0) & (g_xy[:, 0] <= bx1)
+        & (g_xy[:, 1] >= by0) & (g_xy[:, 1] <= by1)
+    )
+    g_xy = g_xy[~under_building]
+    ground = np.column_stack([g_xy, np.zeros(len(g_xy)), np.full(len(g_xy), 2)])
 
     # Roof (class 6) inside a 30x30m building; planar, low-tilt south
-    bx0, by0, bx1, by1 = 35.0, 35.0, 65.0, 65.0
     bcx, bcy = (bx0 + bx1) / 2, (by0 + by1) / 2
     n_roof = 4_000
     r_xy = rng.uniform([bx0, by0], [bx1, by1], size=(n_roof, 2))
@@ -161,6 +168,41 @@ def test_runner_end_to_end(synth_inputs: dict[str, Path]) -> None:
     assert row["mounting_type"] == "tilted_rack_rooftop"
     assert row["mounting_rule"] == "R2"
     assert row["mounting_confidence"] >= 0.5
+    # Single-part input: the join key degenerates to the row id.
+    assert row["parent_polygon_id"] == "panel_1"
+
+
+def test_runner_multipolygon_explode_join_back(synth_inputs: dict[str, Path]) -> None:
+    """A MultiPolygon detection (under the `detection_id` alias, as in the S8
+    atlas parquet) explodes into per-part rows whose parent_polygon_id joins
+    back to the input detection id — no `__p<i>` suffix parsing needed."""
+    from shapely.geometry import MultiPolygon
+
+    multi = gpd.GeoDataFrame(
+        {"detection_id": ["det_1"]},
+        geometry=[MultiPolygon([box(40.0, 40.0, 45.0, 50.0), box(45.0, 40.0, 50.0, 50.0)])],
+        crs="EPSG:6341",
+    )
+    polygons_path = synth_inputs["laz_dir"] / "polys_multi.parquet"
+    multi.to_parquet(polygons_path)
+
+    cfg = PVGeomConfig()
+    cfg.compute.backend = "local"
+    run_pipeline(
+        polygons_uri=str(polygons_path),
+        tile_index_uri=str(synth_inputs["tindex"]),
+        lidar_prefix=str(synth_inputs["laz_dir"]),
+        footprints_uri=str(synth_inputs["footprints"]),
+        output_uri=str(synth_inputs["out"]),
+        cfg=cfg,
+        name_template="tile.laz",
+        tile_id_col="Name",
+        use_dask=False,
+    )
+    table = pq.read_table(sorted(synth_inputs["out"].glob("part-*.parquet"))[0])
+    rows = table.to_pylist()
+    assert {r["polygon_id"] for r in rows} == {"det_1__p0", "det_1__p1"}
+    assert {r["parent_polygon_id"] for r in rows} == {"det_1"}
 
 
 def test_resume_preserves_existing_partition(synth_inputs: dict[str, Path]) -> None:
@@ -269,6 +311,146 @@ def test_process_tile_group_missing_primary_tile(synth_inputs: dict[str, Path]) 
     # Empty table, but with the canonical schema (so pyarrow.concat_tables works).
     assert len(table) == 0
     assert set(table.schema.names) == set(OUTPUT_SCHEMA.names)
+
+
+def test_build_row_carport_from_under_panel_returns() -> None:
+    """LiDAR-only canopy classification: an elevated panel with ground returns
+    underneath and NO footprint involvement must come out as carport."""
+    from pv_geom.pipeline.tile_task import _build_row
+
+    rng = np.random.default_rng(0)
+    poly = box(0.0, 0.0, 12.0, 3.0)                  # aspect ratio 4
+    n = 300
+    p_xy = rng.uniform([0.0, 0.0], [12.0, 3.0], size=(n, 2))
+    t = np.radians(8.0)                              # ~8 deg south-facing at ~3 m
+    p_z = 3.0 - np.tan(t) * (p_xy[:, 1] - 1.5) + rng.normal(0, 0.01, n)
+    panel_pts = np.column_stack([p_xy, p_z])
+    g_xy = rng.uniform([-20.0, -20.0], [30.0, 20.0], size=(4000, 2))
+    ground = np.column_stack([g_xy, np.zeros(4000)])  # z=0, incl. under the canopy
+    footprints = gpd.GeoDataFrame({"building_id": []}, geometry=[], crs="EPSG:6341")
+    others = gpd.GeoDataFrame(geometry=[], crs="EPSG:6341")
+
+    row = _build_row(
+        polygon=poly, polygon_id="c1", cfg=PVGeomConfig(), config_hash="x",
+        run_id="r", partition_id=0,
+        panel_pts=panel_pts, ground_xyz=ground, roof_input_pts=panel_pts,
+        footprints=footprints, other_pv_polygons=others,
+        contributing_tile_ids=("t1",),
+    )
+    assert row["on_building"] is False
+    assert row["mounting_type"] == "carport"
+    assert row["mounting_confidence"] >= 0.5
+    assert "possible_missing_footprint" not in row["flags"]
+
+
+def test_build_row_nan_hag_stays_unknown() -> None:
+    """No ground reference anywhere near the polygon: HAG must be null in the
+    output and the mounting ambiguous — pre-0.3 the NaN was coerced to 0.0 and
+    the polygon fired R4/R5 as a confident ground mount."""
+    from pv_geom.pipeline.tile_task import _build_row
+
+    rng = np.random.default_rng(1)
+    poly = box(0.0, 0.0, 12.0, 3.0)
+    n = 300
+    p_xy = rng.uniform([0.0, 0.0], [12.0, 3.0], size=(n, 2))
+    t = np.radians(8.0)
+    p_z = 3.0 - np.tan(t) * (p_xy[:, 1] - 1.5) + rng.normal(0, 0.01, n)
+    panel_pts = np.column_stack([p_xy, p_z])
+    # Ground exists but only ~150 m away — beyond the fallback max radius.
+    g_xy = rng.uniform([150.0, 0.0], [160.0, 10.0], size=(200, 2))
+    ground = np.column_stack([g_xy, np.zeros(200)])
+    footprints = gpd.GeoDataFrame({"building_id": []}, geometry=[], crs="EPSG:6341")
+    others = gpd.GeoDataFrame(geometry=[], crs="EPSG:6341")
+
+    row = _build_row(
+        polygon=poly, polygon_id="u1", cfg=PVGeomConfig(), config_hash="x",
+        run_id="r", partition_id=0,
+        panel_pts=panel_pts, ground_xyz=ground, roof_input_pts=panel_pts,
+        footprints=footprints, other_pv_polygons=others,
+        contributing_tile_ids=("t1",),
+    )
+    assert row["height_above_ground_m"] is None
+    assert row["mounting_type"] == "ambiguous"
+
+
+def test_seed_for_polygon_is_process_stable() -> None:
+    """RNG seeds must be identical across processes/runs (PRD §10). The builtin
+    ``hash()`` is salted per process, so the seed is sha256-derived; pin the
+    exact value so a regression to ``hash()`` fails on any interpreter."""
+    from pv_geom.pipeline.tile_task import _seed_for_polygon
+
+    assert _seed_for_polygon("21_840480_397711__0") == 1798131859
+    assert 0 <= _seed_for_polygon("anything") < 2**32
+
+
+def test_failed_tile_group_does_not_abort_run(tmp_path: Path) -> None:
+    """A tile group whose processing raises (here: corrupt LAZ) must not abort
+    the run: the other group's partition is still written, the failure lands in
+    the manifest, and a follow-up --resume retries only the failed group."""
+    import json
+
+    good_laz = tmp_path / "good.laz"
+    _write_synthetic_laz(good_laz)
+    bad_laz = tmp_path / "bad.laz"
+    bad_laz.write_bytes(b"this is not a LAZ file")
+
+    polygons = gpd.GeoDataFrame(
+        {"polygon_id": ["p_good", "p_bad"]},
+        geometry=[box(40.0, 40.0, 50.0, 50.0), box(140.0, 40.0, 150.0, 50.0)],
+        crs="EPSG:6341",
+    )
+    polygons_path = tmp_path / "polys.parquet"
+    polygons.to_parquet(polygons_path)
+
+    footprints = gpd.GeoDataFrame(
+        {"building_id": ["b1"]},
+        geometry=[box(35.0, 35.0, 65.0, 65.0)],
+        crs="EPSG:6341",
+    )
+    footprints_path = tmp_path / "fp.parquet"
+    footprints.to_parquet(footprints_path)
+
+    tindex = gpd.GeoDataFrame(
+        {"Name": ["good", "bad"]},
+        geometry=[box(0.0, 0.0, 100.0, 100.0), box(100.0, 0.0, 200.0, 100.0)],
+        crs="EPSG:6341",
+    )
+    tindex_path = tmp_path / "tindex.parquet"
+    tindex.to_parquet(tindex_path)
+
+    kwargs = dict(
+        polygons_uri=str(polygons_path),
+        tile_index_uri=str(tindex_path),
+        lidar_prefix=str(tmp_path),
+        footprints_uri=str(footprints_path),
+        output_uri=str(tmp_path / "out"),
+        cfg=PVGeomConfig(),
+        name_template="{name}.laz",
+        use_dask=False,
+    )
+    run_pipeline(**kwargs)
+
+    parts = sorted((tmp_path / "out").glob("part-*.parquet"))
+    assert len(parts) == 1, "the good group's partition must survive the bad group's failure"
+    manifest = json.loads((tmp_path / "out" / "manifest.json").read_text())
+    assert manifest["counts"]["succeeded"] == 1
+    assert manifest["counts"]["failed"] == 1
+    assert manifest["counts"]["failed_groups"] == 1
+    assert len(manifest["aggregate_stats"]["task_errors"]) == 1
+
+    # Fix the bad tile; --resume retries only the failed group.
+    _write_synthetic_laz(
+        bad_laz,
+        tile_extent=(100.0, 0.0, 200.0, 100.0),
+        panel_extent=(140.0, 40.0, 150.0, 50.0),
+    )
+    run_pipeline(**kwargs, resume=True)
+    parts = sorted((tmp_path / "out").glob("part-*.parquet"))
+    assert len(parts) == 2
+    manifest = json.loads((tmp_path / "out" / "manifest.json").read_text())
+    assert manifest["counts"]["succeeded"] == 2
+    assert manifest["counts"]["failed"] == 0
+    assert manifest["counts"]["failed_groups"] == 0
 
 
 def test_runner_dry_run(synth_inputs: dict[str, Path]) -> None:

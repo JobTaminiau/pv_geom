@@ -8,6 +8,7 @@ per polygon. Output is a pyarrow Table matching ``schema.OUTPUT_SCHEMA``.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 import geopandas as gpd
@@ -20,6 +21,7 @@ from pv_geom.classify.interface import MountingFeatures
 from pv_geom.classify.rules import classify_mounting
 from pv_geom.config import PVGeomConfig
 from pv_geom.geometry.heights import (
+    ground_under_polygon,
     height_above_ground,
     height_above_roof,
     panel_roof_angle_deg,
@@ -37,8 +39,14 @@ from pv_geom.schema import OUTPUT_SCHEMA
 
 
 def _seed_for_polygon(polygon_id: str) -> int:
-    """Stable RNG seed derived from polygon_id (PRD §10 determinism)."""
-    return abs(hash(polygon_id)) & 0xFFFFFFFF
+    """Stable RNG seed derived from polygon_id (PRD §10 determinism).
+
+    Must not use the builtin ``hash()``: string hashing is salted per process
+    (PYTHONHASHSEED), so every Dask worker would draw different RANSAC and
+    bootstrap seeds and runs would not be reproducible.
+    """
+    digest = hashlib.sha256(polygon_id.encode("utf-8")).digest()
+    return int.from_bytes(digest[:4], "little")
 
 
 def _split_classes_for_tile_group(
@@ -91,6 +99,7 @@ def _build_row(
     footprints: gpd.GeoDataFrame,
     other_pv_polygons: gpd.GeoDataFrame,
     contributing_tile_ids: tuple[str, ...],
+    parent_polygon_id: str | None = None,   # defaults to polygon_id (single-part input)
 ) -> dict[str, Any]:
     """Compute all per-row fields. Returns a dict keyed on schema names."""
     flags: list[str] = []
@@ -159,10 +168,13 @@ def _build_row(
 
     # M4 heights
     panel_inliers = panel_pts[panel_fit.inlier_mask] if panel_fit.n_inliers > 0 else panel_pts[:0]
+    panel_z = panel_inliers[:, 2] if len(panel_inliers) else panel_pts[:, 2]
     hag = height_above_ground(
-        panel_inliers[:, 2] if len(panel_inliers) else panel_pts[:, 2],
+        panel_z,
         ground_xyz, (cx, cy),
         cfg.heights.ground_search_radius_m,
+        fallback_k=cfg.heights.ground_fallback_k,
+        fallback_max_radius_m=cfg.heights.ground_fallback_max_radius_m,
     )
     if roof_plane_available:
         har = height_above_roof(panel_inliers, roof_res.fit) if len(panel_inliers) else float("nan")
@@ -171,31 +183,61 @@ def _build_row(
         har = float("nan")
         pra = float("nan")
 
-    # Tracker-suspected flag (per-polygon heuristic; PRD §7.2 v1)
+    # Canopy evidence: ground-class returns under the panel polygon (NaN HAG
+    # or footprint errors must not silently become "ground level"; the gap
+    # under the panels is the direct LiDAR signal).
+    n_ground_under, ground_under_gap = ground_under_polygon(panel_z, ground_xyz, polygon)
+    canopy_evidence = (
+        n_ground_under >= cfg.mounting_rules.canopy_min_ground_points_under
+        and not np.isnan(ground_under_gap)
+        and ground_under_gap >= cfg.mounting_rules.canopy_gap_m_min
+    )
+
+    # Off-building + high HAG + no canopy evidence: most likely a rooftop on a
+    # building the footprint layer is missing. The R3/R8 height caps route it
+    # toward ambiguous; the flag makes the population auditable.
+    if (
+        not roof_res.on_building
+        and not canopy_evidence
+        and not np.isnan(hag)
+        and hag > cfg.mounting_rules.missing_footprint_hag_m
+    ):
+        flags.append("possible_missing_footprint")
+
+    # Tracker-suspected flag (per-polygon heuristic; PRD §7.2 v1).
+    # NaN HAG/tilt propagate — is_tracker_suspected returns False on NaN,
+    # which is the correct "unknown" behavior (was coerced to 0.0 pre-0.3).
     if is_tracker_suspected(
         on_building=roof_res.on_building,
         aspect_ratio=aspect,
-        height_above_ground_m=hag if not np.isnan(hag) else 0.0,
-        panel_tilt_deg=panel_fit.tilt_deg if not np.isnan(panel_fit.tilt_deg) else 0.0,
+        height_above_ground_m=hag,
+        panel_tilt_deg=panel_fit.tilt_deg,
     ):
         flags.append("tracker_suspected")
 
-    # M5 mounting classification
+    # M5 mounting classification. NaN HAG propagates: the rules treat unknown
+    # heights as non-evidence and fall through to ambiguous rather than
+    # confidently classifying at "ground level".
     feats = MountingFeatures(
         on_building=roof_res.on_building,
         panel_tilt_deg=panel_fit.tilt_deg,
         panel_azimuth_deg=panel_fit.azimuth_deg,
         panel_roof_angle_deg=pra,
         height_above_roof_m=har,
-        height_above_ground_m=hag if not np.isnan(hag) else 0.0,
+        height_above_ground_m=hag,
         area_m2=area_m2,
         aspect_ratio=aspect,
         roof_plane_available=roof_plane_available,
+        roof_tilt_deg=float(roof_res.fit.tilt_deg) if roof_plane_available else None,
+        east_west_rack="east_west_rack" in flags,
+        n_ground_under=n_ground_under,
+        ground_under_gap_m=ground_under_gap,
     )
     mr = classify_mounting(feats, cfg.mounting_rules)
 
     return {
         "polygon_id": str(polygon_id),
+        "parent_polygon_id": str(parent_polygon_id if parent_polygon_id is not None else polygon_id),
         "geometry": wkb.dumps(polygon),
         "n_points_panel": int(panel_fit.n_total),
         "n_inliers_panel": int(panel_fit.n_inliers),
@@ -212,7 +254,7 @@ def _build_row(
         "roof_rmse_m": _f32(roof_res.fit.rmse) if roof_res.fit is not None else None,
         "panel_roof_angle_deg": _f32(pra),
         "height_above_roof_m": _f32(har),
-        "height_above_ground_m": _f32(hag if not np.isnan(hag) else 0.0),
+        "height_above_ground_m": _f32(hag),   # null when unknown (schema nullable)
         "on_building": bool(roof_res.on_building),
         "building_id": roof_res.building_id,
         "area_m2": np.float32(area_m2),
@@ -292,9 +334,11 @@ def process_tile_group(
 
     # 3) For each polygon, just clip the pre-filtered panel pool and build a row.
     rows: list[dict[str, Any]] = []
+    has_parent_col = "parent_polygon_id" in polygons.columns
     for _, row in polygons.iterrows():
         poly = row.geometry
         pid = str(row[polygon_id_col])
+        parent_id = str(row["parent_polygon_id"]) if has_parent_col else pid
 
         in_panel = clip_points_to_polygon(
             panel_pts_all,
@@ -310,6 +354,7 @@ def process_tile_group(
             _build_row(
                 polygon=poly,
                 polygon_id=pid,
+                parent_polygon_id=parent_id,
                 cfg=cfg,
                 config_hash=config_hash,
                 run_id=run_id,

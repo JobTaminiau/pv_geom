@@ -33,23 +33,24 @@ if not os.environ.get("RUN_INTEGRATION"):
 
 # ---- Prerequisite file paths (on the dev machine) -------------------------
 ATLAS_PARQUET = Path(r"C:\Users\job_t\code\free\pv_sam3\artifacts\atlas\latest.parquet")
-FEMA_AZ_PARQUET = Path(r"C:\Users\job_t\AppData\Local\Temp\pv_geom_spike_cache\az.geoparquet")
-TILE_INDEX_SHP = Path(r"C:\Users\job_t\AppData\Local\Temp\tileindex\USGS_AZ_MaricopaPinal_1_2020_TileIndex.shp")
-LAZ_DIR = Path(r"C:\Users\job_t\AppData\Local\Temp\pv_geom_spike_cache")
+FEMA_AZ_PARQUET = Path(r"C:\Users\job_t\code\free\pv-geom\data\fema\az.geoparquet")
 LIDAR_PREFIX = "s3://free-research-data-raw/US/arizona/top-level/lidar/lidar_data"
+# Tile index read straight from S3 (localized + cached at runtime) — no
+# %TEMP%-staged SHP to get evicted.
+TILE_INDEX_URI = f"{LIDAR_PREFIX}/USGS_AZ_MaricopaPinal_1_2020_TileIndex.zip"
 LAZ_NAME_TEMPLATE = "USGS_LPC_AZ_MaricopaPinal_2020_B20_{name}.laz"
 
 PREREQS = {
     "atlas": ATLAS_PARQUET,
     "fema": FEMA_AZ_PARQUET,
-    "tile_index": TILE_INDEX_SHP,
 }
 
 missing = [k for k, p in PREREQS.items() if not p.exists()]
 if missing:
     pytest.skip(
-        f"missing prerequisite files: {missing}; run scripts/spike_roof.py first "
-        f"to populate the cache",
+        f"missing prerequisite files: {missing}; "
+        f"stage FEMA with: aws s3 cp s3://free-research-data/national/"
+        f"fema_footprints/az.geoparquet data/fema/az.geoparquet",
         allow_module_level=True,
     )
 
@@ -64,7 +65,7 @@ def test_phoenix_bbox_end_to_end(tmp_path: Path) -> None:
     out = tmp_path / "out"
     manifest_path = run_pipeline(
         polygons_uri=str(ATLAS_PARQUET),
-        tile_index_uri=str(TILE_INDEX_SHP),
+        tile_index_uri=TILE_INDEX_URI,
         lidar_prefix=LIDAR_PREFIX,
         footprints_uri=str(FEMA_AZ_PARQUET),
         output_uri=str(out),

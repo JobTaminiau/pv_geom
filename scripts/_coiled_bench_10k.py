@@ -26,9 +26,9 @@ def main() -> None:
     t0 = time.perf_counter()
     manifest = run_pipeline(
         polygons_uri=r"C:\Users\job_t\code\free\pv_sam3\artifacts\atlas\latest.parquet",
-        tile_index_uri=r"C:\Users\job_t\AppData\Local\Temp\tileindex\USGS_AZ_MaricopaPinal_1_2020_TileIndex.shp",
+        tile_index_uri="s3://free-research-data-raw/US/arizona/top-level/lidar/lidar_data/USGS_AZ_MaricopaPinal_1_2020_TileIndex.zip",
         lidar_prefix="s3://free-research-data-raw/US/arizona/top-level/lidar/lidar_data",
-        footprints_uri=r"C:\Users\job_t\AppData\Local\Temp\pv_geom_spike_cache\az.geoparquet",
+        footprints_uri=r"C:\Users\job_t\code\free\pv-geom\data\fema\az.geoparquet",
         output_uri="./out_coiled_bench_10k",
         cfg=cfg,
         name_template="USGS_LPC_AZ_MaricopaPinal_2020_B20_{name}.laz",

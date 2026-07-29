@@ -323,16 +323,44 @@ def run_pipeline(
         with _cluster_for(cfg) as client:
             from dask.distributed import as_completed
 
-            futures = {
-                client.submit(process_tile_group, **_build_task(pid, g)): (pid, g)
-                for pid, g in pending
-            }
-            for fut in as_completed(futures):
-                pid, g = futures[fut]
+            # Bounded-in-flight submission. Building every task payload up
+            # front (the pre-2026-07-29 dict comprehension) materializes and
+            # serializes ~3k footprint/polygon subsets on the client before
+            # the first result returns — at atlas scale that is multi-GB and
+            # took the client down. A submit window a few times the worker
+            # count keeps the cluster saturated at bounded client memory.
+            if cfg.compute.backend == "coiled":
+                n_workers = cfg.compute.coiled.n_workers
+            elif cfg.compute.backend == "local":
+                n_workers = cfg.compute.local.n_workers or 4
+            else:
+                n_workers = 8
+            max_inflight = max(32, 4 * int(n_workers))
+
+            pending_iter = iter(pending)
+            inflight: dict = {}
+            ac = as_completed()
+
+            def _submit_next() -> bool:
+                try:
+                    pid, g = next(pending_iter)
+                except StopIteration:
+                    return False
+                fut = client.submit(process_tile_group, **_build_task(pid, g))
+                inflight[fut] = (pid, g)
+                ac.add(fut)
+                return True
+
+            for _ in range(min(max_inflight, len(pending))):
+                _submit_next()
+            for fut in ac:
+                pid, g = inflight.pop(fut)
                 if fut.status == "error":
                     _on_error(pid, g, fut.exception())
                 else:
                     _on_done(pid, fut.result())
+                fut.release()
+                _submit_next()
     elif pending:
         for pid, g in pending:
             try:

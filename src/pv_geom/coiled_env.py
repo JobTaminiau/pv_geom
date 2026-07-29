@@ -91,6 +91,11 @@ def make_cluster(cfg: PVGeomConfig) -> "Cluster":
         worker_cpu=c.worker_cpu,
         software=c.software or SOFTWARE_ENV,
         region=REGION,
+        # Cap concurrent tasks per worker: each tile-group task loads up to a
+        # few GB of decompressed LAZ, and the dask default (nthreads =
+        # worker_cpu = 4) runs four at once into a 16 GiB budget. Two is the
+        # ratio the 10k bench proved on the densest Phoenix tiles.
+        worker_options={"nthreads": 2},
     )
     return cluster
 
@@ -99,6 +104,15 @@ def install_pv_geom_on_workers(client, ref: str = "main") -> None:
     """Install pv_geom on the scheduler AND every worker (works around
     Coiled's silent dropping of ``git+`` pip requirements).
 
+    Workers get a ``PipInstall`` worker plugin rather than a one-shot
+    ``client.run``: the plugin runs on every CURRENT AND FUTURE worker,
+    which matters on large clusters — with 40 staggered-boot workers, a
+    one-shot install missed the late joiners, and a worker without
+    ``pv_geom`` dies at task *deserialization* (protocol-layer
+    ``ModuleNotFoundError`` → ``KilledWorker``, took down the 2026-07-29
+    full-run attempt). The plugin also covers nanny-restarted workers
+    mid-run.
+
     The scheduler also needs ``pv_geom`` because Dask deserializes the
     task graph on it before dispatching: any class/function reference
     in a delayed task imports ``pv_geom.*`` during ``pickle.loads``.
@@ -106,6 +120,7 @@ def install_pv_geom_on_workers(client, ref: str = "main") -> None:
     ``ModuleNotFoundError: No module named 'pv_geom'`` from
     ``scheduler.update_graph``.
     """
+    from distributed import PipInstall
 
     def _install(ref: str = ref) -> str:
         import subprocess
@@ -118,4 +133,9 @@ def install_pv_geom_on_workers(client, ref: str = "main") -> None:
         return out.decode("utf-8", errors="replace")[-200:]
 
     client.run_on_scheduler(_install)
-    client.run(_install)
+    client.register_plugin(
+        PipInstall(
+            packages=[f"git+https://github.com/JobTaminiau/pv_geom.git@{ref}"],
+            pip_options=["--quiet"],
+        )
+    )

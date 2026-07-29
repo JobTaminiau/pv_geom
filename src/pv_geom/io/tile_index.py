@@ -54,7 +54,7 @@ def build_tile_uris(
     For Phoenix's USGS LPC bucket, call:
         build_tile_uris(
             tindex,
-            base_uri="s3://asu-nsf-phoenix/data/lidar_data",
+            base_uri="s3://free-research-data-raw/US/arizona/top-level/lidar/lidar_data",
             name_template="USGS_LPC_AZ_MaricopaPinal_2020_B20_{name}.laz",
         )
     """

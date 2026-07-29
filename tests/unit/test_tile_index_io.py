@@ -66,12 +66,12 @@ def test_build_tile_uris_phoenix_pattern() -> None:
     tindex = _make_tindex(2)
     out = build_tile_uris(
         tindex,
-        base_uri="s3://asu-nsf-phoenix/data/lidar_data",
+        base_uri="s3://free-research-data-raw/US/arizona/top-level/lidar/lidar_data",
         name_template="USGS_LPC_AZ_MaricopaPinal_2020_B20_{name}.laz",
     )
     assert list(out["tile_path"]) == [
-        "s3://asu-nsf-phoenix/data/lidar_data/USGS_LPC_AZ_MaricopaPinal_2020_B20_w0432n3719.laz",
-        "s3://asu-nsf-phoenix/data/lidar_data/USGS_LPC_AZ_MaricopaPinal_2020_B20_w0433n3719.laz",
+        "s3://free-research-data-raw/US/arizona/top-level/lidar/lidar_data/USGS_LPC_AZ_MaricopaPinal_2020_B20_w0432n3719.laz",
+        "s3://free-research-data-raw/US/arizona/top-level/lidar/lidar_data/USGS_LPC_AZ_MaricopaPinal_2020_B20_w0433n3719.laz",
     ]
 
 

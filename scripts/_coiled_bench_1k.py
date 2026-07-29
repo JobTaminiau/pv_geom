@@ -25,7 +25,7 @@ def main() -> None:
     manifest = run_pipeline(
         polygons_uri=r"C:\Users\job_t\code\free\pv_sam3\artifacts\atlas\latest.parquet",
         tile_index_uri=r"C:\Users\job_t\AppData\Local\Temp\tileindex\USGS_AZ_MaricopaPinal_1_2020_TileIndex.shp",
-        lidar_prefix="s3://asu-nsf-phoenix/data/lidar_data",
+        lidar_prefix="s3://free-research-data-raw/US/arizona/top-level/lidar/lidar_data",
         footprints_uri=r"C:\Users\job_t\AppData\Local\Temp\pv_geom_spike_cache\az.geoparquet",
         output_uri="./out_coiled_bench_1k",
         cfg=cfg,

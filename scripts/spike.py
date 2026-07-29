@@ -55,8 +55,8 @@ from shapely.geometry import Point, Polygon
 # --------------------------------------------------------------------------- #
 
 POLYGONS_PARQUET = Path(r"C:\Users\job_t\code\free\pv_sam3\artifacts\atlas\latest.parquet")
-LIDAR_BUCKET = "asu-nsf-phoenix"
-LIDAR_PREFIX = "data/lidar_data/"
+LIDAR_BUCKET = "free-research-data-raw"
+LIDAR_PREFIX = "US/arizona/top-level/lidar/lidar_data/"
 DEFAULT_POLYGON_ID = "21_840480_397711__0"   # score 0.98, ~67 m^2, east valley
 OUT = Path(__file__).parent / "eda_outputs"
 OUT.mkdir(exist_ok=True)

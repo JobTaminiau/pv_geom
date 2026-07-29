@@ -52,8 +52,8 @@ from shapely.geometry import Polygon
 # --------------------------------------------------------------------------- #
 
 POLYGONS_PARQUET = Path(r"C:\Users\job_t\code\free\pv_sam3\artifacts\atlas\latest.parquet")
-LIDAR_BUCKET = "asu-nsf-phoenix"
-LIDAR_PREFIX = "data/lidar_data/"
+LIDAR_BUCKET = "free-research-data-raw"
+LIDAR_PREFIX = "US/arizona/top-level/lidar/lidar_data/"
 LAZ_NAME_FMT = "USGS_LPC_AZ_MaricopaPinal_2020_B20_{tile}.laz"
 LAZ_CRS = 6341  # NAD83(2011) / UTM 12N, meters
 CACHE = Path(tempfile.gettempdir()) / "pv_geom_spike_cache"

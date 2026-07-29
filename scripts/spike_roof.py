@@ -74,8 +74,8 @@ OUT = Path(__file__).parent / "eda_outputs"
 OUT.mkdir(exist_ok=True)
 LAZ_CRS = 6341
 DEFAULT_POLYGON = "21_840435_397729__1"  # 26 m^2, 99.95% inside FEMA footprint
-DEFAULT_TILE = ("asu-nsf-phoenix",
-                "data/lidar_data/USGS_LPC_AZ_MaricopaPinal_2020_B20_w0432n3719.laz")
+DEFAULT_TILE = ("free-research-data-raw",
+                "US/arizona/top-level/lidar/lidar_data/USGS_LPC_AZ_MaricopaPinal_2020_B20_w0432n3719.laz")
 
 
 def _s3_download(bucket: str, key: str) -> Path:

@@ -1,5 +1,5 @@
 """Diagnostic: run boto3 calls on a Coiled worker to confirm what creds and
-permissions it actually has against the asu-nsf-phoenix bucket. Single
+permissions it actually has against the free-research-data-raw bucket. Single
 worker, ~2 minutes total.
 """
 
@@ -31,27 +31,27 @@ def _probe() -> dict[str, Any]:
     s3 = boto3.client("s3")
 
     try:
-        s3.head_bucket(Bucket="asu-nsf-phoenix")
+        s3.head_bucket(Bucket="free-research-data-raw")
         out["head_bucket"] = "OK"
     except ClientError as e:
         out["head_bucket"] = f"{e.response['ResponseMetadata']['HTTPStatusCode']} {e.response['Error'].get('Code')}"
 
     try:
-        loc = s3.get_bucket_location(Bucket="asu-nsf-phoenix")
+        loc = s3.get_bucket_location(Bucket="free-research-data-raw")
         out["bucket_location"] = loc.get("LocationConstraint") or "us-east-1"
     except ClientError as e:
         out["bucket_location_error"] = str(e)
 
-    key = "data/lidar_data/USGS_LPC_AZ_MaricopaPinal_2020_B20_w0432n3719.laz"
+    key = "US/arizona/top-level/lidar/lidar_data/USGS_LPC_AZ_MaricopaPinal_2020_B20_w0432n3719.laz"
     try:
-        h = s3.head_object(Bucket="asu-nsf-phoenix", Key=key)
+        h = s3.head_object(Bucket="free-research-data-raw", Key=key)
         out["head_object"] = {"size_mb": round(h.get("ContentLength", 0) / 1e6, 1)}
     except ClientError as e:
         code = e.response["ResponseMetadata"]["HTTPStatusCode"]
         out["head_object"] = f"{code} {e.response['Error'].get('Code')}"
 
     try:
-        lst = s3.list_objects_v2(Bucket="asu-nsf-phoenix", Prefix="data/lidar_data/", MaxKeys=2)
+        lst = s3.list_objects_v2(Bucket="free-research-data-raw", Prefix="US/arizona/top-level/lidar/lidar_data/", MaxKeys=2)
         out["list_objects_v2"] = {
             "count": len(lst.get("Contents", [])),
             "first_keys": [c["Key"] for c in lst.get("Contents", [])][:2],

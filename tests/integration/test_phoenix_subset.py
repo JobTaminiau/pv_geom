@@ -36,7 +36,7 @@ ATLAS_PARQUET = Path(r"C:\Users\job_t\code\free\pv_sam3\artifacts\atlas\latest.p
 FEMA_AZ_PARQUET = Path(r"C:\Users\job_t\AppData\Local\Temp\pv_geom_spike_cache\az.geoparquet")
 TILE_INDEX_SHP = Path(r"C:\Users\job_t\AppData\Local\Temp\tileindex\USGS_AZ_MaricopaPinal_1_2020_TileIndex.shp")
 LAZ_DIR = Path(r"C:\Users\job_t\AppData\Local\Temp\pv_geom_spike_cache")
-LIDAR_PREFIX = "s3://asu-nsf-phoenix/data/lidar_data"
+LIDAR_PREFIX = "s3://free-research-data-raw/US/arizona/top-level/lidar/lidar_data"
 LAZ_NAME_TEMPLATE = "USGS_LPC_AZ_MaricopaPinal_2020_B20_{name}.laz"
 
 PREREQS = {

@@ -73,7 +73,10 @@ A GeoParquet partition file per tile group plus a JSON `manifest.json`
 under the output prefix. Per-row schema (canonical source:
 `src/pv_geom/schema.py`):
 
-- **Geometry**: `polygon_id`, `geometry` (WKB), `area_m2`, `aspect_ratio`
+- **Identity**: `polygon_id` (unique per row; exploded MultiPolygon parts get a
+  `__p<i>` suffix), `parent_polygon_id` (the original input id — join on this
+  to aggregate back to input detections)
+- **Geometry**: `geometry` (WKB), `area_m2`, `aspect_ratio`
 - **Panel fit (M3)**: `panel_tilt_deg`, `panel_azimuth_deg`, `panel_rmse_m`,
   `n_points_panel`, `n_inliers_panel`, `panel_tilt_unc_deg`,
   `panel_azimuth_unc_deg`
@@ -81,17 +84,39 @@ under the output prefix. Per-row schema (canonical source:
   `secondary_azimuth_deg`
 - **Roof plane (M4)**: `roof_tilt_deg`, `roof_azimuth_deg`, `roof_rmse_m`,
   `panel_roof_angle_deg`, `on_building`, `building_id`
-- **Heights (M4)**: `height_above_ground_m`, `height_above_roof_m`
+- **Heights (M4)**: `height_above_ground_m` (null when no ground reference
+  exists near the polygon — never silently 0.0), `height_above_roof_m`
 - **Mounting (M5)**: `mounting_type`, `mounting_confidence`, `mounting_rule`
 - **Quality + provenance**: `flags`, `lidar_tile_ids`, `pkg_version`,
   `config_hash`, `run_id`, `partition_id`
 
-`mounting_type` is one of `flush_mount_rooftop`, `tilted_rack_rooftop`,
-`ground_mount_fixed`, `ground_mount_tracker_suspected`, `carport`,
-`ambiguous`. `mounting_rule` records which rule (R1–R6) fired.
+`mounting_type` is one of `flush_mount_pitched_roof`, `flush_mount_flat_roof`
+(both rule R1 — the label splits on roof tilt vs `flat_roof_tilt_deg_max`),
+`tilted_rack_rooftop`, `east_west_rack_rooftop` (R7 — the M5 east-west
+two-plane signature, guarded against gable-facet false positives by requiring
+a flat roof when a roof fit exists), `ground_mount_fixed`,
+`ground_mount_tracker_suspected`, `carport`, `pole_mount` (R8 — small,
+near-square, elevated, off-building), `ambiguous`. `mounting_rule` records
+which rule fired (R1–R8; rule IDs are stable identifiers — R7 is evaluated
+before R1/R2 and R8 before R3, most-specific first). Releases before 0.2
+emitted `flush_mount_rooftop` for what is now the two flush-mount labels.
+
+The rooftop / canopy / ground superclass split is primarily LiDAR-driven:
+ground-class returns *inside* the polygon with a multi-metre vertical gap to
+the panel plane are the signature of an open-sided canopy (a roof blocks the
+pulse; a carport doesn't). This "canopy evidence" reroutes carports that
+footprint layers map as buildings, substitutes for a missing
+height-above-ground in the carport/pole-mount rules, and suppresses the
+ground-mount rules when present. `on_building` requires a real footprint
+overlap fraction (default ≥ 0.5 of the polygon), not a sliver touch; carport
+and pole mount carry upper height caps (6 m / 8 m) so a rooftop on a building
+missing from the footprint layer degrades to `ambiguous` +
+`possible_missing_footprint` instead of a confident wrong label. Unknown
+(NaN) heights are never treated as evidence — they propagate to `ambiguous`.
 
 `flags` is a list drawn from `low_density`, `poor_fit`, `near_horizontal`,
-`east_west_rack`, `tracker_suspected`, `roof_insufficient`, `roof_complex`.
+`east_west_rack`, `tracker_suspected`, `roof_insufficient`, `roof_complex`,
+`possible_missing_footprint`.
 
 The manifest captures aggregate stats (mounting-type counts, RMSE
 percentiles, flag counts), the config hash, the input URIs, the cluster
@@ -114,7 +139,9 @@ Key knobs you'll likely touch:
 - `io.classification` — ASPRS class assignments and the class-1 fallback
   height (USGS LPC tiles often lack class 6; `pv_geom` falls back to
   class-1 returns above local ground).
-- `mounting_rules` — thresholds for each of R1–R6 in `classify/rules.py`.
+- `mounting_rules` — thresholds for each of R1–R8 in `classify/rules.py`,
+  plus the canopy-evidence knobs (`canopy_min_ground_points_under`,
+  `canopy_gap_m_min`) and the missing-footprint flag threshold.
 - `compute.backend` — `local` or `coiled`.
 
 ## Compute backends
@@ -180,7 +207,8 @@ debugging the full pipeline.
   against USGS LPC AZ MaricopaPinal 2020 metadata.
 - **ASPRS class fallback**: USGS LPC tiles in this dataset have classes
   1, 2, 7 only — no class 6 ("building"). Configured fallback uses
-  class-1 returns above ground (`fallback_height_above_ground_m: 1.5`).
+  class-1 returns above ground (`fallback_height_above_ground_m: 0.8`;
+  a higher cutoff deletes the lower half of ground-mount arrays).
 - **Density**: tiles deliver ~9–11 pts/m². The `min_density_pts_per_m2`
   floor of 3 leaves comfortable margin; the `min_points: 30` floor
   protects RANSAC robustness on small polygons (~3 m² and below).
@@ -242,4 +270,5 @@ this repo URL.
 ## Acknowledgments
 
 Built at FREE. LiDAR data: USGS 3DEP / LPC. Building footprints: FEMA
-USA Structures. Phoenix LiDAR is hosted under the ASU NSF Phoenix bucket.
+USA Structures. Phoenix LiDAR is mirrored in the FREE research data
+commons (`s3://free-research-data-raw/US/arizona/top-level/lidar/lidar_data/`).

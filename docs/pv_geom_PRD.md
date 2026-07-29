@@ -53,7 +53,7 @@ Existing PV inventories (NREL OpenPV, Stanford DeepSolar, etc.) provide presence
 - **CRS:** arbitrary; pipeline reprojects to LiDAR CRS once at ingest.
 
 ### 3.2 LiDAR archive
-- **Location:** S3 prefix, e.g. `s3://asu-nsf-phoenix/data/lidar_data/`.
+- **Location:** S3 prefix, e.g. `s3://free-research-data-raw/US/arizona/top-level/lidar/lidar_data/`.
 - **Format:** Classified LAZ tiles (ASPRS classes; minimally class 2 = ground, class 6 = building used by this package).
 - **Sidecar tile index:** GeoParquet, GeoPackage, or shapefile of tile-bounding polygons with at minimum a `tile_path` (or `filename`) column resolvable to an S3 URI and a CRS that matches the LAZ data. The implementation must auto-detect index format.
 - **Point density:** any; a configured minimum (default 4 pts/m² per polygon) is required to attempt a fit.
@@ -338,7 +338,8 @@ Output: GeoParquet, partitioned by `partition_id` (a hashed bucket of `polygon_i
 
 | field | type | nullable | description |
 |---|---|---|---|
-| `polygon_id` | string | no | passthrough from input |
+| `polygon_id` | string | no | passthrough from input; exploded MultiPolygon parts get a `__p<i>` suffix |
+| `parent_polygon_id` | string | no | original input id — the join key back to the input inventory; equals `polygon_id` for single-part inputs |
 | `geometry` | geometry | no | passthrough, in LiDAR CRS |
 | `n_points_panel` | int32 | no | total returns clipped to polygon |
 | `n_inliers_panel` | int32 | no | RANSAC + refinement inliers |
@@ -380,8 +381,8 @@ Pyarrow schema is the source of truth (`schema.py`); a Pydantic model mirrors it
 ```
 pv_geom run \
   --polygons s3://.../pv_polygons.parquet \
-  --lidar-prefix s3://asu-nsf-phoenix/data/lidar_data/ \
-  --tile-index s3://asu-nsf-phoenix/data/lidar_data/tile_index.parquet \
+  --lidar-prefix s3://free-research-data-raw/US/arizona/top-level/lidar/lidar_data/ \
+  --tile-index s3://free-research-data-raw/US/arizona/top-level/lidar/lidar_data/tile_index.parquet \
   --footprints s3://.../buildings.parquet \
   --output s3://free-data-commons/pv_geom/phoenix/v0.1/ \
   --config configs/phoenix.yaml \

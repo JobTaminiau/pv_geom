@@ -179,27 +179,42 @@ def _figure(df: pd.DataFrame) -> None:
         df_wgs_minx - pad_lon, df_wgs_miny - pad_lat,
         df_wgs_maxx + pad_lon, df_wgs_maxy + pad_lat,
     )
-    print(f"[aerial] fetching basemap for {fetch_bbox}")
-    img, extent = aerial_basemap(fetch_bbox)
-    ax.imshow(img, extent=extent, zorder=0)
+    # An ortho basemap only makes sense at bench scale; a metro-wide bbox
+    # (full-atlas review) would need a multi-GB z21 canvas (MemoryError).
+    metro_scale = max(df_wgs_maxx - df_wgs_minx, df_wgs_maxy - df_wgs_miny) > 0.1
+    if metro_scale:
+        print("[aerial] bbox too large for ortho basemap; plotting centroids instead")
+        for label, sub_idx in df.groupby("mounting_type").groups.items():
+            xs = [geoms_wgs[i].centroid.x for i in sub_idx]
+            ys = [geoms_wgs[i].centroid.y for i in sub_idx]
+            ax.scatter(xs, ys, s=0.2, color=MOUNT_COLOURS.get(label, "k"),
+                       alpha=0.4, linewidths=0, rasterized=True)
+            ax.plot([], [], color=MOUNT_COLOURS.get(label, "k"), lw=1.2, label=label)
+        ax.set_xlim(fetch_bbox[0], fetch_bbox[2])
+        ax.set_ylim(fetch_bbox[1], fetch_bbox[3])
+        ax.set_title("(c) detection centroids by mounting type")
+    else:
+        print(f"[aerial] fetching basemap for {fetch_bbox}")
+        img, extent = aerial_basemap(fetch_bbox)
+        ax.imshow(img, extent=extent, zorder=0)
 
-    # Overlay polygon outlines; group by mounting_type for the legend.
-    for label, sub_idx in df.groupby("mounting_type").groups.items():
-        for i in sub_idx:
-            g = geoms_wgs[i]
-            if g.geom_type == "Polygon":
-                xs, ys = g.exterior.xy
-                ax.plot(xs, ys, color=MOUNT_COLOURS.get(label, "k"),
-                        lw=0.8, alpha=0.9)
-        # Add a sentinel for the legend
-        ax.plot([], [], color=MOUNT_COLOURS.get(label, "k"), lw=1.2, label=label)
+        # Overlay polygon outlines; group by mounting_type for the legend.
+        for label, sub_idx in df.groupby("mounting_type").groups.items():
+            for i in sub_idx:
+                g = geoms_wgs[i]
+                if g.geom_type == "Polygon":
+                    xs, ys = g.exterior.xy
+                    ax.plot(xs, ys, color=MOUNT_COLOURS.get(label, "k"),
+                            lw=0.8, alpha=0.9)
+            # Add a sentinel for the legend
+            ax.plot([], [], color=MOUNT_COLOURS.get(label, "k"), lw=1.2, label=label)
 
-    ax.set_xlim(extent[0], extent[1])
-    ax.set_ylim(extent[2], extent[3])
+        ax.set_xlim(extent[0], extent[1])
+        ax.set_ylim(extent[2], extent[3])
+        ax.set_title("(c) polygons over Maricopa 2024 ortho")
     ax.set_xlabel("longitude")
     ax.set_ylabel("latitude")
     ax.set_aspect("equal")
-    ax.set_title("(c) polygons over Maricopa 2024 ortho")
     ax.legend(fontsize=6, loc="lower left")
 
     # (d) mounting-type bar with confidence whiskers

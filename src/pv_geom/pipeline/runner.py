@@ -46,8 +46,8 @@ def run_pipeline(
     dry_run: bool = False,
     resume: bool = False,
     use_dask: bool = True,
-) -> Path:
-    """End-to-end pipeline. Returns the manifest path.
+) -> Path | str:
+    """End-to-end pipeline. Returns the manifest path (str when output is s3://).
 
     Output layout::
 
@@ -68,8 +68,47 @@ def run_pipeline(
     ``aggregate_stats.task_errors``) rather than aborting the run — so completed
     work survives mid-run failures and ``--resume`` retries only the failures.
     """
-    out_root = Path(output_uri)
-    out_root.mkdir(parents=True, exist_ok=True)
+    # Output target: local directory or an s3:// prefix. S3 writes happen on
+    # the CLIENT (per-group tables come back to the client either way), so no
+    # worker-side write permissions are needed — only the client's creds.
+    out_str = str(output_uri).rstrip("/")
+    s3_output = out_str.startswith("s3://")
+    if s3_output:
+        import fsspec
+
+        out_fs = fsspec.filesystem("s3")
+        out_root: Path | None = None
+    else:
+        out_root = Path(output_uri)
+        out_root.mkdir(parents=True, exist_ok=True)
+
+    def _part_target(partition_id: int) -> str | Path:
+        name = f"part-{partition_id:05d}.parquet"
+        return f"{out_str}/{name}" if s3_output else out_root / name
+
+    def _existing_part_ids() -> set[int]:
+        """Partition ids with a non-empty part file already at the output."""
+        found: set[int] = set()
+        if s3_output:
+            try:
+                infos = out_fs.find(out_str, detail=True)
+            except FileNotFoundError:
+                return found
+            entries = [(i.get("name", ""), i.get("size", 0)) for i in infos.values()]
+        else:
+            entries = [(p.name, p.stat().st_size) for p in out_root.glob("part-*.parquet")]
+        for name, size in entries:
+            base = str(name).rsplit("/", 1)[-1]
+            if base.startswith("part-") and base.endswith(".parquet") and size > 0:
+                try:
+                    found.add(int(base[len("part-"):-len(".parquet")]))
+                except ValueError:
+                    continue
+        return found
+
+    manifest_target: str | Path = (
+        f"{out_str}/manifest.json" if s3_output else out_root / "manifest.json"
+    )
 
     run_id = uuid.uuid4().hex
     config_hash = cfg.hash()
@@ -102,9 +141,8 @@ def run_pipeline(
     print(f"[runner] {len(polygons)} polygons -> {len(groups)} tile groups")
 
     if dry_run:
-        manifest_path = out_root / "manifest.json"
         write_manifest(
-            manifest_path,
+            manifest_target,
             config_dict=cfg.model_dump(mode="json"),
             config_hash=config_hash,
             inputs={
@@ -121,29 +159,25 @@ def run_pipeline(
             tiles_touched=sorted({t for g in groups for t in g.fetch_tile_ids}),
             run_id=run_id,
         )
-        return manifest_path
+        return manifest_target
 
     # 3) Per-group worker dispatch -------------------------------------------
     polygon_id_set_per_group = [set(g.polygon_ids) for g in groups]
     polygons_indexed = polygons.set_index(polygon_id_col, drop=False)
 
-    # Resume support — skip groups whose partition file is already on disk.
-    skipped_paths: list[Path] = []
-    if resume:
-        for partition_id, _group in enumerate(groups):
-            path = out_root / f"part-{partition_id:05d}.parquet"
-            if path.exists() and path.stat().st_size > 0:
-                skipped_paths.append(path)
-        if skipped_paths:
-            print(
-                f"[runner] resume: skipping {len(skipped_paths)} already-written partitions"
-            )
+    # Resume support — skip groups whose partition file already exists at the
+    # output (one LIST for s3 outputs rather than a HEAD per group).
+    skipped_ids: set[int] = _existing_part_ids() if resume else set()
+    skipped_ids &= set(range(len(groups)))
+    if skipped_ids:
+        print(
+            f"[runner] resume: skipping {len(skipped_ids)} already-written partitions"
+        )
 
     pending = [
         (partition_id, group)
         for partition_id, group in enumerate(groups)
-        if not (resume and (out_root / f"part-{partition_id:05d}.parquet").exists()
-                and (out_root / f"part-{partition_id:05d}.parquet").stat().st_size > 0)
+        if partition_id not in skipped_ids
     ]
 
     # Pre-warm the LAZ cache in the main process. The original motivation was
@@ -271,10 +305,14 @@ def run_pipeline(
         new_tables.append(table)
         if len(table) == 0:
             return
-        path = out_root / f"part-{partition_id:05d}.parquet"
-        pq.write_table(table, path)
+        target = _part_target(partition_id)
+        if s3_output:
+            with out_fs.open(str(target), "wb") as f:
+                pq.write_table(table, f)
+        else:
+            pq.write_table(table, target)
         n_succeeded_new += len(table)
-        print(f"[runner] wrote {path} ({len(table)} rows)")
+        print(f"[runner] wrote {target} ({len(table)} rows)")
 
     def _on_error(partition_id: int, group: TileGroup, exc: BaseException) -> None:
         failed_groups[partition_id] = repr(exc)
@@ -314,7 +352,14 @@ def run_pipeline(
               f"({n_failed_polys} polygons); rerun with --resume to retry them")
 
     # 4b) Read back skipped partitions so manifest stats include them ---------
-    skipped_tables = [pq.read_table(p) for p in skipped_paths]
+    skipped_tables: list[pa.Table] = []
+    for pid in sorted(skipped_ids):
+        target = _part_target(pid)
+        if s3_output:
+            with out_fs.open(str(target), "rb") as f:
+                skipped_tables.append(pq.read_table(f))
+        else:
+            skipped_tables.append(pq.read_table(target))
     n_succeeded_resumed = sum(len(t) for t in skipped_tables)
     n_succeeded = n_succeeded_new + n_succeeded_resumed
     tables = list(new_tables) + skipped_tables
@@ -325,9 +370,8 @@ def run_pipeline(
     if failed_groups:
         aggregate_stats["task_errors"] = failed_groups
 
-    manifest_path = out_root / "manifest.json"
     write_manifest(
-        manifest_path,
+        manifest_target,
         config_dict=cfg.model_dump(mode="json"),
         config_hash=config_hash,
         inputs={
@@ -349,7 +393,7 @@ def run_pipeline(
         tiles_touched=sorted({t for g in groups for t in g.fetch_tile_ids}),
         run_id=run_id,
     )
-    return manifest_path
+    return manifest_target
 
 
 @contextlib.contextmanager

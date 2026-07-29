@@ -11,7 +11,7 @@ from pv_geom import __version__
 
 
 def write_manifest(
-    output_path: Path,
+    output_path: str | Path,
     *,
     config_dict: dict[str, Any],
     config_hash: str,
@@ -35,5 +35,13 @@ def write_manifest(
         "tiles_touched": tiles_touched,
         "run_id": run_id,
     }
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(manifest, indent=2, default=str), encoding="utf-8")
+    payload = json.dumps(manifest, indent=2, default=str)
+    if str(output_path).startswith("s3://"):
+        import fsspec
+
+        with fsspec.open(str(output_path), "w", encoding="utf-8") as f:
+            f.write(payload)
+    else:
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(payload, encoding="utf-8")

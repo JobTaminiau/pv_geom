@@ -9,15 +9,15 @@ plus a JSON run manifest.
 from __future__ import annotations
 
 import contextlib
+import traceback
 import uuid
 from pathlib import Path
 
-import dask
 import pyarrow as pa
 import pyarrow.parquet as pq
 
 from pv_geom.config import PVGeomConfig
-from pv_geom.io._localize import RemoteFileMissing, is_remote, localize
+from pv_geom.io._localize import RemoteFileMissing, is_remote, list_s3_uris, localize
 from pv_geom.io.footprints import read_footprints
 from pv_geom.io.polygons import read_polygons
 from pv_geom.io.tile_index import build_tile_uris, load_tile_index
@@ -62,6 +62,11 @@ def run_pipeline(
     their groups are skipped. Changing inputs/config between runs while using
     ``--resume`` will produce inconsistent output (partition_ids shift). The
     manifest's ``config_hash`` is logged so you can detect drift after the fact.
+
+    Partitions are written incrementally as each tile group completes, and a
+    failed group is logged + recorded in the manifest (``counts.failed_groups``,
+    ``aggregate_stats.task_errors``) rather than aborting the run — so completed
+    work survives mid-run failures and ``--resume`` retries only the failures.
     """
     out_root = Path(output_uri)
     out_root.mkdir(parents=True, exist_ok=True)
@@ -175,6 +180,28 @@ def run_pipeline(
                           f"MISSING (will be skipped)")
                     missing_uris.add(uri)
 
+    # When pre-warm didn't run (Coiled, or serial runs against S3), one
+    # paginated LIST from the client finds tiles absent from the bucket —
+    # ~75% of indexed Phoenix tiles have no LAZ — so dead groups are dropped
+    # before dispatch instead of every worker paying a 404 round-trip.
+    if pending and not do_prewarm and str(lidar_prefix).startswith("s3://"):
+        try:
+            available = list_s3_uris(lidar_prefix)
+        except Exception as exc:
+            # No client-side S3 creds / network: workers still 404 gracefully.
+            print(f"[runner] S3 listing of {lidar_prefix} failed ({exc!r}); "
+                  f"missing tiles will be handled worker-side")
+        else:
+            prefix = str(lidar_prefix).rstrip("/") + "/"
+            for _, g in pending:
+                for tid in g.fetch_tile_ids:
+                    uri = tile_uri_map.get(tid)
+                    if uri and uri.startswith(prefix) and uri not in available:
+                        missing_uris.add(uri)
+            if missing_uris:
+                print(f"[runner] {len(missing_uris)} indexed tiles have no LAZ "
+                      f"under {lidar_prefix}; dropping them up-front")
+
     # Drop missing tiles from each group's fetch list. If the primary tile
     # itself is missing, the group is dropped from `pending` (no points to fit).
     if missing_uris:
@@ -208,8 +235,16 @@ def run_pipeline(
             sub_bbox[0] - margin: sub_bbox[2] + margin,
             sub_bbox[1] - margin: sub_bbox[3] + margin,
         ]
+        # Subset the URI map to this group's tiles: embedding the full index
+        # (13k+ entries, ~MBs serialized) in every task inflates the graph to
+        # GBs at atlas scale (~1000-2000 groups).
+        group_uri_map = {
+            tid: tile_uri_map[tid]
+            for tid in group.fetch_tile_ids
+            if tid in tile_uri_map
+        }
         return dict(
-            tile_uri_map=tile_uri_map,
+            tile_uri_map=group_uri_map,
             primary_tile_id=group.primary_tile_id,
             polygons=sub,
             fetch_tile_ids=group.fetch_tile_ids,
@@ -221,28 +256,62 @@ def run_pipeline(
             polygon_id_col=polygon_id_col,
         )
 
-    if use_dask and pending:
-        delayed_tasks = [
-            dask.delayed(process_tile_group)(**_build_task(pid, g)) for pid, g in pending
-        ]
-        with _cluster_for(cfg) as client:
-            del client                        # context manager keeps it alive
-            new_tables = list(dask.compute(*delayed_tasks))
-    elif pending:
-        new_tables = [process_tile_group(**_build_task(pid, g)) for pid, g in pending]
-    else:
-        new_tables = []
-
-    # 4) Write new partitions -------------------------------------------------
-    n_attempted = sum(len(g.polygon_ids) for g in groups)
+    # 4) Dispatch + write each partition as soon as its group finishes. A
+    # failed group is recorded and skipped rather than aborting the run, so a
+    # multi-hour atlas run keeps every completed partition on disk and a
+    # follow-up `--resume` retries only the failures. (Previously a single
+    # dask.compute barrier wrote nothing until ALL tasks succeeded — one
+    # KilledWorker discarded hours of completed work.)
+    new_tables: list[pa.Table] = []
+    failed_groups: dict[int, str] = {}
     n_succeeded_new = 0
-    for (partition_id, _group), table in zip(pending, new_tables, strict=True):
+
+    def _on_done(partition_id: int, table: pa.Table) -> None:
+        nonlocal n_succeeded_new
+        new_tables.append(table)
         if len(table) == 0:
-            continue
+            return
         path = out_root / f"part-{partition_id:05d}.parquet"
         pq.write_table(table, path)
         n_succeeded_new += len(table)
         print(f"[runner] wrote {path} ({len(table)} rows)")
+
+    def _on_error(partition_id: int, group: TileGroup, exc: BaseException) -> None:
+        failed_groups[partition_id] = repr(exc)
+        print(f"[runner] tile group {group.primary_tile_id} (partition "
+              f"{partition_id}, {len(group.polygon_ids)} polygons) FAILED: {exc!r}")
+
+    if use_dask and pending:
+        with _cluster_for(cfg) as client:
+            from dask.distributed import as_completed
+
+            futures = {
+                client.submit(process_tile_group, **_build_task(pid, g)): (pid, g)
+                for pid, g in pending
+            }
+            for fut in as_completed(futures):
+                pid, g = futures[fut]
+                if fut.status == "error":
+                    _on_error(pid, g, fut.exception())
+                else:
+                    _on_done(pid, fut.result())
+    elif pending:
+        for pid, g in pending:
+            try:
+                table = process_tile_group(**_build_task(pid, g))
+            except Exception as exc:
+                traceback.print_exc()
+                _on_error(pid, g, exc)
+            else:
+                _on_done(pid, table)
+
+    n_attempted = sum(len(g.polygon_ids) for g in groups)
+    if failed_groups:
+        n_failed_polys = sum(
+            len(g.polygon_ids) for pid, g in pending if pid in failed_groups
+        )
+        print(f"[runner] {len(failed_groups)} tile-group tasks failed "
+              f"({n_failed_polys} polygons); rerun with --resume to retry them")
 
     # 4b) Read back skipped partitions so manifest stats include them ---------
     skipped_tables = [pq.read_table(p) for p in skipped_paths]
@@ -253,6 +322,8 @@ def run_pipeline(
     # 5) Aggregate stats + manifest ------------------------------------------
     full_table = pa.concat_tables(list(tables)) if tables else None
     aggregate_stats = _aggregate(full_table) if full_table is not None and len(full_table) else {}
+    if failed_groups:
+        aggregate_stats["task_errors"] = failed_groups
 
     manifest_path = out_root / "manifest.json"
     write_manifest(
@@ -272,6 +343,7 @@ def run_pipeline(
             "attempted": int(n_attempted),
             "succeeded": int(n_succeeded),
             "failed": int(n_attempted - n_succeeded),
+            "failed_groups": len(failed_groups),
         },
         aggregate_stats=aggregate_stats,
         tiles_touched=sorted({t for g in groups for t in g.fetch_tile_ids}),

@@ -24,6 +24,25 @@ class RemoteFileMissing(FileNotFoundError):
     rather than crashing the whole pipeline on a single missing LAZ tile."""
 
 
+def list_s3_uris(prefix_uri: str) -> set[str]:
+    """List all object URIs under an ``s3://bucket/prefix`` with one paginated
+    LIST. Lets the runner drop tiles absent from the bucket before dispatch
+    instead of paying a 404 round-trip per missing tile on every worker."""
+    s = str(prefix_uri)
+    if not s.startswith("s3://"):
+        raise ValueError(f"expected an s3:// prefix; got {s}")
+    bucket, _, key_prefix = s[len("s3://"):].partition("/")
+
+    import boto3
+
+    uris: set[str] = set()
+    paginator = boto3.client("s3").get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=key_prefix):
+        for obj in page.get("Contents", []):
+            uris.add(f"s3://{bucket}/{obj['Key']}")
+    return uris
+
+
 def localize(uri: str | Path, cache_dir: Path | None = None) -> Path:
     """Return a local Path for ``uri``. Downloads from S3 once if needed.
 

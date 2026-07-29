@@ -26,7 +26,13 @@ def test_default_values() -> None:
     assert cfg.io.classification.panel_class_primary == 6
     assert cfg.io.classification.panel_class_fallback == 1
     assert cfg.io.classification.ground_class == 2
-    assert cfg.io.classification.fallback_height_above_ground_m == 1.5
+    assert cfg.io.classification.fallback_height_above_ground_m == 0.8
+    # 0.3.0 classification-robustness knobs
+    assert cfg.roof_plane.min_overlap_frac == 0.5
+    assert cfg.heights.ground_fallback_k == 50
+    assert cfg.mounting_rules.R3.height_above_ground_m_max == 6.0
+    assert cfg.mounting_rules.canopy_min_ground_points_under == 15
+    assert cfg.mounting_rules.canopy_gap_m_min == 2.0
 
 
 def test_phoenix_overrides() -> None:

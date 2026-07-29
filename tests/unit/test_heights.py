@@ -5,7 +5,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from shapely.geometry import box
+
 from pv_geom.geometry.heights import (
+    ground_under_polygon,
     height_above_ground,
     height_above_roof,
     panel_roof_angle_deg,
@@ -67,6 +70,82 @@ def test_hag_no_ground_in_radius_returns_nan() -> None:
 def test_hag_empty_inputs_return_nan() -> None:
     assert np.isnan(height_above_ground(np.array([]), np.zeros((10, 3)), (0, 0)))
     assert np.isnan(height_above_ground(np.array([1.0]), np.zeros((0, 3)), (0, 0)))
+
+
+def test_hag_fallback_uses_nearest_k_when_disk_empty() -> None:
+    """Large-building case: no ground return within the disk (class 2 stops at
+    the wall) — the k-nearest fallback should still produce a HAG."""
+    panel_z = np.full(10, 12.0)
+    ang = np.linspace(0, 2 * np.pi, 60, endpoint=False)
+    ground = np.column_stack([
+        30.0 * np.cos(ang), 30.0 * np.sin(ang), np.full(60, 10.0)
+    ])
+    h = height_above_ground(
+        panel_z, ground, (0.0, 0.0),
+        search_radius_m=10.0, fallback_k=50, fallback_max_radius_m=100.0,
+    )
+    assert h == pytest.approx(2.0, abs=1e-6)
+
+
+def test_hag_fallback_disabled_returns_nan() -> None:
+    panel_z = np.full(10, 12.0)
+    ground = np.array([[30.0, 0.0, 10.0]])
+    h = height_above_ground(
+        panel_z, ground, (0.0, 0.0),
+        search_radius_m=10.0, fallback_k=0,
+    )
+    assert np.isnan(h)
+
+
+def test_hag_fallback_respects_max_radius() -> None:
+    panel_z = np.full(10, 12.0)
+    ground = np.array([[150.0, 0.0, 10.0]])
+    h = height_above_ground(
+        panel_z, ground, (0.0, 0.0),
+        search_radius_m=10.0, fallback_k=50, fallback_max_radius_m=100.0,
+    )
+    assert np.isnan(h)
+
+
+# --------------------------------------------------------------------------- #
+# ground_under_polygon (canopy evidence)
+# --------------------------------------------------------------------------- #
+
+
+def test_ground_under_polygon_counts_and_gap() -> None:
+    poly = box(0.0, 0.0, 10.0, 10.0)
+    rng = np.random.default_rng(0)
+    inside_xy = rng.uniform(1, 9, size=(50, 2))
+    outside_xy = rng.uniform(20, 30, size=(50, 2))
+    ground = np.vstack([
+        np.column_stack([inside_xy, np.zeros(50)]),
+        np.column_stack([outside_xy, np.zeros(50)]),
+    ])
+    n, gap = ground_under_polygon(np.full(20, 3.0), ground, poly)
+    assert n == 50
+    assert gap == pytest.approx(3.0, abs=1e-9)
+
+
+def test_ground_under_polygon_none_inside() -> None:
+    ground = np.column_stack([
+        np.full(10, 50.0), np.full(10, 50.0), np.zeros(10)
+    ])
+    n, gap = ground_under_polygon(np.full(5, 3.0), ground, box(0, 0, 1, 1))
+    assert n == 0
+    assert np.isnan(gap)
+
+
+def test_ground_under_polygon_empty_ground() -> None:
+    n, gap = ground_under_polygon(np.full(5, 3.0), np.zeros((0, 3)), box(0, 0, 1, 1))
+    assert n == 0
+    assert np.isnan(gap)
+
+
+def test_ground_under_polygon_no_panel_z_still_counts() -> None:
+    ground = np.array([[0.5, 0.5, 0.0], [0.6, 0.6, 0.0]])
+    n, gap = ground_under_polygon(np.array([]), ground, box(0, 0, 1, 1))
+    assert n == 2
+    assert np.isnan(gap)
 
 
 # --------------------------------------------------------------------------- #

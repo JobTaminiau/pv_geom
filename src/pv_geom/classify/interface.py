@@ -17,6 +17,10 @@ class MountingFeatures:
     area_m2: float
     aspect_ratio: float
     roof_plane_available: bool
+    roof_tilt_deg: float | None = None     # None / NaN if no roof plane
+    east_west_rack: bool = False           # M5 multi-plane EW signature present
+    n_ground_under: int = 0                # ground-class returns inside the polygon
+    ground_under_gap_m: float | None = None  # median panel z - median under-polygon ground z
 
 
 @dataclass(frozen=True)

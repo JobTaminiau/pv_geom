@@ -101,6 +101,19 @@ def extract_roof_plane(
         inter_areas = candidates.geometry.intersection(pv_polygon).area
         chosen = candidates.loc[inter_areas.idxmax()]
     footprint = chosen.geometry
+
+    # A sliver touch is not "on the building": an edge-clipping ground mount
+    # or a carport adjacent to a wall must not be routed down the rooftop
+    # rules. Require a real overlap fraction of the PV polygon.
+    poly_area = pv_polygon.area
+    overlap_frac = (
+        footprint.intersection(pv_polygon).area / poly_area if poly_area > 0 else 0.0
+    )
+    if overlap_frac < cfg.min_overlap_frac:
+        return RoofPlaneResult(
+            fit=None, on_building=False, building_id=None,
+            flag=None, used_buffer_m=None,
+        )
     bid = (
         str(chosen[building_id_col])
         if building_id_col in candidates.columns and chosen[building_id_col] is not None

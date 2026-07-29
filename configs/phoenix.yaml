@@ -15,6 +15,9 @@ compute:
   coiled:
     name: pv-geom-phoenix
     n_workers: 40
-    worker_memory: "8GiB"
+    worker_memory: "16GiB"      # the densest Phoenix tiles (~3000 polygons,
+                                # 50M+ points) blow through 8 GiB on the
+                                # tile-group worker; verified via the 10k
+                                # Coiled bench (2026-05-02).
     worker_cpu: 4
     software: pv-geom-2026-05

@@ -207,6 +207,39 @@ def test_complex_roof_flag_when_rmse_too_high() -> None:
     assert result.fit is not None
 
 
+def test_sliver_overlap_is_off_building() -> None:
+    """Edge-clipping a footprint by a few percent must NOT set on_building —
+    routing edge-adjacent ground mounts / carports down the rooftop rules was
+    a top rooftop-vs-canopy confusion channel."""
+    pv = box(0.0, 0.0, 10.0, 10.0)              # 5% overlap with the footprint
+    footprints = gpd.GeoDataFrame(
+        {"building_id": ["b1"]},
+        geometry=[box(9.5, 0.0, 20.0, 10.0)],
+        crs="EPSG:6341",
+    )
+    others = gpd.GeoDataFrame(geometry=[], crs="EPSG:6341")
+    result = extract_roof_plane(pv, footprints, others, np.zeros((10, 3)), RoofPlaneConfig())
+    assert result.on_building is False
+    assert result.fit is None
+    assert result.building_id is None
+
+
+def test_majority_overlap_is_on_building() -> None:
+    """60% overlap clears the default 0.5 gate (tolerates ML-footprint
+    misregistration); with no usable ring points the result is still
+    on_building + roof_insufficient."""
+    pv = box(0.0, 0.0, 10.0, 10.0)
+    footprints = gpd.GeoDataFrame(
+        {"building_id": ["b1"]},
+        geometry=[box(4.0, 0.0, 20.0, 10.0)],   # covers 60% of the PV
+        crs="EPSG:6341",
+    )
+    others = gpd.GeoDataFrame(geometry=[], crs="EPSG:6341")
+    result = extract_roof_plane(pv, footprints, others, np.zeros((0, 3)), RoofPlaneConfig())
+    assert result.on_building is True
+    assert result.flag == "roof_insufficient"
+
+
 def test_picks_largest_overlapping_footprint() -> None:
     """Two overlapping footprints — pick the one with the bigger PV intersection."""
     pv = box(2.0, 2.0, 6.0, 6.0)

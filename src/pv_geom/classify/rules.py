@@ -1,13 +1,24 @@
-"""Rules-based mounting classifier (PRD §7.5). M5.
+"""Rules-based mounting classifier (PRD §7.5 + extended taxonomy). M5.
 
-Rules evaluated in order; first match wins. Confidence is a piecewise-linear
-function of the margin past the deciding threshold. The ``ambiguous`` default
-returns ``1 - best_near_miss_confidence``.
+Rules evaluated in order; first match wins. Rule IDs are stable identifiers,
+not evaluation order: more-specific rules added after the PRD's R1-R6 run
+*before* the broader rule they would otherwise lose polygons to (R7 east-west
+rack before R1/R2; R8 pole mount before R3 carport). Confidence is a
+piecewise-linear function of the margin past the deciding threshold. The
+``ambiguous`` default returns ``1 - best_near_miss_confidence``.
 
 The fractional ``confidence_margin`` (default 0.5) scales each threshold
 absolutely: for threshold T, full confidence is reached at distance
 ``|T| * margin`` past T (or at distance ``|T| * margin`` short of T for
 opposing direction). At T exactly, confidence is 0.5.
+
+Canopy evidence (0.3.0): ground-class returns inside the polygon with a
+multi-metre vertical gap to the panel plane are the LiDAR signature of an
+open-sided canopy. When present, the polygon is routed down the canopy rules
+(R8/R3) even if a footprint layer says ``on_building`` (carports are often
+mapped as buildings), and the ground-mount rules (R4/R5) are suppressed.
+Unknown (NaN) heights never satisfy evidence conditions — they propagate to
+``ambiguous`` — but an unknown height does not veto an *upper-cap* guard.
 """
 
 from __future__ import annotations
@@ -58,8 +69,21 @@ def _conf_ge(value: float | None, threshold: float, margin: float) -> float:
     return float((value - full_fail) / (full_pass - full_fail))
 
 
+def _conf_le_unknown_ok(value: float | None, threshold: float, margin: float) -> float:
+    """``_conf_le`` where an unknown value does NOT veto.
+
+    Used for upper-cap *guards* (e.g. "carports are under ~6 m"): the cap
+    should only bind when the value was actually measured; the rule's positive
+    evidence conditions still require real measurements to fire.
+    """
+    if _is_nan(value):
+        return 1.0
+    return _conf_le(value, threshold, margin)
+
+
 class RulesMountingClassifier(MountingClassifier):
-    """Implements the v1 mounting rules from PRD §7.5."""
+    """PRD §7.5's R1-R6 plus the extended taxonomy: R7 east_west_rack_rooftop,
+    R8 pole_mount, and R1's flat/pitched label split (logged in STATUS.md)."""
 
     def __init__(self, cfg: MountingRulesConfig) -> None:
         self.cfg = cfg
@@ -70,22 +94,61 @@ class RulesMountingClassifier(MountingClassifier):
         near_misses: list[float] = []
 
         # ------------------------------------------------------------------
-        # R1 — flush_mount_rooftop
+        # Canopy evidence — ground returns under the panels. Rooftops have
+        # none (the building blocks them); open-sided canopies let LiDAR
+        # through around the edges and gaps. Footprint-independent, so it
+        # corrects both failure modes of ``on_building``: carports mapped as
+        # buildings, and rooftops on unmapped buildings.
         # ------------------------------------------------------------------
-        if f.on_building and f.roof_plane_available:
+        canopy_gap_conf = 0.0
+        if f.n_ground_under >= cfg.canopy_min_ground_points_under:
+            canopy_gap_conf = _conf_ge(f.ground_under_gap_m, cfg.canopy_gap_m_min, m)
+        canopy_evidence = canopy_gap_conf >= 0.5
+
+        rooftop_context = f.on_building and not canopy_evidence
+        canopy_context = (not f.on_building) or canopy_evidence
+
+        # ------------------------------------------------------------------
+        # R7 — east_west_rack_rooftop (before R1/R2: the two-plane EW
+        # signature is more specific than either, and R2 would otherwise
+        # absorb the primary plane as a generic tilted rack). Caveat: two
+        # facets of a gable roof also face ~180 deg apart with similar tilts,
+        # so on a pitched roof the EW flag is most likely facet bleed —
+        # confidence is graded on the roof being flat when a roof fit exists.
+        # ------------------------------------------------------------------
+        if rooftop_context and f.east_west_rack:
+            r = cfg.R7
+            c = _conf_le(f.panel_tilt_deg, r.tilt_deg_max, m)
+            if f.roof_plane_available:
+                c = min(c, _conf_le(f.roof_tilt_deg, cfg.flat_roof_tilt_deg_max, m))
+            if c >= 0.5:
+                return MountingResult("east_west_rack_rooftop", c, "R7")
+            near_misses.append(c)
+
+        # ------------------------------------------------------------------
+        # R1 — flush mount, split by roof type. Firing/confidence semantics
+        # are the PRD's R1; the label refines on roof tilt (hard threshold —
+        # the split is descriptive, not a separate gate).
+        # ------------------------------------------------------------------
+        if rooftop_context and f.roof_plane_available:
             r = cfg.R1
             c = min(
                 _conf_le(f.panel_roof_angle_deg, r.panel_roof_angle_deg_max, m),
                 _conf_le(f.height_above_roof_m, r.height_above_roof_m_max, m),
             )
             if c >= 0.5:
-                return MountingResult("flush_mount_rooftop", c, "R1")
+                flat = (
+                    not _is_nan(f.roof_tilt_deg)
+                    and f.roof_tilt_deg <= cfg.flat_roof_tilt_deg_max
+                )
+                label = "flush_mount_flat_roof" if flat else "flush_mount_pitched_roof"
+                return MountingResult(label, c, "R1")
             near_misses.append(c)
 
         # ------------------------------------------------------------------
         # R2 — tilted_rack_rooftop (with/without roof-plane fallback)
         # ------------------------------------------------------------------
-        if f.on_building:
+        if rooftop_context:
             r = cfg.R2
             c_with = c_without = 0.0
             if f.roof_plane_available:
@@ -104,12 +167,39 @@ class RulesMountingClassifier(MountingClassifier):
             near_misses.append(c)
 
         # ------------------------------------------------------------------
-        # R3 — carport
+        # R8 — pole_mount (before R3: a small near-square elevated array is a
+        # pole mount; R3's aspect_ratio_min only catches the elongated ones,
+        # so these used to land in ambiguous or worse). Elevation is
+        # satisfiable by measured HAG *or* the under-panel gap; the height cap
+        # guards against rooftops on unmapped buildings and only binds when
+        # HAG was actually measured.
         # ------------------------------------------------------------------
-        if not f.on_building:
+        if canopy_context:
+            r = cfg.R8
+            c = min(
+                max(
+                    _conf_ge(f.height_above_ground_m, r.height_above_ground_m_min, m),
+                    canopy_gap_conf,
+                ),
+                _conf_le_unknown_ok(f.height_above_ground_m, r.height_above_ground_m_max, m),
+                _conf_le(f.area_m2, r.area_m2_max, m),
+                _conf_le(f.aspect_ratio, r.aspect_ratio_max, m),
+            )
+            if c >= 0.5:
+                return MountingResult("pole_mount", c, "R8")
+            near_misses.append(c)
+
+        # ------------------------------------------------------------------
+        # R3 — carport (same elevation/cap semantics as R8)
+        # ------------------------------------------------------------------
+        if canopy_context:
             r = cfg.R3
             c = min(
-                _conf_ge(f.height_above_ground_m, r.height_above_ground_m_min, m),
+                max(
+                    _conf_ge(f.height_above_ground_m, r.height_above_ground_m_min, m),
+                    canopy_gap_conf,
+                ),
+                _conf_le_unknown_ok(f.height_above_ground_m, r.height_above_ground_m_max, m),
                 _conf_ge(f.aspect_ratio, r.aspect_ratio_min, m),
             )
             if c >= 0.5:
@@ -117,9 +207,11 @@ class RulesMountingClassifier(MountingClassifier):
             near_misses.append(c)
 
         # ------------------------------------------------------------------
-        # R4 — ground_mount_tracker_suspected
+        # R4 — ground_mount_tracker_suspected (suppressed by canopy evidence:
+        # a multi-metre gap under the panels contradicts "at ground level"
+        # even when a stray HAG measurement says otherwise)
         # ------------------------------------------------------------------
-        if not f.on_building:
+        if not f.on_building and not canopy_evidence:
             r = cfg.R4
             c = min(
                 _conf_le(f.height_above_ground_m, r.height_above_ground_m_max, m),
@@ -131,9 +223,9 @@ class RulesMountingClassifier(MountingClassifier):
             near_misses.append(c)
 
         # ------------------------------------------------------------------
-        # R5 — ground_mount_fixed
+        # R5 — ground_mount_fixed (suppressed by canopy evidence, as R4)
         # ------------------------------------------------------------------
-        if not f.on_building:
+        if not f.on_building and not canopy_evidence:
             r = cfg.R5
             c = min(
                 _conf_le(f.height_above_ground_m, r.height_above_ground_m_max, m),

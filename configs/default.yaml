@@ -26,19 +26,31 @@ roof_plane:
   buffer_max_m: 5.0
   min_points: 100
   rmse_max_m: 0.10
+  min_overlap_frac: 0.5          # footprint∩polygon / polygon area for on_building=True
+                                 # (sliver touches must not become "rooftop")
 
 heights:
   ground_search_radius_m: 10.0
+  ground_fallback_k: 50          # k-nearest ground fallback when the disk is empty
+  ground_fallback_max_radius_m: 100.0   # (large commercial roofs; 0 disables)
   use_whitebox_dem: false
 
 mounting_rules:
   R1: { panel_roof_angle_deg_max: 5.0, height_above_roof_m_max: 0.5 }
   R2: { panel_roof_angle_deg_min: 5.0, height_above_roof_m_max: 1.5,
         fallback_tilt_deg_min: 5.0, fallback_height_above_ground_m_min: 2.5 }
-  R3: { height_above_ground_m_min: 2.0, aspect_ratio_min: 2.0 }
+  R3: { height_above_ground_m_min: 2.0, aspect_ratio_min: 2.0,
+        height_above_ground_m_max: 6.0 }   # cap: taller = likely missing-footprint rooftop
   R4: { aspect_ratio_min: 4.0, tilt_deg_max: 35.0, height_above_ground_m_max: 2.0 }
   R5: { tilt_deg_min: 5.0, height_above_ground_m_max: 2.0 }
+  R7: { tilt_deg_max: 20.0 }     # east_west_rack_rooftop (evaluated before R1/R2)
+  R8: { height_above_ground_m_min: 2.0, area_m2_max: 20.0, aspect_ratio_max: 2.0,
+        height_above_ground_m_max: 8.0 }   # pole_mount (before R3)
+  flat_roof_tilt_deg_max: 7.0    # R1 flat/pitched label split + R7 gable-facet guard
   confidence_margin: 0.5
+  canopy_min_ground_points_under: 15   # ground returns inside the polygon +
+  canopy_gap_m_min: 2.0                #   multi-metre gap = open-sided canopy signature
+  missing_footprint_hag_m: 6.0   # off-building above this w/o canopy evidence -> flag
 
 io:
   lidar_reader: laspy          # laspy | pdal (pdal needs the [pdal] extra + system libs)
@@ -49,14 +61,16 @@ io:
     panel_class_primary: 6     #   are class-1/2/7 only (no class 6), so we fall back to
     panel_class_fallback: 1    #   class-1 returns above-ground when class 6 is absent.
     ground_class: 2
-    fallback_height_above_ground_m: 1.5    # min HAG to keep a class-1 return as panel-candidate
+    fallback_height_above_ground_m: 0.8    # min HAG to keep a class-1 return as panel-candidate
+                                           # (1.5 deleted the lower half of ground-mount arrays)
 
 compute:
   backend: local               # local | coiled
   coiled:
     name: pv-geom
     n_workers: 40
-    worker_memory: "8GiB"
+    worker_memory: "16GiB"        # densest Phoenix tiles need >8 GiB; verified
+                                  # via 10k Coiled bench, 2026-05-02.
     worker_cpu: 4
     software: pv-geom-2026-05
   local:

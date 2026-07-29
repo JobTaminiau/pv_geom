@@ -91,11 +91,13 @@ def make_cluster(cfg: PVGeomConfig) -> "Cluster":
         worker_cpu=c.worker_cpu,
         software=c.software or SOFTWARE_ENV,
         region=REGION,
-        # Cap concurrent tasks per worker: each tile-group task loads up to a
-        # few GB of decompressed LAZ, and the dask default (nthreads =
-        # worker_cpu = 4) runs four at once into a 16 GiB budget. Two is the
-        # ratio the 10k bench proved on the densest Phoenix tiles.
-        worker_options={"nthreads": 2},
+        # One tile-group task per worker: a task's peak is the concatenated
+        # multi-tile point cloud (up to ~13 GB for dense-metro fetch
+        # neighborhoods), so even two concurrent tasks breach a 16 GiB
+        # worker — observed as paired KilledWorker failures on the
+        # 2026-07-29 full run once it reached the metro core. Memory, not
+        # CPU, is the binding constraint.
+        worker_options={"nthreads": 1},
     )
     return cluster
 

@@ -33,6 +33,9 @@ out_*/
 # Draft release metadata — un-ignore when ready to publish to Zenodo
 .zenodo.json
 
+# Quarto render cache (docs/paper)
+.quarto/
+
 # Notebooks
 .ipynb_checkpoints/
 

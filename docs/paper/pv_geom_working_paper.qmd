@@ -1,0 +1,377 @@
+---
+title: "pv_geom: Scalable Extraction of Geometric Attributes for Solar Photovoltaic Installations from Airborne LiDAR"
+subtitle: "Working paper — draft v0.1"
+author:
+  - name: Job Taminiau
+    email: jt@freefutures.org
+    affiliations:
+      - name: Foundation for Renewable Energy and Environment (FREE)
+date: 2026-07-15
+date-format: "MMMM D, YYYY"
+abstract: >
+  Existing large-area photovoltaic (PV) inventories resolve where solar
+  installations are, but not how they are built. We present `pv_geom`, an
+  open Python package that enriches a vector inventory of PV polygons with
+  per-installation geometry derived from co-temporal classified airborne
+  LiDAR: panel tilt and azimuth with bootstrap uncertainties, the orientation
+  of the underlying roof plane, panel--roof angle, heights above ground and
+  roof, and a rules-based mounting-type classification with per-row
+  confidence and provenance. The pipeline is tile-centric and horizontally
+  scalable: polygons are grouped by LiDAR tile, each tile group is processed
+  independently on a Dask cluster (locally or on ephemeral cloud workers via
+  Coiled), and results are written incrementally with per-group failure
+  tolerance and crash-safe resume. Runs are reproducible bit-for-bit across
+  backends via config hashing and per-polygon deterministic random seeds.
+  We validate the method on metropolitan Phoenix, Arizona (~10 pts/m^2 USGS
+  3DEP LiDAR): on a 1,000-polygon utility-scale benchmark, all fits succeed
+  with inlier RMSE of 1.3 cm (median), and local and cloud backends produce
+  identical output; a 8,906-polygon mixed-density stress test completes in
+  25 minutes on 8 workers and demonstrates that the quality-flag system
+  correctly isolates the long tail of small, sparse, or noisy input polygons
+  rather than emitting unreliable fits. We discuss calibration and validation
+  steps required before a metro-scale release.
+keywords: [solar photovoltaics, LiDAR, RANSAC, plane fitting, mounting classification, distributed computing]
+bibliography: references.bib
+format:
+  html:
+    embed-resources: true
+    toc: true
+    number-sections: true
+    fig-cap-location: bottom
+  typst:
+    number-sections: true
+    margin:
+      x: 2.5cm
+      y: 2.5cm
+execute:
+  echo: false
+---
+
+::: {.callout-note}
+**Status.** This is a working paper accompanying `pv_geom` v0.1.x. Benchmark
+results in @sec-results were produced with the six-label mounting taxonomy of
+v0.1.0; the software now ships a nine-label taxonomy (@sec-mounting) whose new
+thresholds are uncalibrated defaults. The full ~417k-polygon Phoenix atlas run
+is pending and will be reported in a revision. Placeholders for those results
+are marked **[TODO]**.
+:::
+
+# Introduction
+
+Large-area PV inventories built from aerial or satellite imagery — e.g.
+DeepSolar for the United States [@yu2018deepsolar], a harmonised open dataset
+for the UK [@stowell2020uk], and a global inventory of utility-scale units
+[@kruitwagen2021global] — resolve the *presence*, *extent*, and rough
+*capacity* of solar installations. What they do not resolve is *geometry*:
+the tilt and azimuth of the modules, whether they are flush-mounted on a
+pitched roof or racked above a flat one, whether a ground-mounted array is
+fixed or tracking, and how the panels relate to the structure beneath them.
+
+Geometry matters for several downstream questions:
+
+1. **Yield modeling.** Tilt- and azimuth-aware irradiance transposition is
+   the difference between assuming every rooftop system faces south at
+   latitude tilt and modeling the fleet that actually exists.
+2. **Mounting-type classification.** Flush-mount residential, tilted
+   commercial rack, carport, fixed ground mount, and single-axis tracker have
+   different cost structures, capacity densities, and policy relevance.
+3. **Equity and policy analysis.** Fused with parcel and demographic data,
+   installation geometry sharpens questions about who adopts which kind of
+   system — the level of detail currently available only from permit records
+   such as Tracking the Sun [@barbose2023tts], which cover a nonrandom subset
+   of jurisdictions.
+4. **Expansion headroom and shading.** Roof-plane orientation and
+   panel--roof geometry are inputs to estimating remaining usable roof area.
+
+Airborne LiDAR resolves this geometry directly. Where a LiDAR acquisition is
+roughly co-temporal with the imagery underlying a polygon inventory, the
+returns inside each PV polygon sample the panel surface itself, and the
+returns around it sample the roof or ground beneath. `pv_geom`
+operationalizes this observation at metropolitan scale: given a polygon
+inventory, a classified LAZ tile archive on S3, and a building-footprint
+layer, it produces a polygon-keyed attribute table with per-row quality flags
+and full provenance.
+
+The package is deliberately metro-agnostic — all thresholds, coordinate
+systems, and point-classification conventions are configuration — and its
+first deployment target is metropolitan Phoenix, Arizona: a ~417,000-polygon
+PV inventory derived from a segmentation model applied to aerial imagery,
+paired with the USGS 3DEP Maricopa--Pinal 2020 LiDAR collection
+[@usgs3dep] at ~10 pts/m^2.
+
+# Data {#sec-data}
+
+**PV polygons.** A GeoParquet inventory of PV installation polygons with a
+unique `polygon_id`. For Phoenix we use an atlas of 416,976 polygons produced
+by a SAM-based segmentation pipeline over 2024 aerial orthoimagery
+(median polygon ~11 m^2). MultiPolygons are exploded into single parts with a
+`parent_polygon_id` link; the link column is carried through to the output, so
+part-level rows can be aggregated back to input detections by grouping on it.
+Polygons are reprojected once at ingest into the
+LiDAR CRS (Phoenix: EPSG:6341, NAD83(2011) / UTM 12N, metres).
+
+**LiDAR.** Classified LAZ tiles with a sidecar tile index. The Phoenix
+archive (USGS LPC AZ MaricopaPinal 2020 B20) comprises 13,373 indexed
+1-km tiles, of which 3,381 are currently mirrored to S3; delivered density is
+9--11 pts/m^2. A practical complication: these tiles carry ASPRS classes 1
+(unclassified), 2 (ground), and 7 only — there is no class 6 ("building").
+`pv_geom` therefore supports a configurable fallback: when class 6 is absent,
+panel/roof candidate points are class-1 returns more than a configurable
+height (default 1.5 m) above the tile-group ground median.
+
+**Building footprints.** FEMA USA Structures polygons for Arizona
+[@femastructures]. Roughly 92% of atlas polygons intersect at least one
+footprint; the remaining ~8% sit in genuine FEMA coverage gaps and surface in
+the output as `on_building = False` (a data limitation we return to in
+@sec-limitations). The FEMA `shape_area` attribute is unusable (all zeros in
+this extract); areas are always recomputed from geometry.
+
+# Methods {#sec-methods}
+
+## Panel-plane fitting {#sec-panelfit}
+
+For each polygon, panel-class returns are clipped to the polygon eroded
+inward by 0.15 m (suppressing racking-edge and roof returns at the boundary),
+and a plane is fit by RANSAC [@fischler1981ransac] with an inlier distance
+threshold of 0.05 m and 200 iterations, followed by a least-squares
+refinement (PCA: the plane normal is the smallest-variance right singular
+vector of the centered inlier cloud), re-classification of inliers against
+the refined plane, and RMSE computation on the final inlier set.
+
+With unit normal $\hat{n} = (n_x, n_y, n_z)$ canonicalized to the upper
+half-space ($n_z \ge 0$), tilt and compass azimuth follow as
+
+$$
+\theta_{\text{tilt}} = \arccos(n_z), \qquad
+\phi_{\text{az}} = \operatorname{atan2}(n_x, n_y) \bmod 360^\circ ,
+$$
+
+with azimuth reported as NaN below a 1° tilt floor, where the direction a
+near-horizontal panel "faces" is numerically and physically ill-defined.
+
+A fit is attempted whenever at least 3 points survive clipping, but rows are
+flagged `low_density` below 3 pts/m^2 or 30 points, and `poor_fit` when the
+RANSAC consensus covers less than 60% of clipped points. The 30-point floor
+is empirical: a bootstrap size-sweep on clean Phoenix panels showed tilt
+estimates are *unbiased* down to N=5 with precision scaling as $1/\sqrt{N}$,
+so the practical floor is not statistical noise but RANSAC's ability to
+reject overshoot and multi-plane contamination, which requires roughly 30
+inliers. At Phoenix densities that corresponds to ~3 m^2 — about the bottom
+10--15% of atlas polygons.
+
+**Uncertainty.** 1-σ uncertainties for tilt and azimuth are estimated by a
+50-sample nonparametric bootstrap over the inlier set, refitting each
+resample by PCA. Azimuth dispersion uses the Mardia circular standard
+deviation $\sigma = \sqrt{-2 \ln R}$, where $R$ is the mean resultant length
+[@mardia2000directional], avoiding the wrap-around artifacts of a naive
+standard deviation on angles.
+
+## Multi-plane detection {#sec-multiplane}
+
+East--west racking on flat commercial roofs produces two panel populations
+facing ~180° apart. After the primary fit, a second RANSAC pass runs on the
+primary's non-inliers (looser 0.10 m threshold); if the secondary plane
+captures at least 20% of the polygon's points, both planes are reported, and
+the row is flagged `east_west_rack` when the two azimuths are within 25° of
+opposite and tilts agree within 5°.
+
+## Roof-plane extraction {#sec-roofplane}
+
+To characterize the surface *beneath* a rooftop system, `pv_geom` fits a
+plane to panel-class returns in a ring buffer around the polygon: the polygon
+buffered outward (starting at 3 m), minus the polygon itself, minus any other
+PV polygons on the same building, intersected with the chosen building
+footprint (the intersecting footprint with maximum overlap). If fewer than
+100 returns fall in the ring, the buffer expands in 0.5 m steps to a 5 m cap
+before giving up with flag `roof_insufficient` — the common failure mode when
+panels occupy most of the roof. A fit whose inlier RMSE exceeds 0.10 m is
+rejected as `roof_complex` (dormers, hips, multi-facet bleed). From the panel
+and roof fits together we derive the panel--roof angle (angle between the two
+normals) and height-above-roof (vertical offset of the panel inlier centroid
+from the roof plane).
+
+## Heights {#sec-heights}
+
+Height-above-ground is the median panel-inlier elevation minus the median
+class-2 (ground) elevation within 10 m of the polygon centroid. When the
+class-6 fallback is active (@sec-data), the ground reference for the
+*candidate filter* is a single tile-group-wide ground median — defensible on
+Phoenix's flat terrain at the 1-km tile scale, and revisit-worthy in
+higher-relief metros.
+
+## Mounting classification {#sec-mounting}
+
+Mounting type is assigned by an ordered rules engine over the features
+`(on_building, panel_tilt, panel_roof_angle, height_above_roof,`
+`height_above_ground, area, aspect_ratio, roof_plane_available,`
+`roof_tilt, east_west_rack)`. Rules are evaluated most-specific-first; the
+first rule to clear a confidence of 0.5 fires. Each threshold comparison maps
+to a confidence via a piecewise-linear ramp — 0.5 exactly at the threshold,
+1.0 at a fractional margin (default 50% of the threshold) past it — and a
+rule's confidence is the minimum over its clauses. Polygons matching no rule
+are `ambiguous` with confidence $1 - \max(\text{near-miss confidences})$.
+
+| Rule | Label | Core predicate |
+|:----:|:------|:---------------|
+| R7 | `east_west_rack_rooftop` | on building, EW two-plane signature, tilt ≤ 20°; if a roof fit exists it must be flat (guards against gable facets, which also face ~180° apart) |
+| R1 | `flush_mount_pitched_roof` / `flush_mount_flat_roof` | on building, panel--roof angle ≤ 5°, height above roof ≤ 0.5 m; label splits on roof tilt vs 7° |
+| R2 | `tilted_rack_rooftop` | on building, panel--roof angle > 5° and height above roof ≤ 1.5 m (or, without a roof fit: tilt > 5° and height above ground > 2.5 m) |
+| R8 | `pole_mount` | off building, height ≥ 2 m, area ≤ 20 m^2, aspect ≤ 2 |
+| R3 | `carport` | off building, height ≥ 2 m, aspect ≥ 2 |
+| R4 | `ground_mount_tracker_suspected` | off building, height < 2 m, aspect ≥ 4, tilt < 35° |
+| R5 | `ground_mount_fixed` | off building, height < 2 m, tilt ≥ 5° |
+| R6 | `ambiguous` | default |
+
+: Mounting rules in evaluation order. Rule IDs are stable identifiers, not
+evaluation order: R7 and R8 were added after the initial six and run before
+the broader rules that would otherwise absorb their polygons. {#tbl-rules}
+
+Thresholds are configuration, not code; the R7/R8 and flat/pitched-split
+defaults are physically motivated but *uncalibrated* pending a labeled
+validation sample (@sec-limitations). The classifier sits behind an abstract
+interface so a learned model can replace the rules without touching the
+pipeline; rules would then remain as a fallback and explanation layer.
+
+## Quality flags and provenance {#sec-provenance}
+
+Every row carries its quality flags (`low_density`, `poor_fit`,
+`near_horizontal`, `east_west_rack`, `tracker_suspected`,
+`roof_insufficient`, `roof_complex`), the contributing LiDAR tile IDs, the
+package version, a SHA-256 hash of the fully-resolved configuration, and a
+run ID. A JSON manifest per run records the resolved config, input URIs,
+cluster spec, counts, and aggregate quality statistics. Reproducibility is
+by construction: RANSAC and bootstrap seeds derive from a SHA-256 of the
+polygon ID (process-stable, unlike Python's salted `hash()`), so identical
+inputs and config produce identical output regardless of worker count,
+scheduling order, or compute backend.
+
+# Implementation and scaling {#sec-implementation}
+
+LAZ I/O dominates cost, so the pipeline is *tile-centric*: each polygon is
+assigned a primary tile (containing its centroid) plus the set of tiles its
+geometry overlaps; polygons are grouped by primary tile; and each tile
+group's fetch list expands to the union of overlapping tiles. One Dask task
+[@rocklin2015dask] processes one tile group: fetch all tiles (with local
+caching), split the point cloud by class once for the whole group, then clip
+and fit per polygon. Only the primary group emits a polygon's row, so
+tile-spanning polygons need no dedup pass and raw point clouds are never
+shuffled between workers.
+
+Three design decisions matter at atlas scale (~1,000--2,000 tile groups):
+
+- **Incremental writes with per-group failure tolerance.** Each partition is
+  written the moment its group completes; a failed group is recorded in the
+  manifest rather than aborting the run, and `--resume` retries exactly the
+  missing partitions. A single worker loss at hour 3 of a multi-hour run
+  costs one group, not the run.
+- **Slim task graphs.** Tasks embed only their group's tile URIs (not the
+  13k-entry index), and a single client-side S3 LIST drops indexed tiles with
+  no LAZ object (~75% of the Phoenix index) before dispatch, replacing
+  thousands of worker-side 404 round-trips.
+- **Bounded memory.** Class filtering is hoisted out of the per-polygon loop
+  and the raw 4-column point array (~1.5 GB on dense tiles) is freed before
+  fitting begins. Phoenix's densest tiles (~3,000 polygons, >50M points)
+  still require 16 GiB workers.
+
+The same code runs serially in-process (`--no-dask`), on a local
+`distributed.LocalCluster`, or on ephemeral cloud workers provisioned by
+Coiled in the data's AWS region, selected purely by configuration.
+
+# Validation and benchmarks {#sec-results}
+
+## Point-level spike validation
+
+A pre-implementation spike on 29 randomly drawn Phoenix polygons
+established that the data supports the method: 27/29 plane fits achieved
+RMSE < 0.05 m; the tilt distribution was bimodal at 5--10° (flush-mount) and
+18--22° (tilted rack); and azimuths concentrated at 150--230° (south to SSW)
+with none facing north — physically correct for Arizona. On one polygon with
+visible segmentation overshoot into a yard, RANSAC reduced RMSE from 0.377 m
+(plain SVD fit) to 0.018 m by rejecting the 14% of returns off the panel
+plane, confirmed by aerial overlay.
+
+## 1,000-polygon benchmark (utility-scale cluster)
+
+A 1 km^2 bounding box capturing a utility-scale plant (@fig-bench1k): 1,000
+polygons across 2 tile groups, all fits successful, panel RMSE p50/p90 =
+1.3/1.6 cm. Wall time was 322 s on a 2-worker local cluster and 414 s on
+Coiled (the difference is ~90 s cluster spin-up, ~25 s worker package
+install, and cold S3 reads), with **bit-for-bit identical** algorithm output
+across backends. The classifier splits the plant into 617
+`ground_mount_tracker_suspected` and 363 `ground_mount_fixed` — a known
+weakness of the per-polygon tracker heuristic that installation-level
+clustering is designed to repair (@sec-limitations).
+
+![Six-panel review of the 1,000-polygon benchmark: (a) tilt vs azimuth,
+(b) panel-fit RMSE against the 5 cm specification floor, (c) polygons over
+2024 orthoimagery, (d) mounting-type counts, (e) confidence by mounting type,
+(f) quality flags.](figures/bench_1k_review.png){#fig-bench1k}
+
+## 8,906-polygon stress test (mixed density)
+
+A 3 km × 3 km box spanning 8 tiles and the full quality range of the input
+atlas, run on 8 Coiled workers (2 vCPU / 16 GiB): 24.8 min wall, all 8,906
+rows emitted. Here the input long tail becomes visible: 68% of panel fits
+succeed; 42% of rows carry `low_density`, 32% `poor_fit`, and 33% classify
+as `ambiguous`. Critically, *successful* fits remain excellent (RMSE p50/p90
+= 1.5/1.8 cm): the flag system is correctly refusing the small, sparse, and
+segmentation-noisy polygons rather than emitting junk geometry on them. We
+treat the flagged share as an honest property of the input inventory, to be
+addressed by input-side repair (fragment clustering, adaptive erosion) rather
+than by loosening fit acceptance.
+
+## Full-atlas run
+
+**[TODO]** The full Phoenix atlas run (~417k polygons, of which ~25% fall on
+currently-mirrored LiDAR tiles → ~100k processable; projected 2--4 h on 40
+workers) is the next gating item. This section will report end-to-end
+counts, mounting-type composition, tilt/azimuth distributions by mounting
+type, and cost.
+
+# Limitations and planned work {#sec-limitations}
+
+1. **Footprint gaps.** ~8% of polygons are off-building solely because FEMA
+   lacks the structure, shunting true rooftop systems toward ground/carport/
+   ambiguous rules. Planned: fall back to a second footprint source where
+   FEMA is empty.
+2. **Uncalibrated classifier thresholds.** All rule thresholds — especially
+   the new R7/R8 and flat/pitched defaults — await calibration against a
+   ~200-polygon aerial-verified label set, which will also resolve whether
+   the 33% ambiguous rate in the stress test reflects miscalibration or
+   genuinely uninformative inputs.
+3. **Per-polygon tracker heuristic.** Trackers are detected per polygon
+   (elongated, low, off-building, modest tilt); the 1k benchmark shows one
+   plant split across two labels. Planned: installation-level clustering
+   (grouping by centroid proximity and orientation coherence), which also
+   enables site typing, row-spacing/GCR estimates, and repair of
+   segmentation fragments by inheritance from the cluster fit.
+4. **Fixed erosion.** The 0.15 m inward erosion consumes a large share of
+   points on the smallest polygons and drives part of the `low_density`
+   rate; erosion should scale with polygon size.
+5. **External validation.** Tilt/azimuth/mounting accuracy will be
+   quantified against permit and interconnection records (e.g., Tracking the
+   Sun [@barbose2023tts]) for a Phoenix sample.
+6. **Flat-terrain assumption in the class-6 fallback.** The tile-wide ground
+   median used to select above-ground candidate returns is appropriate for
+   Phoenix but should become slope-aware before deployment in high-relief
+   metros.
+
+# Software availability {#sec-availability}
+
+`pv_geom` is a Python package (src layout, `pyproject.toml`) with a Typer
+CLI, Pydantic-validated YAML configuration, 152 unit tests on synthetic
+inputs, and a gated integration test against real Phoenix data. Source:
+<https://github.com/JobTaminiau/pv_geom>. A tagged release with an archived
+DOI (Zenodo) and license is in preparation; until then the repository URL is
+the citable reference. LiDAR: USGS 3DEP / LPC [@usgs3dep], hosted under the
+ASU NSF Phoenix collection. Building footprints: FEMA USA Structures
+[@femastructures].
+
+# Acknowledgments {.unnumbered}
+
+Built at the Foundation for Renewable Energy and Environment (FREE).
+
+# References {.unnumbered}
+
+::: {#refs}
+:::

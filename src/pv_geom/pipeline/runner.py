@@ -353,14 +353,32 @@ def run_pipeline(
 
             for _ in range(min(max_inflight, len(pending))):
                 _submit_next()
-            for fut in ac:
-                pid, g = inflight.pop(fut)
-                if fut.status == "error":
-                    _on_error(pid, g, fut.exception())
-                else:
-                    _on_done(pid, fut.result())
-                fut.release()
-                _submit_next()
+            # A lost scheduler connection cancels every in-flight future;
+            # FutureCancelledError is a BaseException (CancelledError), and
+            # letting it propagate discards the manifest for hours of
+            # already-written partitions. Drain instead: record the
+            # remainder as failed and fall through to the manifest write —
+            # rerunning with --resume retries exactly those groups.
+            from concurrent.futures import CancelledError
+
+            try:
+                for fut in ac:
+                    pid, g = inflight.pop(fut)
+                    if fut.status == "error":
+                        _on_error(pid, g, fut.exception())
+                    elif fut.status == "cancelled":
+                        _on_error(pid, g, RuntimeError("future cancelled (connection lost?)"))
+                    else:
+                        _on_done(pid, fut.result())
+                    fut.release()
+                    _submit_next()
+            except (Exception, CancelledError) as exc:
+                for pid, g in inflight.values():
+                    _on_error(pid, g, exc)
+                for pid, g in pending_iter:
+                    _on_error(pid, g, RuntimeError("not dispatched (run aborted)"))
+                print(f"[runner] dispatch aborted ({exc!r}); writing manifest "
+                      f"for completed work — rerun with --resume to retry")
     elif pending:
         for pid, g in pending:
             try:

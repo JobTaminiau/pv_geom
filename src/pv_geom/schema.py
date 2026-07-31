@@ -69,5 +69,6 @@ QUALITY_FLAGS: frozenset[str] = frozenset(
         "roof_insufficient",
         "roof_complex",
         "possible_missing_footprint",
+        "no_panel_standoff",
     }
 )

@@ -58,6 +58,11 @@ class HeightsConfig(BaseModel):
     # NaN. Set ground_fallback_k=0 to disable.
     ground_fallback_k: int = 50
     ground_fallback_max_radius_m: float = 100.0
+    # Minimum panel-above-roof separation that a plane fit can resolve. Panel
+    # and roof fits each carry ~2 cm RMSE, so a smaller gap does not establish
+    # that a panel is physically present above the roof surface; below it the
+    # row gets the `no_panel_standoff` flag. See README (Quality flags).
+    min_panel_standoff_m: float = 0.05
     use_whitebox_dem: bool = False
 
 

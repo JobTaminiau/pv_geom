@@ -183,6 +183,16 @@ def _build_row(
         har = float("nan")
         pra = float("nan")
 
+    # Panel plane indistinguishable from the roof plane beneath it. Expected on
+    # a genuinely low-profile flush mount, but also the signature of an input
+    # polygon whose panels were absent from the point cloud — when the imagery
+    # the detection came from postdates the LiDAR, there are no panel returns
+    # to fit and the "panel" plane IS the roof. Such rows carry roof geometry
+    # under panel column names, so downstream work that needs measured *panel*
+    # geometry (tilt/azimuth of a rack, panel-roof angle) should exclude them.
+    if roof_plane_available and not np.isnan(har) and har < cfg.heights.min_panel_standoff_m:
+        flags.append("no_panel_standoff")
+
     # Canopy evidence: ground-class returns under the panel polygon (NaN HAG
     # or footprint errors must not silently become "ground level"; the gap
     # under the panels is the direct LiDAR signal).

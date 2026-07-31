@@ -116,7 +116,37 @@ missing from the footprint layer degrades to `ambiguous` +
 
 `flags` is a list drawn from `low_density`, `poor_fit`, `near_horizontal`,
 `east_west_rack`, `tracker_suspected`, `roof_insufficient`, `roof_complex`,
-`possible_missing_footprint`.
+`possible_missing_footprint`, `no_panel_standoff`.
+
+### `no_panel_standoff` and input/LiDAR vintage
+
+`no_panel_standoff` fires when a roof plane was fitted and the panel plane
+sits less than `heights.min_panel_standoff_m` (default 5 cm) above it — below
+what two fits carrying ~2 cm RMSE each can resolve. It has two causes, and
+the flag deliberately describes the observation rather than guessing between
+them:
+
+1. a genuinely low-profile flush mount, and
+2. **an input polygon whose panels were not in the point cloud.** If the
+   inventory being enriched was detected on imagery that postdates the LiDAR,
+   the array may not have existed when the tile was flown. There are then no
+   panel returns to fit, RANSAC fits the bare roof, and the row reports *roof*
+   geometry under the panel column names — a plausible-looking flush mount
+   with tight RMSE.
+
+Cause 2 is a property of the input pairing, not of a tile, so pv-geom cannot
+rule it out per row; the flag is a screening filter. Calibration against
+dated permit records for metropolitan Phoenix (2024 imagery, 2020 LiDAR;
+34,837 single-permit parcels) puts the 5 cm threshold at **90% of
+known-post-LiDAR arrays flagged, against 32% of known-pre-LiDAR arrays** —
+so use it to *exclude* rows when measured panel geometry is required (rack
+tilt/azimuth, panel–roof angle), not to date individual installations. Panel
+*azimuth* is the least affected quantity, since a flush array is parallel to
+the facet the roof fit recovers anyway.
+
+Before running, check whether your detection imagery and LiDAR are
+co-temporal, and report the fraction flagged alongside any fleet-level
+geometry statistic.
 
 The manifest captures aggregate stats (mounting-type counts, RMSE
 percentiles, flag counts), the config hash, the input URIs, the cluster

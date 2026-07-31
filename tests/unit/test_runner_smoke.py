@@ -373,6 +373,70 @@ def test_build_row_nan_hag_stays_unknown() -> None:
     assert row["mounting_type"] == "ambiguous"
 
 
+def _rooftop_scene(standoff_m: float) -> dict:
+    """A pitched roof with a polygon on it, panels ``standoff_m`` above the
+    roof surface. standoff 0 reproduces the case where the detection's panels
+    were absent from the point cloud and RANSAC can only fit the bare roof.
+    """
+    rng = np.random.default_rng(7)
+    footprint = box(-10.0, -10.0, 20.0, 20.0)
+    panel_poly = box(0.0, 0.0, 6.0, 4.0)
+    slope = np.tan(np.radians(20.0))          # 20 deg, facing -y (south)
+
+    def roof_z(xy: np.ndarray) -> np.ndarray:
+        return 6.0 - slope * (xy[:, 1] - 5.0)
+
+    r_xy = rng.uniform([-10.0, -10.0], [20.0, 20.0], size=(6000, 2))
+    roof_pts = np.column_stack([r_xy, roof_z(r_xy) + rng.normal(0, 0.01, len(r_xy))])
+    p_xy = rng.uniform([0.0, 0.0], [6.0, 4.0], size=(600, 2))
+    panel_pts = np.column_stack(
+        [p_xy, roof_z(p_xy) + standoff_m + rng.normal(0, 0.01, len(p_xy))]
+    )
+    # Ground only outside the building — LiDAR cannot see through a roof.
+    g_xy = rng.uniform([-60.0, -60.0], [60.0, 60.0], size=(4000, 2))
+    keep = (g_xy[:, 0] < -12) | (g_xy[:, 0] > 22) | (g_xy[:, 1] < -12) | (g_xy[:, 1] > 22)
+    ground = np.column_stack([g_xy[keep], np.zeros(keep.sum())])
+    return {
+        "polygon": panel_poly,
+        "panel_pts": panel_pts,
+        "roof_input_pts": np.vstack([roof_pts, panel_pts]),
+        "ground_xyz": ground,
+        "footprints": gpd.GeoDataFrame(
+            {"building_id": ["b1"]}, geometry=[footprint], crs="EPSG:6341"
+        ),
+        "other_pv_polygons": gpd.GeoDataFrame(geometry=[], crs="EPSG:6341"),
+    }
+
+
+def test_build_row_flags_no_panel_standoff_when_panels_absent() -> None:
+    """Imagery postdating the LiDAR: the polygon is real but its panels were
+    not in the cloud, so the "panel" plane is the bare roof. The row still
+    looks like a clean flush mount, so it must carry `no_panel_standoff`."""
+    from pv_geom.pipeline.tile_task import _build_row
+
+    scene = _rooftop_scene(standoff_m=0.0)
+    row = _build_row(
+        polygon_id="v0", cfg=PVGeomConfig(), config_hash="x", run_id="r",
+        partition_id=0, contributing_tile_ids=("t1",), **scene,
+    )
+    assert row["on_building"] is True
+    assert "no_panel_standoff" in row["flags"]
+
+
+def test_build_row_no_standoff_flag_for_real_flush_array() -> None:
+    """A genuine flush mount sits ~10 cm above the roof (racking + frame) —
+    resolvably above it, so the flag must stay off."""
+    from pv_geom.pipeline.tile_task import _build_row
+
+    scene = _rooftop_scene(standoff_m=0.10)
+    row = _build_row(
+        polygon_id="v1", cfg=PVGeomConfig(), config_hash="x", run_id="r",
+        partition_id=0, contributing_tile_ids=("t1",), **scene,
+    )
+    assert row["on_building"] is True
+    assert "no_panel_standoff" not in row["flags"]
+
+
 def test_seed_for_polygon_is_process_stable() -> None:
     """RNG seeds must be identical across processes/runs (PRD §10). The builtin
     ``hash()`` is salted per process, so the seed is sha256-derived; pin the

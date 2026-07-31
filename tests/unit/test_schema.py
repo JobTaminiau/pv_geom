@@ -49,6 +49,14 @@ def test_quality_flags_include_missing_footprint() -> None:
     assert "possible_missing_footprint" in QUALITY_FLAGS
 
 
+def test_quality_flags_include_no_panel_standoff() -> None:
+    """Panel plane not resolvably above the roof — a genuinely flush mount, or
+    an input polygon whose panels postdate the LiDAR (see README)."""
+    from pv_geom.schema import QUALITY_FLAGS
+
+    assert "no_panel_standoff" in QUALITY_FLAGS
+
+
 def test_panel_tilt_is_nullable() -> None:
     assert OUTPUT_SCHEMA.field("panel_tilt_deg").nullable
 

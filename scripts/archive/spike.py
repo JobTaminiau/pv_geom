@@ -46,9 +46,8 @@ import geopandas as gpd
 import laspy
 import matplotlib.pyplot as plt
 import numpy as np
-import pyarrow.parquet as pq
 from botocore.exceptions import ClientError, NoCredentialsError
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Polygon
 
 # --------------------------------------------------------------------------- #
 # Defaults — change here, not via CLI, when iterating

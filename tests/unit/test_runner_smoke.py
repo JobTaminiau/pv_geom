@@ -280,7 +280,7 @@ def test_process_tile_group_missing_primary_tile(synth_inputs: dict[str, Path]) 
     from shapely.geometry import box
 
     from pv_geom.io._localize import RemoteFileMissing
-    from pv_geom.pipeline.tile_task import process_tile_group
+    from pv_geom.pipeline.worker import process_tile_group
 
     cfg = PVGeomConfig()
     polys = gpd.GeoDataFrame(
@@ -297,10 +297,10 @@ def test_process_tile_group_missing_primary_tile(synth_inputs: dict[str, Path]) 
     def _raise_missing(*args, **kwargs):
         raise RemoteFileMissing("s3://fake/missing.laz not found")
 
-    import pv_geom.pipeline.tile_task as tile_task_mod
+    import pv_geom.pipeline.pointpool as worker_mod
 
-    orig = tile_task_mod.read_tile
-    tile_task_mod.read_tile = _raise_missing
+    orig = worker_mod.read_tile
+    worker_mod.read_tile = _raise_missing
     try:
         table = process_tile_group(
             tile_uri_map={"t1": "s3://fake/missing.laz"},
@@ -314,7 +314,7 @@ def test_process_tile_group_missing_primary_tile(synth_inputs: dict[str, Path]) 
             partition_id=0,
         )
     finally:
-        tile_task_mod.read_tile = orig
+        worker_mod.read_tile = orig
 
     # Empty table, but with the canonical schema (so pyarrow.concat_tables works).
     assert len(table) == 0
@@ -324,7 +324,7 @@ def test_process_tile_group_missing_primary_tile(synth_inputs: dict[str, Path]) 
 def test_build_row_carport_from_under_panel_returns() -> None:
     """LiDAR-only canopy classification: an elevated panel with ground returns
     underneath and NO footprint involvement must come out as carport."""
-    from pv_geom.pipeline.tile_task import _build_row
+    from pv_geom.pipeline.worker import build_row
 
     rng = np.random.default_rng(0)
     poly = box(0.0, 0.0, 12.0, 3.0)                  # aspect ratio 4
@@ -338,7 +338,7 @@ def test_build_row_carport_from_under_panel_returns() -> None:
     footprints = gpd.GeoDataFrame({"building_id": []}, geometry=[], crs="EPSG:6341")
     others = gpd.GeoDataFrame(geometry=[], crs="EPSG:6341")
 
-    row = _build_row(
+    row = build_row(
         polygon=poly, polygon_id="c1", cfg=_mounting_cfg(), config_hash="x",
         run_id="r", partition_id=0,
         panel_pts=panel_pts, ground_xyz=ground, roof_input_pts=panel_pts,
@@ -355,7 +355,7 @@ def test_build_row_nan_hag_stays_unknown() -> None:
     """No ground reference anywhere near the polygon: HAG must be null in the
     output and the mounting ambiguous — pre-0.3 the NaN was coerced to 0.0 and
     the polygon fired R4/R5 as a confident ground mount."""
-    from pv_geom.pipeline.tile_task import _build_row
+    from pv_geom.pipeline.worker import build_row
 
     rng = np.random.default_rng(1)
     poly = box(0.0, 0.0, 12.0, 3.0)
@@ -370,7 +370,7 @@ def test_build_row_nan_hag_stays_unknown() -> None:
     footprints = gpd.GeoDataFrame({"building_id": []}, geometry=[], crs="EPSG:6341")
     others = gpd.GeoDataFrame(geometry=[], crs="EPSG:6341")
 
-    row = _build_row(
+    row = build_row(
         polygon=poly, polygon_id="u1", cfg=_mounting_cfg(), config_hash="x",
         run_id="r", partition_id=0,
         panel_pts=panel_pts, ground_xyz=ground, roof_input_pts=panel_pts,
@@ -420,10 +420,10 @@ def test_build_row_flags_no_panel_standoff_when_panels_absent() -> None:
     """Imagery postdating the LiDAR: the polygon is real but its panels were
     not in the cloud, so the "panel" plane is the bare roof. The row still
     looks like a clean flush mount, so it must carry `no_panel_standoff`."""
-    from pv_geom.pipeline.tile_task import _build_row
+    from pv_geom.pipeline.worker import build_row
 
     scene = _rooftop_scene(standoff_m=0.0)
-    row = _build_row(
+    row = build_row(
         polygon_id="v0", cfg=PVGeomConfig(), config_hash="x", run_id="r",
         partition_id=0, contributing_tile_ids=("t1",), **scene,
     )
@@ -434,10 +434,10 @@ def test_build_row_flags_no_panel_standoff_when_panels_absent() -> None:
 def test_build_row_no_standoff_flag_for_real_flush_array() -> None:
     """A genuine flush mount sits ~10 cm above the roof (racking + frame) —
     resolvably above it, so the flag must stay off."""
-    from pv_geom.pipeline.tile_task import _build_row
+    from pv_geom.pipeline.worker import build_row
 
     scene = _rooftop_scene(standoff_m=0.10)
-    row = _build_row(
+    row = build_row(
         polygon_id="v1", cfg=PVGeomConfig(), config_hash="x", run_id="r",
         partition_id=0, contributing_tile_ids=("t1",), **scene,
     )
@@ -449,10 +449,10 @@ def test_seed_for_polygon_is_process_stable() -> None:
     """RNG seeds must be identical across processes/runs (PRD §10). The builtin
     ``hash()`` is salted per process, so the seed is sha256-derived; pin the
     exact value so a regression to ``hash()`` fails on any interpreter."""
-    from pv_geom.pipeline.tile_task import _seed_for_polygon
+    from pv_geom.pipeline.measure import seed_for_polygon
 
-    assert _seed_for_polygon("21_840480_397711__0") == 1798131859
-    assert 0 <= _seed_for_polygon("anything") < 2**32
+    assert seed_for_polygon("21_840480_397711__0") == 1798131859
+    assert 0 <= seed_for_polygon("anything") < 2**32
 
 
 def test_failed_tile_group_does_not_abort_run(tmp_path: Path) -> None:
@@ -547,7 +547,7 @@ def test_build_row_marks_unscreenable_when_no_roof_reference() -> None:
     """Off-building: there is no roof to measure the panel plane against, so the
     vintage screen could not run. The row must say so rather than look like it
     passed — the distinction is the whole point of the tri-state."""
-    from pv_geom.pipeline.tile_task import _build_row
+    from pv_geom.pipeline.worker import build_row
 
     rng = np.random.default_rng(3)
     poly = box(0.0, 0.0, 6.0, 4.0)
@@ -556,7 +556,7 @@ def test_build_row_marks_unscreenable_when_no_roof_reference() -> None:
     g_xy = rng.uniform([-20.0, -20.0], [20.0, 20.0], size=(600, 2))
     ground = np.column_stack([g_xy, np.zeros(len(g_xy))])
 
-    row = _build_row(
+    row = build_row(
         polygon=poly, polygon_id="w0", cfg=PVGeomConfig(), config_hash="x",
         run_id="r", partition_id=0,
         panel_pts=panel_pts, ground_xyz=ground, roof_input_pts=panel_pts,
@@ -573,11 +573,11 @@ def test_build_row_marks_unscreenable_when_no_roof_reference() -> None:
 def test_standoff_screen_states_are_mutually_exclusive() -> None:
     """The three outcomes must partition the rows: failed, unscreenable, or
     (neither flag) screened and passed."""
-    from pv_geom.pipeline.tile_task import _build_row
+    from pv_geom.pipeline.worker import build_row
 
     for standoff, expect in ((0.0, "no_panel_standoff"), (0.10, None)):
         scene = _rooftop_scene(standoff_m=standoff)
-        row = _build_row(
+        row = build_row(
             polygon_id=f"s{standoff}", cfg=PVGeomConfig(), config_hash="x",
             run_id="r", partition_id=0, contributing_tile_ids=("t1",), **scene,
         )
@@ -589,13 +589,13 @@ def test_standoff_screen_states_are_mutually_exclusive() -> None:
 def test_absent_panels_do_not_earn_full_confidence() -> None:
     """End-to-end version of the rules-level cap: the bare-roof row is still
     labelled a flush mount, but must not outrank a measured one."""
-    from pv_geom.pipeline.tile_task import _build_row
+    from pv_geom.pipeline.worker import build_row
 
     cfg = _mounting_cfg()
-    absent = _build_row(polygon_id="c0", cfg=cfg, config_hash="x", run_id="r",
+    absent = build_row(polygon_id="c0", cfg=cfg, config_hash="x", run_id="r",
                         partition_id=0, contributing_tile_ids=("t1",),
                         **_rooftop_scene(standoff_m=0.0))
-    real = _build_row(polygon_id="c1", cfg=cfg, config_hash="x", run_id="r",
+    real = build_row(polygon_id="c1", cfg=cfg, config_hash="x", run_id="r",
                       partition_id=0, contributing_tile_ids=("t1",),
                       **_rooftop_scene(standoff_m=0.10))
 

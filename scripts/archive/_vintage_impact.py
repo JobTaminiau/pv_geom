@@ -31,13 +31,13 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pyarrow.dataset as ds
+from pv_geom.pipeline.tile_task import _build_row
 from shapely import contains_xy, wkb
 
-from pv_geom.config import PVGeomConfig, RoofPlaneConfig
+from pv_geom.config import PVGeomConfig
 from pv_geom.geometry.plane_fit import fit_plane_ransac
 from pv_geom.geometry.roof_plane import extract_roof_plane
 from pv_geom.io.lidar import clip_points_to_polygon, read_tile_points
-from pv_geom.pipeline.tile_task import _build_row
 
 DEFAULT_TILE = (
     Path.home() / "AppData/Local/Temp/pv_geom_cache"

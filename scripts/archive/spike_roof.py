@@ -36,12 +36,12 @@ import laspy
 import matplotlib.patheffects as pe
 import matplotlib.pyplot as plt
 import numpy as np
+from pv_geom.classify.interface import MountingFeatures
+from pv_geom.classify.rules import classify_mounting
 from pyproj import Transformer
 from shapely import contains_xy
 from shapely.geometry import box
 
-from pv_geom.classify.interface import MountingFeatures
-from pv_geom.classify.rules import classify_mounting
 from pv_geom.config import (
     HeightsConfig,
     MountingRulesConfig,

@@ -58,9 +58,9 @@ def build(name: str, polygons: str, tile: str, n: int, pad_m: float, seed: int,
     keep.to_parquet(out / "polygons.parquet")
 
     # Returns within pad_m of any sampled polygon's bounds.
-    from pv_geom.pipeline.tile_task import _NearMask
+    from pv_geom.pipeline.pointpool import NearMask
 
-    near = _NearMask(list(keep.geometry), pad_m=pad_m)
+    near = NearMask(list(keep.geometry), pad_m=pad_m)
     mask = near(np.asarray(las.x), np.asarray(las.y))
     clipped = laspy.LasData(header)
     clipped.points = las.points[mask]

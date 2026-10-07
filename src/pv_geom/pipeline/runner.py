@@ -29,7 +29,7 @@ from pv_geom.pipeline.partition import (
     assign_polygons_to_tiles,
     build_tile_groups,
 )
-from pv_geom.pipeline.tile_task import process_tile_group
+from pv_geom.pipeline.worker import process_tile_group
 from pv_geom.provenance import write_manifest
 from pv_geom.utils.crs import resolve_target_crs
 from pv_geom.vintage import GEOMETRY_BASIS, PANEL_BASES, parse_vintage

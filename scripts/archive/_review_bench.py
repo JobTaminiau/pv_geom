@@ -38,7 +38,7 @@ from shapely import wkb
 from shapely.ops import transform as shapely_transform
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _aerial import aerial_basemap                  # noqa: E402
+from _aerial import aerial_basemap  # noqa: E402
 
 _DEFAULT = "out_bench_1k"
 OUT_DIR = Path(sys.argv[1] if len(sys.argv) > 1 else _DEFAULT)

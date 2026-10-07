@@ -90,30 +90,3 @@ def _is_east_west_rack(
     az_close = az_offset < cfg.ew_rack_azimuth_tol_deg
     tilt_close = abs(primary.tilt_deg - secondary.tilt_deg) < cfg.ew_rack_tilt_tol_deg
     return bool(az_close and tilt_close)
-
-
-def is_tracker_suspected(
-    *,
-    on_building: bool,
-    aspect_ratio: float,
-    height_above_ground_m: float,
-    panel_tilt_deg: float,
-    aspect_min: float = 4.0,
-    height_above_ground_max_m: float = 2.0,
-    tilt_max_deg: float = 35.0,
-) -> bool:
-    """Per-polygon tracker heuristic (PRD §7.2 v1).
-
-    Off-building, elongated, low height-above-ground, low tilt. Sets the
-    ``tracker_suspected`` flag on the row; the more robust spatial-clustering
-    version is deferred to v1.1.
-    """
-    if on_building:
-        return False
-    if np.isnan(aspect_ratio) or np.isnan(panel_tilt_deg) or np.isnan(height_above_ground_m):
-        return False
-    return (
-        aspect_ratio >= aspect_min
-        and height_above_ground_m < height_above_ground_max_m
-        and panel_tilt_deg < tilt_max_deg
-    )

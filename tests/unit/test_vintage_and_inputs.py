@@ -97,9 +97,9 @@ def test_old_config_blocks_are_ignored() -> None:
 
 
 def _row(standoff_m: float, **kw):
-    from pv_geom.pipeline.tile_task import _build_row
+    from pv_geom.pipeline.worker import build_row
 
-    return _build_row(polygon_id="p", cfg=PVGeomConfig(), config_hash="x", run_id="r",
+    return build_row(polygon_id="p", cfg=PVGeomConfig(), config_hash="x", run_id="r",
                       partition_id=0, contributing_tile_ids=("t1",),
                       **_rooftop_scene(standoff_m=standoff_m), **kw)
 
@@ -149,11 +149,11 @@ def test_row_surface_area_exceeds_plan_area_by_cos_tilt() -> None:
 
 
 def test_open_ring_gives_a_roof_reference_without_footprints() -> None:
-    from pv_geom.pipeline.tile_task import _build_row
+    from pv_geom.pipeline.worker import build_row
 
     scene = _rooftop_scene(standoff_m=0.10)
     scene["footprints"] = None
-    row = _build_row(polygon_id="p", cfg=PVGeomConfig(), config_hash="x", run_id="r",
+    row = build_row(polygon_id="p", cfg=PVGeomConfig(), config_hash="x", run_id="r",
                      partition_id=0, contributing_tile_ids=("t1",), **scene)
     assert row["on_building"] is None            # unknown, not False
     assert row["roof_ref_source"] == "open_ring"
@@ -162,13 +162,13 @@ def test_open_ring_gives_a_roof_reference_without_footprints() -> None:
 
 
 def test_open_ring_can_be_disabled() -> None:
-    from pv_geom.pipeline.tile_task import _build_row
+    from pv_geom.pipeline.worker import build_row
 
     cfg = PVGeomConfig()
     cfg.roof_plane.open_ring = False
     scene = _rooftop_scene(standoff_m=0.10)
     scene["footprints"] = None
-    row = _build_row(polygon_id="p", cfg=cfg, config_hash="x", run_id="r",
+    row = build_row(polygon_id="p", cfg=cfg, config_hash="x", run_id="r",
                      partition_id=0, contributing_tile_ids=("t1",), **scene)
     assert row["roof_ref_source"] == "none"
     assert "standoff_unscreenable" in row["flags"]
@@ -177,12 +177,12 @@ def test_open_ring_can_be_disabled() -> None:
 def test_open_ring_with_nothing_around_is_not_a_roof_flag() -> None:
     """A ground mount has no elevated returns around it; that is 'no reference',
     not a roof-quality problem."""
-    from pv_geom.pipeline.tile_task import _build_row
+    from pv_geom.pipeline.worker import build_row
 
     rng = np.random.default_rng(0)
     xy = rng.uniform([0, 0], [10, 4], size=(400, 2))
     pts = np.column_stack([xy, 1.5 + 0.3 * xy[:, 1] + rng.normal(0, 0.01, 400)])
-    row = _build_row(polygon=box(0, 0, 10, 4), polygon_id="g", cfg=PVGeomConfig(),
+    row = build_row(polygon=box(0, 0, 10, 4), polygon_id="g", cfg=PVGeomConfig(),
                      config_hash="x", run_id="r", partition_id=0,
                      panel_pts=pts, ground_xyz=np.zeros((0, 3)), roof_input_pts=pts,
                      footprints=None,
@@ -231,7 +231,7 @@ def test_ground_model_follows_a_slope() -> None:
 def test_fallback_keeps_panels_on_a_hillside() -> None:
     """With no building class, panel candidates are class-1 returns above
     *local* ground — a rooftop at the low end of a sloping tile must survive."""
-    from pv_geom.pipeline.tile_task import _split_classes_for_tile_group
+    from pv_geom.pipeline.pointpool import split_classes
 
     rng = np.random.default_rng(3)
     gxy = rng.uniform([0, 0], [500, 500], size=(50000, 2))
@@ -240,7 +240,7 @@ def test_fallback_keeps_panels_on_a_hillside() -> None:
                            np.full(300, 2.5 + 3.0), np.full(300, 1)])     # 3 m above ground
     weeds = np.column_stack([rng.uniform([400, 400], [410, 410], size=(300, 2)),
                              np.full(300, 40.5 + 0.2), np.full(300, 1)])  # 0.2 m above ground
-    _, panel, used = _split_classes_for_tile_group(
+    _, panel, used = split_classes(
         np.concatenate([ground, low, weeds]), PVGeomConfig())
     assert used == 1
     assert len(panel) == 300 and panel[:, 0].max() < 100     # roof kept, weeds dropped
@@ -334,7 +334,7 @@ def test_partitions_are_valid_geoparquet(two_input_run: dict) -> None:
 
 def test_lidar_date_is_measured_from_gps_time_per_row(tmp_path: Path) -> None:
     """No declared LiDAR date: each row gets its own tile's flight date."""
-    from pv_geom.pipeline.tile_task import process_tile_group
+    from pv_geom.pipeline.worker import process_tile_group
 
     laz = tmp_path / "t.laz"
     _laz_flown_on(laz, date(2020, 11, 26), n=2000)
@@ -375,13 +375,13 @@ def test_data_dictionary_describes_every_column() -> None:
 
 
 def _noisy_array_row(noise_m: float, cfg: PVGeomConfig | None = None):
-    from pv_geom.pipeline.tile_task import _build_row
+    from pv_geom.pipeline.worker import build_row
 
     rng = np.random.default_rng(7)
     xy = rng.uniform([0, 0], [8, 5], size=(500, 2))
     z = 6.0 - np.tan(np.radians(30.0)) * xy[:, 1] + rng.normal(0, noise_m, 500)
     pts = np.column_stack([xy, z])
-    return _build_row(polygon=box(0, 0, 8, 5), polygon_id="n", cfg=cfg or PVGeomConfig(),
+    return build_row(polygon=box(0, 0, 8, 5), polygon_id="n", cfg=cfg or PVGeomConfig(),
                       config_hash="x", run_id="r", partition_id=0,
                       panel_pts=pts, ground_xyz=np.zeros((0, 3)), roof_input_pts=pts,
                       footprints=None,
@@ -418,9 +418,9 @@ def test_scatter_beyond_the_cap_still_fails() -> None:
 
 
 def test_near_mask_keeps_only_points_around_polygons() -> None:
-    from pv_geom.pipeline.tile_task import _NearMask
+    from pv_geom.pipeline.pointpool import NearMask
 
-    near = _NearMask([box(100, 100, 110, 110), box(500, 500, 505, 505)], pad_m=20.0)
+    near = NearMask([box(100, 100, 110, 110), box(500, 500, 505, 505)], pad_m=20.0)
     x = np.array([105.0, 125.0, 300.0, 502.0, 90.0, -1e6])
     y = np.array([105.0, 105.0, 300.0, 502.0, 85.0, 105.0])
     assert near(x, y).tolist() == [True, True, False, True, True, False]

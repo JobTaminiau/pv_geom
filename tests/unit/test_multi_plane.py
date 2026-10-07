@@ -7,9 +7,9 @@ import pytest
 from shapely.geometry import Polygon, box
 
 from pv_geom.config import MultiPlaneConfig
+from pv_geom.experimental.mounting.features import is_tracker_suspected
 from pv_geom.geometry.multi_plane import (
     detect_multi_plane,
-    is_tracker_suspected,
     polygon_aspect_ratio,
 )
 from pv_geom.geometry.plane_fit import fit_plane_ransac
@@ -111,8 +111,8 @@ def test_disabled_short_circuits() -> None:
 
 
 def test_failed_primary_skips() -> None:
-    from pv_geom.geometry.plane_fit import _failed_fit
-    primary = _failed_fit(0)
+    from pv_geom.geometry.plane_fit import failed_fit
+    primary = failed_fit(0)
     res = detect_multi_plane(np.zeros((0, 3)), primary, MultiPlaneConfig(), seed=0)
     assert res.secondary is None
 

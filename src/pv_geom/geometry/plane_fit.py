@@ -40,7 +40,7 @@ def tilt_azimuth_from_normal(
     return tilt_deg, azimuth_deg
 
 
-def _failed_fit(n_total: int) -> PlaneFit:
+def failed_fit(n_total: int) -> PlaneFit:
     return PlaneFit(
         normal=np.array([0.0, 0.0, 1.0]),
         centroid=np.zeros(3),
@@ -83,7 +83,7 @@ def fit_plane_ransac(
         raise ValueError(f"points must be (N, 3); got shape {pts.shape}")
     n = len(pts)
     if n < 3:
-        return _failed_fit(n)
+        return failed_fit(n)
 
     rng = np.random.default_rng(seed)
     best_inliers: np.ndarray | None = None
@@ -107,7 +107,7 @@ def fit_plane_ransac(
             best_inliers = in_mask
 
     if best_inliers is None or best_count < 3:
-        return _failed_fit(n)
+        return failed_fit(n)
 
     # Refine plane on inliers via PCA, then re-classify inliers and recompute RMSE.
     inliers = pts[best_inliers]
@@ -118,7 +118,7 @@ def fit_plane_ransac(
         dists = np.abs((pts - centroid) @ normal)
         best_inliers = dists < ransac_threshold
         if best_inliers.sum() < 3:
-            return _failed_fit(n)
+            return failed_fit(n)
         inliers = pts[best_inliers]
         residuals = (inliers - centroid) @ normal
     else:

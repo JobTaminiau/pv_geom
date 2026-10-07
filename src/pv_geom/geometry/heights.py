@@ -45,40 +45,6 @@ def height_above_ground(
     return float(np.median(panel_inlier_z) - np.median(ground_xyz[within][nearest, 2]))
 
 
-def ground_under_polygon(
-    panel_inlier_z: np.ndarray,
-    ground_xyz: np.ndarray,
-    polygon,
-) -> tuple[int, float]:
-    """Ground-class returns inside the polygon + vertical gap to the panel plane.
-
-    The canopy discriminator: rooftop arrays have (near) zero ground returns
-    inside their polygon because the building blocks the pulse; open-sided
-    canopies (carports, pole mounts) let LiDAR reach the ground through and
-    around the panels; ground mounts have ground directly below with a
-    sub-metre gap. Returns ``(n_under, gap_m)`` where ``gap_m`` is median
-    panel-inlier z minus median under-polygon ground z (NaN when either side
-    is empty).
-    """
-    from shapely import contains_xy
-
-    if len(ground_xyz) == 0 or polygon is None or polygon.is_empty:
-        return 0, float("nan")
-    minx, miny, maxx, maxy = polygon.bounds
-    bbox_mask = (
-        (ground_xyz[:, 0] >= minx) & (ground_xyz[:, 0] <= maxx)
-        & (ground_xyz[:, 1] >= miny) & (ground_xyz[:, 1] <= maxy)
-    )
-    if not bbox_mask.any():
-        return 0, float("nan")
-    candidates = ground_xyz[bbox_mask]
-    inside = contains_xy(polygon, candidates[:, 0], candidates[:, 1])
-    n_under = int(inside.sum())
-    if n_under == 0 or len(panel_inlier_z) == 0:
-        return n_under, float("nan")
-    return n_under, float(np.median(panel_inlier_z) - np.median(candidates[inside, 2]))
-
-
 def height_above_roof(
     panel_inlier_xyz: np.ndarray,
     roof_plane: PlaneFit,

@@ -31,12 +31,12 @@ from __future__ import annotations
 
 import math
 
-from pv_geom.classify.interface import (
+from pv_geom.config import MountingRulesConfig
+from pv_geom.experimental.mounting.interface import (
     MountingClassifier,
     MountingFeatures,
     MountingResult,
 )
-from pv_geom.config import MountingRulesConfig
 
 
 def _is_nan(x: float | None) -> bool:

@@ -54,6 +54,6 @@ def read_footprints(
 
     if bbox is not None:
         x0, y0, x1, y1 = bbox
-        gdf = gdf.cx[x0:x1, y0:y1]
+        gdf = gdf.cx[slice(x0, x1), slice(y0, y1)]
 
     return gdf.reset_index(drop=True)

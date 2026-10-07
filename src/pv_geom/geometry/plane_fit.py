@@ -198,10 +198,7 @@ def bootstrap_uncertainty(
     if len(sin_az) > 1:
         # Mardia circular std: σ = sqrt(-2 * ln R), R is mean resultant length.
         r = float(np.hypot(np.mean(cos_az), np.mean(sin_az)))
-        if r > 0:
-            azimuth_unc = float(np.degrees(np.sqrt(-2.0 * np.log(r))))
-        else:
-            azimuth_unc = float("nan")
+        azimuth_unc = float(np.degrees(np.sqrt(-2.0 * np.log(r)))) if r > 0 else float("nan")
     else:
         azimuth_unc = float("nan")
     return tilt_unc, azimuth_unc

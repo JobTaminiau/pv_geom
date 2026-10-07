@@ -15,7 +15,8 @@ import sys
 GATES: list[tuple[str, list[str]]] = [
     ("lint", ["ruff", "check", "src", "tests", "scripts"]),
     ("types", ["mypy", "src"]),
-    ("tests + benchmarks", ["pytest", "-q", "-m", "not integration"]),
+    ("tests + benchmarks", ["pytest", "-q", "-m", "not integration",
+                            "--cov=pv_geom", "--cov-fail-under=88"]),
 ]
 
 

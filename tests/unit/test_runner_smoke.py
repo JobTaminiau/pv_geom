@@ -8,11 +8,10 @@ and verifies the output schema + the recovered tilt/azimuth + mounting label.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 
 import geopandas as gpd
-import laspy
 import numpy as np
 import pyarrow.parquet as pq
 import pytest
@@ -22,127 +21,11 @@ from pv_geom.config import PVGeomConfig
 from pv_geom.pipeline.runner import run_pipeline
 from pv_geom.schema import OUTPUT_SCHEMA, OUTPUT_SCHEMA_WITH_MOUNTING
 
-
-def _mounting_cfg() -> PVGeomConfig:
-    """Config with the archived (experimental) mounting classifier switched on."""
-    cfg = PVGeomConfig()
-    cfg.mounting_rules.enabled = True
-    return cfg
-
-
-def _write_synthetic_laz(
-    path: Path,
-    *,
-    tile_extent: tuple[float, float, float, float] = (0.0, 0.0, 100.0, 100.0),
-    panel_extent: tuple[float, float, float, float] = (40.0, 40.0, 50.0, 50.0),
-    panel_tilt_deg: float = 20.0,
-    panel_az_deg: float = 180.0,
-    roof_z0: float = 5.0,
-    panel_z0: float = 5.5,
-    seed: int = 0,
-) -> None:
-    """Synthesize a LAZ tile with class-2 ground + class-6 roof + class-6 panel.
-    The panel is a planar surface tilted as specified, parked above the roof."""
-    rng = np.random.default_rng(seed)
-
-    def _plane_z(xy, tilt_deg, az_deg, z_at_centroid, centroid_xy):
-        """Plane z(x,y) such that z(centroid_xy) == z_at_centroid."""
-        t = np.radians(tilt_deg)
-        a = np.radians(az_deg)
-        nx, ny, nz = np.sin(t) * np.sin(a), np.sin(t) * np.cos(a), np.cos(t)
-        cx, cy = centroid_xy
-        return z_at_centroid - (nx * (xy[:, 0] - cx) + ny * (xy[:, 1] - cy)) / nz
-
-    # Ground (class 2): scattered points across the tile at z=0, but NONE
-    # inside the building footprint — LiDAR cannot see the ground through a
-    # roof, and unphysical under-roof ground returns would (correctly) trip
-    # the canopy-evidence detector and reroute the rooftop label.
-    bx0, by0, bx1, by1 = 35.0, 35.0, 65.0, 65.0
-    n_ground = 5_000
-    g_xy = rng.uniform(
-        [tile_extent[0], tile_extent[1]],
-        [tile_extent[2], tile_extent[3]],
-        size=(n_ground, 2),
-    )
-    under_building = (
-        (g_xy[:, 0] >= bx0) & (g_xy[:, 0] <= bx1)
-        & (g_xy[:, 1] >= by0) & (g_xy[:, 1] <= by1)
-    )
-    g_xy = g_xy[~under_building]
-    ground = np.column_stack([g_xy, np.zeros(len(g_xy)), np.full(len(g_xy), 2)])
-
-    # Roof (class 6) inside a 30x30m building; planar, low-tilt south
-    bcx, bcy = (bx0 + bx1) / 2, (by0 + by1) / 2
-    n_roof = 4_000
-    r_xy = rng.uniform([bx0, by0], [bx1, by1], size=(n_roof, 2))
-    r_z = _plane_z(r_xy, 5.0, 180.0, roof_z0, (bcx, bcy)) + rng.normal(0, 0.01, n_roof)
-    roof = np.column_stack([r_xy, r_z, np.full(n_roof, 6)])
-
-    # Panel (class 6) above the roof; tilted at panel_tilt_deg facing panel_az_deg
-    n_panel = 800
-    pcx, pcy = (panel_extent[0] + panel_extent[2]) / 2, (panel_extent[1] + panel_extent[3]) / 2
-    p_xy = rng.uniform(
-        [panel_extent[0], panel_extent[1]],
-        [panel_extent[2], panel_extent[3]],
-        size=(n_panel, 2),
-    )
-    p_z = _plane_z(p_xy, panel_tilt_deg, panel_az_deg, panel_z0, (pcx, pcy)) + rng.normal(0, 0.01, n_panel)
-    panel = np.column_stack([p_xy, p_z, np.full(n_panel, 6)])
-
-    pts = np.concatenate([ground, roof, panel])
-
-    header = laspy.LasHeader(point_format=6, version="1.4")
-    header.scales = np.array([0.001, 0.001, 0.001])
-    las = laspy.LasData(header)
-    las.x = pts[:, 0]
-    las.y = pts[:, 1]
-    las.z = pts[:, 2]
-    las.classification = pts[:, 3].astype(np.uint8)
-    las.write(str(path))
-
-
-@pytest.fixture
-def synth_inputs(tmp_path: Path) -> dict[str, Path]:
-    """Build an end-to-end synthetic dataset under tmp_path."""
-    laz = tmp_path / "tile.laz"
-    _write_synthetic_laz(laz)
-
-    polygons = gpd.GeoDataFrame(
-        {"polygon_id": ["panel_1"]},
-        geometry=[box(40.0, 40.0, 50.0, 50.0)],
-        crs="EPSG:6341",
-    )
-    polygons_path = tmp_path / "polys.parquet"
-    polygons.to_parquet(polygons_path)
-
-    footprints = gpd.GeoDataFrame(
-        {"building_id": ["b1"]},
-        geometry=[box(35.0, 35.0, 65.0, 65.0)],
-        crs="EPSG:6341",
-    )
-    footprints_path = tmp_path / "fp.parquet"
-    footprints.to_parquet(footprints_path)
-
-    tindex = gpd.GeoDataFrame(
-        {"Name": ["t1"]},
-        geometry=[box(0.0, 0.0, 100.0, 100.0)],
-        crs="EPSG:6341",
-    )
-    tindex_path = tmp_path / "tindex.parquet"
-    tindex.to_parquet(tindex_path)
-
-    out_dir = tmp_path / "out"
-    return {
-        "polygons": polygons_path,
-        "footprints": footprints_path,
-        "tindex": tindex_path,
-        "laz_dir": tmp_path,
-        "out": out_dir,
-    }
+from .scenes import laz_flown_on, mounting_cfg, rooftop_scene, write_synthetic_laz
 
 
 def test_runner_end_to_end(synth_inputs: dict[str, Path]) -> None:
-    cfg = _mounting_cfg()
+    cfg = mounting_cfg()
     # Synthetic LAZ has class 6, so primary class is used; HAG threshold relaxed
     cfg.compute.backend = "local"
 
@@ -339,7 +222,7 @@ def test_build_row_carport_from_under_panel_returns() -> None:
     others = gpd.GeoDataFrame(geometry=[], crs="EPSG:6341")
 
     row = build_row(
-        polygon=poly, polygon_id="c1", cfg=_mounting_cfg(), config_hash="x",
+        polygon=poly, polygon_id="c1", cfg=mounting_cfg(), config_hash="x",
         run_id="r", partition_id=0,
         panel_pts=panel_pts, ground_xyz=ground, roof_input_pts=panel_pts,
         footprints=footprints, other_pv_polygons=others,
@@ -371,7 +254,7 @@ def test_build_row_nan_hag_stays_unknown() -> None:
     others = gpd.GeoDataFrame(geometry=[], crs="EPSG:6341")
 
     row = build_row(
-        polygon=poly, polygon_id="u1", cfg=_mounting_cfg(), config_hash="x",
+        polygon=poly, polygon_id="u1", cfg=mounting_cfg(), config_hash="x",
         run_id="r", partition_id=0,
         panel_pts=panel_pts, ground_xyz=ground, roof_input_pts=panel_pts,
         footprints=footprints, other_pv_polygons=others,
@@ -381,48 +264,13 @@ def test_build_row_nan_hag_stays_unknown() -> None:
     assert row["mounting_type"] == "ambiguous"
 
 
-def _rooftop_scene(standoff_m: float) -> dict:
-    """A pitched roof with a polygon on it, panels ``standoff_m`` above the
-    roof surface. standoff 0 reproduces the case where the detection's panels
-    were absent from the point cloud and RANSAC can only fit the bare roof.
-    """
-    rng = np.random.default_rng(7)
-    footprint = box(-10.0, -10.0, 20.0, 20.0)
-    panel_poly = box(0.0, 0.0, 6.0, 4.0)
-    slope = np.tan(np.radians(20.0))          # 20 deg, facing -y (south)
-
-    def roof_z(xy: np.ndarray) -> np.ndarray:
-        return 6.0 - slope * (xy[:, 1] - 5.0)
-
-    r_xy = rng.uniform([-10.0, -10.0], [20.0, 20.0], size=(6000, 2))
-    roof_pts = np.column_stack([r_xy, roof_z(r_xy) + rng.normal(0, 0.01, len(r_xy))])
-    p_xy = rng.uniform([0.0, 0.0], [6.0, 4.0], size=(600, 2))
-    panel_pts = np.column_stack(
-        [p_xy, roof_z(p_xy) + standoff_m + rng.normal(0, 0.01, len(p_xy))]
-    )
-    # Ground only outside the building — LiDAR cannot see through a roof.
-    g_xy = rng.uniform([-60.0, -60.0], [60.0, 60.0], size=(4000, 2))
-    keep = (g_xy[:, 0] < -12) | (g_xy[:, 0] > 22) | (g_xy[:, 1] < -12) | (g_xy[:, 1] > 22)
-    ground = np.column_stack([g_xy[keep], np.zeros(keep.sum())])
-    return {
-        "polygon": panel_poly,
-        "panel_pts": panel_pts,
-        "roof_input_pts": np.vstack([roof_pts, panel_pts]),
-        "ground_xyz": ground,
-        "footprints": gpd.GeoDataFrame(
-            {"building_id": ["b1"]}, geometry=[footprint], crs="EPSG:6341"
-        ),
-        "other_pv_polygons": gpd.GeoDataFrame(geometry=[], crs="EPSG:6341"),
-    }
-
-
 def test_build_row_flags_no_panel_standoff_when_panels_absent() -> None:
     """Imagery postdating the LiDAR: the polygon is real but its panels were
     not in the cloud, so the "panel" plane is the bare roof. The row still
     looks like a clean flush mount, so it must carry `no_panel_standoff`."""
     from pv_geom.pipeline.worker import build_row
 
-    scene = _rooftop_scene(standoff_m=0.0)
+    scene = rooftop_scene(standoff_m=0.0)
     row = build_row(
         polygon_id="v0", cfg=PVGeomConfig(), config_hash="x", run_id="r",
         partition_id=0, contributing_tile_ids=("t1",), **scene,
@@ -436,7 +284,7 @@ def test_build_row_no_standoff_flag_for_real_flush_array() -> None:
     resolvably above it, so the flag must stay off."""
     from pv_geom.pipeline.worker import build_row
 
-    scene = _rooftop_scene(standoff_m=0.10)
+    scene = rooftop_scene(standoff_m=0.10)
     row = build_row(
         polygon_id="v1", cfg=PVGeomConfig(), config_hash="x", run_id="r",
         partition_id=0, contributing_tile_ids=("t1",), **scene,
@@ -462,7 +310,7 @@ def test_failed_tile_group_does_not_abort_run(tmp_path: Path) -> None:
     import json
 
     good_laz = tmp_path / "good.laz"
-    _write_synthetic_laz(good_laz)
+    write_synthetic_laz(good_laz)
     bad_laz = tmp_path / "bad.laz"
     bad_laz.write_bytes(b"this is not a LAZ file")
 
@@ -511,7 +359,7 @@ def test_failed_tile_group_does_not_abort_run(tmp_path: Path) -> None:
     assert len(manifest["aggregate_stats"]["task_errors"]) == 1
 
     # Fix the bad tile; --resume retries only the failed group.
-    _write_synthetic_laz(
+    write_synthetic_laz(
         bad_laz,
         tile_extent=(100.0, 0.0, 200.0, 100.0),
         panel_extent=(140.0, 40.0, 150.0, 50.0),
@@ -576,7 +424,7 @@ def test_standoff_screen_states_are_mutually_exclusive() -> None:
     from pv_geom.pipeline.worker import build_row
 
     for standoff, expect in ((0.0, "no_panel_standoff"), (0.10, None)):
-        scene = _rooftop_scene(standoff_m=standoff)
+        scene = rooftop_scene(standoff_m=standoff)
         row = build_row(
             polygon_id=f"s{standoff}", cfg=PVGeomConfig(), config_hash="x",
             run_id="r", partition_id=0, contributing_tile_ids=("t1",), **scene,
@@ -591,13 +439,13 @@ def test_absent_panels_do_not_earn_full_confidence() -> None:
     labelled a flush mount, but must not outrank a measured one."""
     from pv_geom.pipeline.worker import build_row
 
-    cfg = _mounting_cfg()
+    cfg = mounting_cfg()
     absent = build_row(polygon_id="c0", cfg=cfg, config_hash="x", run_id="r",
                         partition_id=0, contributing_tile_ids=("t1",),
-                        **_rooftop_scene(standoff_m=0.0))
+                        **rooftop_scene(standoff_m=0.0))
     real = build_row(polygon_id="c1", cfg=cfg, config_hash="x", run_id="r",
                       partition_id=0, contributing_tile_ids=("t1",),
-                      **_rooftop_scene(standoff_m=0.10))
+                      **rooftop_scene(standoff_m=0.10))
 
     assert absent["mounting_type"].startswith("flush_mount")
     assert real["mounting_type"].startswith("flush_mount")
@@ -610,39 +458,13 @@ def test_absent_panels_do_not_earn_full_confidence() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def _laz_flown_on(path, flight, n: int = 200) -> None:
-    import laspy
-
-    from pv_geom.io.lidar import (
-        _GPS_EPOCH,
-        _GPS_UTC_LEAP_SECONDS,
-        _LAS_GPS_TIME_OFFSET,
-    )
-
-    rng = np.random.default_rng(0)
-    header = laspy.LasHeader(point_format=6, version="1.4")
-    header.scales = np.array([0.001, 0.001, 0.001])
-    header.offsets = np.array([0.0, 0.0, 0.0])
-    las = laspy.LasData(header)
-    las.x = rng.uniform(0, 10, size=n)
-    las.y = rng.uniform(0, 10, size=n)
-    las.z = rng.uniform(0, 5, size=n)
-    las.classification = np.full(n, 6, dtype=np.uint8)
-    secs = (
-        (datetime.combine(flight, datetime.min.time()) - _GPS_EPOCH).total_seconds()
-        + _GPS_UTC_LEAP_SECONDS - _LAS_GPS_TIME_OFFSET
-    )
-    las.gps_time = np.full(n, secs)
-    las.write(str(path))
-
-
 def test_probe_lidar_vintage_reports_gap_when_input_postdates_lidar(tmp_path) -> None:
     """The Phoenix pairing: 2024 imagery against a 2020 flight. The run must
     measure the LiDAR side itself and record the gap in the manifest."""
     from pv_geom.pipeline.vintage_check import probe_lidar_vintage as _probe_lidar_vintage
 
     p = tmp_path / "t.laz"
-    _laz_flown_on(p, date(2020, 11, 26))
+    laz_flown_on(p, date(2020, 11, 26))
     cfg = PVGeomConfig()
     cfg.vintage.polygon_vintage = date(2024, 4, 1)
 
@@ -658,7 +480,7 @@ def test_probe_lidar_vintage_no_warning_when_cotemporal(tmp_path) -> None:
     from pv_geom.pipeline.vintage_check import probe_lidar_vintage as _probe_lidar_vintage
 
     p = tmp_path / "t.laz"
-    _laz_flown_on(p, date(2024, 6, 1))
+    laz_flown_on(p, date(2024, 6, 1))
     cfg = PVGeomConfig()
     cfg.vintage.polygon_vintage = date(2024, 4, 1)
 
@@ -672,7 +494,7 @@ def test_probe_lidar_vintage_survives_unreadable_tiles(tmp_path) -> None:
     from pv_geom.pipeline.vintage_check import probe_lidar_vintage as _probe_lidar_vintage
 
     good = tmp_path / "good.laz"
-    _laz_flown_on(good, date(2020, 11, 26))
+    laz_flown_on(good, date(2020, 11, 26))
     bad = tmp_path / "bad.laz"
     bad.write_bytes(b"not a laz file")
 

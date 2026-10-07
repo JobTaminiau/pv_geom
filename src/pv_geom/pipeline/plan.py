@@ -202,9 +202,9 @@ def find_missing_tiles(pending: list[PendingGroup], plan: Plan, *, prewarm: bool
     root = prefix.rstrip("/") + "/"
     for _, g in pending:
         for t in g.fetch_tile_ids:
-            uri = uri_map.get(t)
-            if uri and uri.startswith(root) and uri not in available:
-                missing.add(uri)
+            tile_uri = uri_map.get(t)
+            if tile_uri and tile_uri.startswith(root) and tile_uri not in available:
+                missing.add(tile_uri)
     if missing:
         log.info("%d indexed tiles have no LAZ under %s; dropping them up front",
                  len(missing), prefix)

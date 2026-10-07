@@ -98,10 +98,8 @@ def _scene(rng: np.random.Generator) -> tuple[np.ndarray, list]:
         in_panel = ((rxy[:, 0] >= px0) & (rxy[:, 0] <= px0 + PANEL[2])
                     & (rxy[:, 1] >= py0) & (rxy[:, 1] <= py0 + PANEL[3]))
         roof_z = _plane(rxy, a.roof_tilt, a.roof_az, base + 6.0, centre)
-        if a.kind == "bare_roof":
-            keep = np.ones(n_roof, dtype=bool)          # roof returns under the polygon too
-        else:
-            keep = ~in_panel                            # the array hides the roof beneath it
+        # A bare roof has returns under the polygon too; an array hides the roof beneath it.
+        keep = np.ones(n_roof, dtype=bool) if a.kind == "bare_roof" else ~in_panel
         pts.append(np.column_stack([rxy[keep], roof_z[keep] + rng.normal(0, a.noise, int(keep.sum())),
                                     np.full(int(keep.sum()), 1)]))
         if a.kind == "bare_roof":

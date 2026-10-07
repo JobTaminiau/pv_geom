@@ -6,13 +6,24 @@ on:
   pull_request:
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.12"]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
       - run: uv sync --extra dev
-      - run: uv run ruff check .
-      - run: uv run pytest -m "not integration"
+      - name: Lint
+        run: uv run ruff check src tests scripts
+      - name: Types
+        run: uv run mypy src
+      # Unit tests plus the synthetic regression benchmark. The real-data
+      # benchmarks need unpublished inputs and skip themselves here.
+      - name: Tests
+        run: uv run pytest -m "not integration" --cov=pv_geom --cov-fail-under=88

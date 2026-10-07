@@ -49,3 +49,7 @@ out_*/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Test artefacts
+.coverage
+htmlcov/

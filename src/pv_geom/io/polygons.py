@@ -66,6 +66,7 @@ def read_polygons(
 
     # Settle the id column.
     lower = {c.lower(): c for c in gdf.columns}
+    source: str | None
     if id_col is not None:
         if id_col not in gdf.columns:
             raise ValueError(f"polygon layer has no '{id_col}' column")
@@ -95,7 +96,7 @@ def read_polygons(
     gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty]
     if bbox is not None:
         x0, y0, x1, y1 = bbox
-        gdf = gdf.cx[x0:x1, y0:y1]
+        gdf = gdf.cx[slice(x0, x1), slice(y0, y1)]
 
     gdf = gdf.assign(parent_polygon_id=gdf["polygon_id"])
     if explode_multipolygons:

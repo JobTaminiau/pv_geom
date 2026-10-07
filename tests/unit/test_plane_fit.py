@@ -56,7 +56,7 @@ def synthesize_plane(
         pts = pts + rng.normal(0.0, noise_m, size=n)[:, None] * n_truth
 
     if outlier_frac > 0:
-        n_out = int(round(n * outlier_frac))
+        n_out = round(n * outlier_frac)
         out_idx = rng.choice(n, size=n_out, replace=False)
         pts[out_idx] = rng.uniform(
             -outlier_scale_m, outlier_scale_m, size=(n_out, 3)

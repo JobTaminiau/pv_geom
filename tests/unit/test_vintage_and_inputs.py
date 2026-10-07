@@ -28,7 +28,7 @@ from pv_geom.vintage import (
     vintage_gap_days,
 )
 
-from .test_runner_smoke import _laz_flown_on, _rooftop_scene, _write_synthetic_laz
+from .scenes import laz_flown_on, rooftop_scene, write_synthetic_laz
 
 # --------------------------------------------------------------------------- #
 # Vintage parsing + geometry basis
@@ -101,7 +101,7 @@ def _row(standoff_m: float, **kw):
 
     return build_row(polygon_id="p", cfg=PVGeomConfig(), config_hash="x", run_id="r",
                       partition_id=0, contributing_tile_ids=("t1",),
-                      **_rooftop_scene(standoff_m=standoff_m), **kw)
+                      **rooftop_scene(standoff_m=standoff_m), **kw)
 
 
 def test_row_panel_confirmed_despite_newer_polygons() -> None:
@@ -151,7 +151,7 @@ def test_row_surface_area_exceeds_plan_area_by_cos_tilt() -> None:
 def test_open_ring_gives_a_roof_reference_without_footprints() -> None:
     from pv_geom.pipeline.worker import build_row
 
-    scene = _rooftop_scene(standoff_m=0.10)
+    scene = rooftop_scene(standoff_m=0.10)
     scene["footprints"] = None
     row = build_row(polygon_id="p", cfg=PVGeomConfig(), config_hash="x", run_id="r",
                      partition_id=0, contributing_tile_ids=("t1",), **scene)
@@ -166,7 +166,7 @@ def test_open_ring_can_be_disabled() -> None:
 
     cfg = PVGeomConfig()
     cfg.roof_plane.open_ring = False
-    scene = _rooftop_scene(standoff_m=0.10)
+    scene = rooftop_scene(standoff_m=0.10)
     scene["footprints"] = None
     row = build_row(polygon_id="p", cfg=cfg, config_hash="x", run_id="r",
                      partition_id=0, contributing_tile_ids=("t1",), **scene)
@@ -274,7 +274,7 @@ def test_non_metric_crs_is_refused() -> None:
 @pytest.fixture
 def two_input_run(tmp_path: Path) -> dict:
     laz = tmp_path / "tile.laz"
-    _write_synthetic_laz(laz)
+    write_synthetic_laz(laz)
     polys = gpd.GeoDataFrame(geometry=[box(40.0, 40.0, 50.0, 50.0)], crs="EPSG:6341")
     polys_path = tmp_path / "polys.geojson"
     polys.to_crs("EPSG:4326").to_file(polys_path, driver="GeoJSON")
@@ -337,7 +337,7 @@ def test_lidar_date_is_measured_from_gps_time_per_row(tmp_path: Path) -> None:
     from pv_geom.pipeline.worker import process_tile_group
 
     laz = tmp_path / "t.laz"
-    _laz_flown_on(laz, date(2020, 11, 26), n=2000)
+    laz_flown_on(laz, date(2020, 11, 26), n=2000)
     polys = gpd.GeoDataFrame({"polygon_id": ["a"]}, geometry=[box(1, 1, 9, 9)],
                              crs="EPSG:6341")
     table = process_tile_group(

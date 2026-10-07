@@ -70,7 +70,7 @@ def ensure_software_env(rebuild: bool = False) -> str:
     return SOFTWARE_ENV
 
 
-def make_cluster(cfg: PVGeomConfig) -> "Cluster":
+def make_cluster(cfg: PVGeomConfig) -> Cluster:
     """Spin up a Coiled cluster from ``cfg.compute.coiled``.
 
     The caller is responsible for using the cluster as a context manager (or

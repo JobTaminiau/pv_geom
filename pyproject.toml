@@ -66,16 +66,41 @@ packages = ["src/pv_geom"]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
-extend-exclude = [".venv", "build", "dist"]
+extend-exclude = [".venv", "build", "dist", "scripts/archive"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
-ignore = ["E501"]
+ignore = [
+    "E501",     # line length is a guideline here, not a gate
+    "RUF001",   # report text and axis labels use real typography on purpose:
+    "RUF002",   #   degree signs, en dashes, sigma
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"src/pv_geom/cli.py" = ["B008"]     # typer.Option(...) in defaults is how Typer works
 
 [tool.mypy]
 python_version = "3.11"
 strict = false
 warn_unused_ignores = true
+warn_redundant_casts = true
+check_untyped_defs = true
+
+# Third-party packages that ship no type information.
+[[tool.mypy.overrides]]
+module = [
+    "geopandas.*", "shapely.*", "pyarrow.*", "pandas.*", "laspy.*", "pyproj.*",
+    "yaml.*", "fsspec.*", "boto3.*", "botocore.*", "dask.*", "distributed.*",
+    "coiled.*", "pdal.*", "matplotlib.*",
+]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+# Archived code: kept runnable and tested, not held to the typing gate.
+[[tool.mypy.overrides]]
+module = "pv_geom.experimental.*"
+ignore_errors = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -100,12 +100,11 @@ def output_crs(output_uri: str | Path, manifest: dict | None = None) -> str | No
         return str(crs)
     parts, fs = _list_parts(str(output_uri))
     if parts:
-        src = fs.open(parts[0], "rb") if fs is not None else parts[0]
-        try:
-            md = pq.read_schema(src).metadata or {}
-        finally:
-            if fs is not None:
-                src.close()
+        if fs is not None:
+            with fs.open(parts[0], "rb") as f:
+                md = pq.read_schema(f).metadata or {}
+        else:
+            md = pq.read_schema(parts[0]).metadata or {}
         if b"geo" in md:
             from pyproj import CRS
 

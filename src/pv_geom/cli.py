@@ -33,7 +33,7 @@ def _root(
 @app.command()
 def version() -> None:
     """Print the package version."""
-    console.print(f"pv-geom v{__version__}")
+    typer.echo(f"pv-geom v{__version__}")
 
 
 @app.command("validate-config")
@@ -134,7 +134,7 @@ def run(
         tile_id_col=tile_id_col,
         polygon_id_col=polygon_id_col,
         max_polygons=max_polygons,
-        bbox=tuple(bbox) if bbox else None,
+        bbox=(bbox[0], bbox[1], bbox[2], bbox[3]) if bbox else None,
         dry_run=dry_run,
         resume=resume,
         use_dask=not no_dask,
@@ -199,7 +199,7 @@ def inspect_tile(
 
     info = _inspect(tile)
     if as_json:
-        console.print_json(json.dumps(info))
+        typer.echo(json.dumps(info, indent=2))      # plain: this is for machines
         return
     t = Table(show_header=False)
     for k, v in info.items():

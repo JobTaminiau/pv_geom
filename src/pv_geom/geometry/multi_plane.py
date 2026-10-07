@@ -60,7 +60,7 @@ def detect_multi_plane(
         return MultiPlaneResult(primary=primary, secondary=None, flags=())
 
     non_inliers = pts[~primary.inlier_mask]
-    secondary_min = max(int(round(cfg.secondary_min_frac * primary.n_total)), 10)
+    secondary_min = max(round(cfg.secondary_min_frac * primary.n_total), 10)
     if len(non_inliers) < secondary_min:
         return MultiPlaneResult(primary=primary, secondary=None, flags=())
 

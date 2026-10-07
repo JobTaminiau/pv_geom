@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import math
 
 import pytest
@@ -34,7 +35,7 @@ def test_conf_le_far_above_is_zero() -> None:
 
 def test_conf_le_monotonic() -> None:
     xs = [_conf_le(v, 5.0, 0.5) for v in [2, 3, 4, 5, 6, 7, 8]]
-    assert all(b <= a for a, b in zip(xs, xs[1:]))
+    assert all(b <= a for a, b in itertools.pairwise(xs))
 
 
 def test_conf_ge_symmetric() -> None:

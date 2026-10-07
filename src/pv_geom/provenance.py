@@ -15,7 +15,7 @@ def write_manifest(
     *,
     config_dict: dict[str, Any],
     config_hash: str,
-    inputs: dict[str, str],
+    inputs: dict[str, str | None],
     cluster_spec: dict[str, Any],
     counts: dict[str, int],
     aggregate_stats: dict[str, Any],

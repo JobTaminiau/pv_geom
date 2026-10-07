@@ -267,7 +267,7 @@ def measure_polygon(
         fallback_k=cfg.heights.ground_fallback_k,
         fallback_max_radius_m=cfg.heights.ground_fallback_max_radius_m,
     )
-    if roof.usable:
+    if roof.usable and roof.fit is not None:
         har = height_above_roof(inliers, roof.fit) if len(inliers) else NAN
         angle = panel_roof_angle_deg(fit, roof.fit)
     else:

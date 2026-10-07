@@ -160,7 +160,7 @@ def extract_roof_plane(
     has_layer = building_footprints is not None
     footprint = None
     bid = None
-    if has_layer and len(building_footprints):
+    if building_footprints is not None and len(building_footprints):
         idx = list(building_footprints.sindex.query(pv_polygon, predicate="intersects"))
         candidates = building_footprints.iloc[idx]
         if len(candidates):

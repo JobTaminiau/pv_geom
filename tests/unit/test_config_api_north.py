@@ -401,3 +401,103 @@ def test_estimate_scales_with_data_and_prices_coiled_runs() -> None:
     assert serial["wall_seconds"] == pytest.approx(work, abs=1)       # one worker
     assert coiled["wall_seconds"] > local["wall_seconds"]             # cluster start-up
     assert coiled["usd"] == pytest.approx(2 * coiled["wall_seconds"] / 3600 * 0.10, abs=0.01)
+
+
+# --------------------------------------------------------------------------- #
+# D3: LiDAR in feet, or in another CRS than the run's
+# --------------------------------------------------------------------------- #
+
+def _demo_in(crs: str, src: Path, dst: Path) -> Path:
+    """The demo study area with its LiDAR tile rewritten into ``crs``,
+    horizontal and vertical both in that CRS's unit."""
+    import shutil
+
+    import laspy
+
+    from pv_geom.utils.crs import horizontal
+
+    shutil.copytree(src, dst)
+    tile = dst / "inputs" / "bench.laz"
+    las = laspy.read(str(tile))
+    target = CRS.from_user_input(crs)
+    to_m = horizontal(target).axis_info[0].unit_conversion_factor
+    x, y = Transformer.from_crs(las.header.parse_crs(), target, always_xy=True).transform(
+        np.asarray(las.x), np.asarray(las.y))
+    header = laspy.LasHeader(point_format=6, version="1.4")
+    header.scales = np.array([0.001, 0.001, 0.001])
+    header.offsets = np.array([float(x.min()), float(y.min()), 0.0])
+    header.add_crs(target)
+    out = laspy.LasData(header)
+    out.x, out.y, out.z = x, y, np.asarray(las.z) / to_m
+    out.classification = np.asarray(las.classification)
+    out.gps_time = np.asarray(las.gps_time)
+    tile.unlink()
+    out.write(str(tile))
+    return dst / "demo.yaml"
+
+
+@pytest.mark.parametrize("crs", ["EPSG:2223", "EPSG:2230", "EPSG:6340"],
+                         ids=["state-plane-TM-intl-ft", "state-plane-Lambert-US-ft",
+                              "other-UTM-zone-m"])
+def test_lidar_in_feet_or_another_crs_measures_the_same(crs: str, tmp_path: Path) -> None:
+    """The acceptance test for D3: the same scene delivered in a foot-based
+    State Plane CRS (Transverse Mercator and Lambert) or a different metric
+    zone gives the same tilt and the same true azimuth."""
+    from pv_geom.sample import write_demo
+
+    base = pv_geom.run(write_demo(tmp_path / "metric"), use_dask=False)
+    other = pv_geom.run(_demo_in(crs, tmp_path / "metric", tmp_path / "other"), use_dask=False)
+
+    a = base.load().set_index("polygon_id")
+    b = other.load().set_index("polygon_id").loc[a.index]
+    assert list(a["status"]) == list(b["status"])
+    assert CRS.from_user_input(b.crs).axis_info[0].unit_name == "metre"
+    ok = a["panel_tilt_deg"].notna().to_numpy()
+    assert ok.sum() >= 5
+    # The points land on a different grid (rotated by the convergence, rounded
+    # to the tile's own millimetre), so the returns inside each polygon and the
+    # RANSAC draws differ slightly: agreement is close, not bit-exact. The two
+    # non-native cases also work in a UTM zone the scene lies outside of, whose
+    # grid scale (about 1.001 there) shifts tilt by a few hundredths of a degree;
+    # the in-zone foot case agrees to a thousandth.
+    d_tilt = np.abs(a["panel_tilt_deg"] - b["panel_tilt_deg"])[ok]
+    assert d_tilt.median() < 0.08 and d_tilt.max() < 0.6
+    if crs == "EPSG:2223":
+        assert d_tilt.max() < 0.01
+    both = ok & a["panel_azimuth_deg"].notna().to_numpy() & b["panel_azimuth_deg"].notna().to_numpy()
+    d_az = np.abs((a["panel_azimuth_deg"] - b["panel_azimuth_deg"] + 180.0) % 360.0 - 180.0)[both]
+    assert d_az.median() < 0.2 and d_az.max() < 1.5
+    for col in ("height_above_ground_m", "area_m2"):
+        assert np.allclose(a[col][ok], b[col][ok], rtol=0.02, atol=0.02), col
+    # An array sitting at the standoff threshold can fall either side of it.
+    changed = int((a["geometry_basis"] != b["geometry_basis"]).sum())
+    assert changed <= (0 if crs == "EPSG:2223" else 1)
+
+
+def test_foot_based_lidar_run_records_the_conversion(tmp_path: Path) -> None:
+    from pv_geom.io.output import read_manifest
+    from pv_geom.sample import write_demo
+
+    write_demo(tmp_path / "metric")
+    run = pv_geom.run(_demo_in("EPSG:2223", tmp_path / "metric", tmp_path / "ft"),
+                      use_dask=False)
+    manifest = read_manifest(run.output)
+    converted = manifest["vintage"]["lidar_converted_on_read"]
+    (what,) = converted.values()
+    assert "horizontal" in what and "heights foot -> metre" in what
+    assert manifest["crs"] != "EPSG:2223"
+
+
+def test_metric_equivalent_and_point_conversion() -> None:
+    from pv_geom.utils.crs import metric_equivalent, to_run_crs
+
+    assert CRS.from_user_input(metric_equivalent("EPSG:2223")).axis_info[0].unit_name == "metre"
+    pts = np.array([[100.0, 200.0, 30.0, 1.0]])
+    same, what = to_run_crs(pts, "EPSG:6341", "EPSG:6341")
+    assert what is None and same is pts
+    untouched, what = to_run_crs(pts, None, "EPSG:6341")
+    assert what is None and untouched is pts
+    x, y = Transformer.from_crs("EPSG:6341", "EPSG:2223", always_xy=True).transform(*_xy("EPSG:6341"))
+    ft, what = to_run_crs(np.array([[x, y, 1000.0, 6.0]]), "EPSG:2223", "EPSG:6341")
+    assert ft[0, :2] == pytest.approx(_xy("EPSG:6341"), abs=1e-3)
+    assert ft[0, 2] == pytest.approx(304.8) and ft[0, 3] == 6.0

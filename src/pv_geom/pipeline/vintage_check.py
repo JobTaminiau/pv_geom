@@ -164,9 +164,13 @@ def check_lidar_classes(cfg: PVGeomConfig, samples: list) -> dict:
     target = str(cfg.crs.target)
     others = sorted({s.crs for s in samples if s.crs and s.crs != target})
     if others and target.lower() != "auto":
-        out["lidar_crs_mismatch"] = others
-        log.warning("some tiles declare CRS %s, not the run CRS %s; points are used in "
-                    "their native coordinates, so check crs.target", others, target)
+        from pv_geom.utils.crs import _tile_transform
+
+        out["lidar_converted_on_read"] = {
+            c: _tile_transform(c, target)[2] or "same grid; no conversion needed"
+            for c in others}
+        log.info("tiles declare CRS %s, not the run CRS %s; converted on read: %s",
+                 others, target, out["lidar_converted_on_read"])
     return out
 
 

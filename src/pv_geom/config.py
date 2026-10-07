@@ -39,7 +39,7 @@ class PanelPlaneConfig(BaseModel):
     min_points: int = 30                # flat floor; size-sweep showed ~5 is the precision
                                         # floor but RANSAC robustness needs ~30 inliers.
     tilt_floor_deg: float = 1.0
-    uncertainty_method: Literal["bootstrap", "covariance"] = "bootstrap"
+    uncertainty_method: Literal["bootstrap", "none"] = "bootstrap"   # "none" skips it
     bootstrap_samples: int = 50
 
 
@@ -201,11 +201,6 @@ class MountingRulesConfig(BaseModel):
     no_panel_standoff_confidence_max: float = 0.5
 
 
-class S3Config(BaseModel):
-    requester_pays: bool = False
-    region: str = "us-east-2"
-
-
 class ClassificationConfig(BaseModel):
     """ASPRS class assignments. USGS LPC tiles often lack class 6; we fall back
     to class 1 returns above ground when class 6 is absent."""
@@ -224,8 +219,7 @@ class ClassificationConfig(BaseModel):
 
 
 class IOConfig(BaseModel):
-    lidar_reader: Literal["pdal", "laspy"] = "laspy"
-    s3: S3Config = Field(default_factory=S3Config)
+    lidar_reader: Literal["pdal", "laspy"] = "laspy"   # pdal needs the [pdal] extra
     classification: ClassificationConfig = Field(default_factory=ClassificationConfig)
 
 
@@ -235,6 +229,12 @@ class CoiledConfig(BaseModel):
     worker_memory: str = "16GiB"
     worker_cpu: int = 4
     software: str = "pv-geom-2026-05"
+    # Cloud region for the cluster: put it where the LiDAR bucket is.
+    region: str = "us-east-2"
+    # What workers ``pip install`` to get pv_geom (Coiled drops git+ URLs from
+    # environment specs, so it is installed at cluster start). Must be the
+    # version the client runs.
+    package_source: str = "git+https://github.com/JobTaminiau/pv_geom.git@main"
 
 
 class LocalConfig(BaseModel):
@@ -303,5 +303,14 @@ class PVGeomConfig(BaseModel):
         return cls(**raw)
 
     def hash(self) -> str:
-        canonical = json.dumps(self.model_dump(mode="json"), sort_keys=True)
+        """sha256 of everything that can change a result or how it was run.
+
+        The archived mounting classifier's thresholds count only when it is
+        switched on: left off, they cannot affect the output, and should not
+        make two otherwise identical runs look different.
+        """
+        dump = self.model_dump(mode="json")
+        if not self.mounting_rules.enabled:
+            dump["mounting_rules"] = {"enabled": False}
+        canonical = json.dumps(dump, sort_keys=True)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

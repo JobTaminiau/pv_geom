@@ -23,8 +23,7 @@ if TYPE_CHECKING:                                  # pragma: no cover
 
 # --- Software environment + region ---------------------------------------- #
 
-SOFTWARE_ENV = "pv-geom-2026-05"
-REGION = "us-east-2"                               # matches free-research-data-raw bucket
+SOFTWARE_ENV = "pv-geom-2026-05"                   # default; cfg.compute.coiled.software wins
 
 # Conda specification (built via coiled.create_software_environment).
 # We keep it pinned-light: major versions only, so the env survives minor
@@ -39,7 +38,6 @@ CONDA_SPEC: dict = {
         "shapely>=2.0",
         "pyproj>=3.6",
         "pyogrio>=0.9",
-        "scikit-learn>=1.5",
         "pyarrow>=17",
         "fsspec>=2024.10",
         "s3fs>=2024.10",
@@ -90,7 +88,7 @@ def make_cluster(cfg: PVGeomConfig) -> "Cluster":
         worker_memory=c.worker_memory,
         worker_cpu=c.worker_cpu,
         software=c.software or SOFTWARE_ENV,
-        region=REGION,
+        region=c.region,
         # One tile-group task per worker: a task's peak is the concatenated
         # multi-tile point cloud (up to ~13 GB for dense-metro fetch
         # neighborhoods), so even two concurrent tasks breach a 16 GiB
@@ -102,7 +100,7 @@ def make_cluster(cfg: PVGeomConfig) -> "Cluster":
     return cluster
 
 
-def install_pv_geom_on_workers(client, ref: str = "main") -> None:
+def install_pv_geom_on_workers(client, package_source: str) -> None:
     """Install pv_geom on the scheduler AND every worker (works around
     Coiled's silent dropping of ``git+`` pip requirements).
 
@@ -124,12 +122,11 @@ def install_pv_geom_on_workers(client, ref: str = "main") -> None:
     """
     from distributed import PipInstall
 
-    def _install(ref: str = ref) -> str:
+    def _install(source: str = package_source) -> str:
         import subprocess
         import sys
         out = subprocess.check_output(
-            [sys.executable, "-m", "pip", "install", "--quiet",
-             f"git+https://github.com/JobTaminiau/pv_geom.git@{ref}"],
+            [sys.executable, "-m", "pip", "install", "--quiet", source],
             stderr=subprocess.STDOUT,
         )
         return out.decode("utf-8", errors="replace")[-200:]
@@ -137,7 +134,7 @@ def install_pv_geom_on_workers(client, ref: str = "main") -> None:
     client.run_on_scheduler(_install)
     client.register_plugin(
         PipInstall(
-            packages=[f"git+https://github.com/JobTaminiau/pv_geom.git@{ref}"],
+            packages=[package_source],
             pip_options=["--quiet"],
         )
     )

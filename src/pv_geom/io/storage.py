@@ -1,9 +1,7 @@
-"""Cache an S3 URI to local disk so file-based readers (laspy, OGR-on-zip)
-can open it. Idempotent: subsequent calls hit the cache.
+"""Remote storage: telling remote from local, listing a prefix, and caching a
+remote object to local disk for readers that need a file path (LAZ, OGR).
 
-Used by ``io.lidar`` (LAZ requires a file path) and ``io.tile_index`` for
-zipped shapefiles. Parquet/GPKG/SHP readers can read s3:// directly via
-fsspec, so they call this only when the file format demands a local handle.
+The cache is idempotent — a second call for the same URI is a local lookup.
 """
 
 from __future__ import annotations

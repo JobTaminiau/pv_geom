@@ -279,7 +279,7 @@ def test_process_tile_group_missing_primary_tile(synth_inputs: dict[str, Path]) 
     import geopandas as gpd
     from shapely.geometry import box
 
-    from pv_geom.io._localize import RemoteFileMissing
+    from pv_geom.io.storage import RemoteFileMissing
     from pv_geom.pipeline.worker import process_tile_group
 
     cfg = PVGeomConfig()

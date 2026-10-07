@@ -17,8 +17,8 @@ import numpy as np
 
 from pv_geom.config import PVGeomConfig
 from pv_geom.geometry.point_index import GroundModel, PointGrid
-from pv_geom.io._localize import RemoteFileMissing
 from pv_geom.io.lidar import TileVintage, read_tile
+from pv_geom.io.storage import RemoteFileMissing
 
 log = logging.getLogger(__name__)
 

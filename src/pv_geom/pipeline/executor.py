@@ -56,7 +56,7 @@ def cluster_for(cfg: PVGeomConfig) -> Iterator[Any]:
         if backend == "coiled":
             from pv_geom.coiled_env import install_pv_geom_on_workers
 
-            install_pv_geom_on_workers(client)
+            install_pv_geom_on_workers(client, cfg.compute.coiled.package_source)
         yield client
     finally:
         client.close()

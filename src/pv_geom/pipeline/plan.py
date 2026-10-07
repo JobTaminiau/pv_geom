@@ -17,9 +17,9 @@ from typing import Any
 import geopandas as gpd
 
 from pv_geom.config import PVGeomConfig
-from pv_geom.io._localize import RemoteFileMissing, is_remote, list_s3_uris, localize
 from pv_geom.io.footprints import read_footprints
 from pv_geom.io.polygons import read_polygons
+from pv_geom.io.storage import RemoteFileMissing, is_remote, list_s3_uris, localize
 from pv_geom.io.tile_index import build_tile_uris, load_tile_index, resolve_tile_id_col
 from pv_geom.pipeline.partition import TileGroup, assign_polygons_to_tiles, build_tile_groups
 from pv_geom.utils.crs import resolve_target_crs

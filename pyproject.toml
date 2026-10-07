@@ -28,7 +28,6 @@ dependencies = [
     "shapely>=2.0",
     "pyproj>=3.6",
     "pyogrio>=0.9",
-    "scikit-learn>=1.5",
     "laspy[lazrs]>=2.5",
     "fsspec>=2024.10",
     "s3fs>=2024.10",
@@ -47,7 +46,6 @@ dependencies = [
 # pdal Python bindings need the system PDAL library; install via conda on Windows.
 # Worker images on Coiled should pull this in.
 pdal = ["pdal>=3.4"]
-whitebox = ["whitebox>=2.3"]
 dev = [
     "pytest>=8",
     "pytest-cov>=5",

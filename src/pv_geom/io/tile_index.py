@@ -13,7 +13,7 @@ from pathlib import Path
 
 import geopandas as gpd
 
-from pv_geom.io._localize import is_remote, localize
+from pv_geom.io.vector import read_vector, reproject
 
 
 def load_tile_index(
@@ -22,28 +22,7 @@ def load_tile_index(
 ) -> gpd.GeoDataFrame:
     """Load the tile-index dataset, reprojecting to ``target_crs`` when given
     (``None`` keeps its native CRS, which is how ``crs.target: auto`` finds it)."""
-    s = str(uri)
-    suffix = s.lower().split("?", 1)[0]
-
-    if suffix.endswith((".parquet", ".geoparquet")):
-        # Parquet reads s3:// transparently via fsspec.
-        gdf = gpd.read_parquet(s)
-    elif suffix.endswith(".zip"):
-        local = localize(s) if is_remote(s) else Path(s)
-        gdf = gpd.read_file(f"zip://{local}")
-    elif is_remote(s):
-        local = localize(s)
-        gdf = gpd.read_file(local)
-    else:
-        gdf = gpd.read_file(s)
-
-    if (
-        target_crs is not None
-        and gdf.crs is not None
-        and str(gdf.crs).lower() != str(target_crs).lower()
-    ):
-        gdf = gdf.to_crs(target_crs)
-    return gdf.reset_index(drop=True)
+    return reproject(read_vector(uri), target_crs).reset_index(drop=True)
 
 
 _TILE_ID_ALIASES = ("name", "tile_id", "tilename", "tile_name", "filename", "location")

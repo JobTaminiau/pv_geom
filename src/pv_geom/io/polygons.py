@@ -15,21 +15,11 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 
+from pv_geom.io.vector import read_vector, reproject
 from pv_geom.vintage import parse_vintage
 
 # Tried in order when the caller does not name the id column.
 _ID_ALIASES = ("polygon_id", "detection_id", "id", "fid", "objectid")
-
-
-def _read_vector(uri: str | Path) -> gpd.GeoDataFrame:
-    s = str(uri)
-    if s.lower().split("?", 1)[0].endswith((".parquet", ".geoparquet")):
-        return gpd.read_parquet(s)
-    if s.startswith("s3://"):
-        from pv_geom.io._localize import localize
-
-        return gpd.read_file(localize(s))
-    return gpd.read_file(s)
 
 
 def read_polygons(
@@ -68,7 +58,7 @@ def read_polygons(
         Optional per-polygon capture-date column (dates, timestamps, or
         ``YYYY`` / ``YYYY-MM`` / ``YYYY-MM-DD`` strings).
     """
-    gdf = _read_vector(uri)
+    gdf = read_vector(uri)
     if gdf.crs is None:
         raise ValueError(f"polygon layer {uri} has no CRS; cannot place it on the LiDAR")
     gdf = gdf.reset_index(drop=True)
@@ -100,9 +90,7 @@ def read_polygons(
             None if pd.isna(v) else parse_vintage(v) for v in gdf[vintage_col]
         ]
 
-    # Reproject (cheap no-op if already in target).
-    if str(gdf.crs).lower() != str(target_crs).lower():
-        gdf = gdf.to_crs(target_crs)
+    gdf = reproject(gdf, target_crs)
 
     gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty]
     if bbox is not None:

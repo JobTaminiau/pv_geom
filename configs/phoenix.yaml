@@ -13,9 +13,6 @@ vintage:
 
 io:
   lidar_reader: laspy
-  s3:
-    requester_pays: false
-    region: us-east-2
 
 compute:
   backend: coiled

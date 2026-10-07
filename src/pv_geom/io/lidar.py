@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-from pv_geom.io._localize import is_remote, localize
+from pv_geom.io.storage import is_remote, localize
 
 
 def read_tile_points(

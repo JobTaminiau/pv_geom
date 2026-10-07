@@ -35,6 +35,26 @@ SEGMENT_FIELDS: list[tuple[str, pa.DataType, str, str]] = [
 SEGMENT_TYPE = pa.list_(pa.struct([pa.field(n, t) for n, t, _, _ in SEGMENT_FIELDS]))
 
 
+# The `recommended` column. Provisional until the accuracy work (spec Epic A)
+# says whether wide-tolerance fits and unresolved surfaces belong in or out.
+RECOMMENDED_BASES = frozenset({"panel_confirmed", "panel_by_vintage"})
+RECOMMENDED_EXCLUDING_FLAGS = frozenset({
+    "low_density", "below_min_area", "overlaps_polygon", "duplicate_geometry",
+})
+RECOMMENDED_RULE = (
+    "status == 'measured' and geometry_basis in "
+    f"{sorted(RECOMMENDED_BASES)} and none of the flags {sorted(RECOMMENDED_EXCLUDING_FLAGS)}. "
+    "Provisional: wide_tolerance_fit rows are included and surface_unresolved rows excluded "
+    "pending validation."
+)
+
+
+def is_recommended(status: str, basis: str, flags: list[str] | tuple[str, ...]) -> bool:
+    """Whether a row is in the suggested default subset (see RECOMMENDED_RULE)."""
+    return (status == "measured" and basis in RECOMMENDED_BASES
+            and not RECOMMENDED_EXCLUDING_FLAGS.intersection(flags))
+
+
 def _f(name: str, typ: pa.DataType, *, nullable: bool = True, unit: str = "",
        desc: str = "") -> pa.Field:
     return pa.field(name, typ, nullable=nullable,
@@ -77,6 +97,11 @@ _CORE_FIELDS: list[pa.Field] = [
     _f("vintage_gap_days", pa.int32(), unit="days",
        desc="polygon_vintage minus lidar_date. Positive means the polygon is "
             "newer than the LiDAR, so the installation may be absent from it."),
+    _f("recommended", pa.bool_(), nullable=False,
+       desc="True for rows suggested for analysis of array geometry: measured, on a panel "
+            "basis (panel_confirmed or panel_by_vintage) and free of the flags that mark an "
+            "unreliable or double-counted row. PROVISIONAL rule, to be fixed once accuracy "
+            "is validated; see RECOMMENDED_RULE in the dataset metadata."),
     _f("geometry_basis", pa.string(), nullable=False,
        desc="What the fitted plane represents: panel_confirmed, "
             "panel_by_vintage, surface_unresolved, unscreened, no_fit, or "

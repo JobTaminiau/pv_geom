@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     import geopandas as gpd
 
     from pv_geom.report import ReportResult
+    from pv_geom.report.compare import CompareResult
     from pv_geom.validation import ValidationResult
 
 _REQUIRED = {
@@ -175,6 +176,15 @@ def report(output: str | Path, out_dir: str | Path | None = None, **kwargs: Any)
     from pv_geom.report import build_report
 
     return build_report(output, out_dir, **kwargs)
+
+
+def compare_runs(outputs: list[str | Path] | list[str], out_dir: str | Path,
+                 **kwargs: Any) -> CompareResult:
+    """Set two to four finished runs side by side: overlaid tilt and orientation
+    profiles and a comparison table, written to ``out_dir``."""
+    from pv_geom.report.compare import compare_runs as _compare
+
+    return _compare(list(outputs), out_dir, **kwargs)
 
 
 def compare_reference(output: str | Path, reference: str | Path,

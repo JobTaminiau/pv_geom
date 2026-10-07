@@ -16,7 +16,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from pv_geom.errors import require
-from pv_geom.schema import MEASURED, NO_FIT, SCHEMA_VERSION
+from pv_geom.schema import MEASURED, NO_FIT, SCHEMA_VERSION, is_recommended
 
 
 def geo_metadata(table: pa.Table, crs: str | None) -> bytes:
@@ -120,6 +120,13 @@ def upgrade_table(table: pa.Table) -> pa.Table:
         fitted = table.column("panel_tilt_deg").is_valid()
         status = pa.array([MEASURED if ok else NO_FIT for ok in fitted.to_pylist()], pa.string())
         table = table.append_column("status", status)
+    needed = {"status", "geometry_basis", "flags"}
+    if "recommended" not in table.column_names and needed <= set(table.column_names):
+        # Added in schema 0.5; derived from columns older outputs already have.
+        rec = [is_recommended(st, basis, flags or ()) for st, basis, flags in zip(
+            table.column("status").to_pylist(), table.column("geometry_basis").to_pylist(),
+            table.column("flags").to_pylist(), strict=True)]
+        table = table.append_column("recommended", pa.array(rec, pa.bool_()))
     return table
 
 

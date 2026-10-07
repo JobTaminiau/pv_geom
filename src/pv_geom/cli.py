@@ -12,7 +12,7 @@ from rich.table import Table
 
 from pv_geom import __version__, api
 from pv_geom.config import PVGeomConfig
-from pv_geom.errors import PVGeomError
+from pv_geom.errors import InputError, PVGeomError
 from pv_geom.utils.logging import add_file_log, configure_logging
 
 app = typer.Typer(
@@ -190,10 +190,22 @@ def demo(
 
 @app.command("report")
 def report_cmd(
-    output_uri: str = typer.Argument(..., help="A pv-geom output directory or s3:// prefix"),
+    output_uris: list[str] = typer.Argument(
+        ..., help="A pv-geom output directory or s3:// prefix (several with --compare)"),
     out: Path | None = typer.Option(
         None, help="Where to write the report. Default: <output>/report (local outputs)"
     ),
+    compare: bool = typer.Option(
+        False, "--compare", help="Compare the given runs side by side instead of reporting "
+                                 "on one (needs --out)"),
+    label: list[str] = typer.Option(
+        [], "--label", help="With --compare: a name for each run, in order "
+                            "(default: study.name from each run's config)"),
+    regions: Path | None = typer.Option(
+        None, help="Polygon layer of regions (districts, municipalities) for a "
+                   "per-region table and map"),
+    region_col: str | None = typer.Option(
+        None, help="Column of the region layer holding the region names"),
     title: str | None = typer.Option(None, help="Report title"),
     area_name: str | None = typer.Option(
         None, help="Name of the study area, used in titles and the methods text "
@@ -217,10 +229,23 @@ def report_cmd(
     ),
 ) -> None:
     """Build tables, figures, an HTML/Markdown report and the release dataset
-    from a finished run."""
+    from a finished run; or, with --compare, set several runs side by side."""
+    if compare:
+        if out is None:
+            raise InputError("--compare needs --out", "say where to write the comparison")
+        cmp = api.compare_runs(output_uris, out, labels=label or None, headline=headline,
+                               weight=weight)
+        console.print(f"[green]comparison:[/green] {cmp.markdown}")
+        console.print(f"[green]tables:[/green]     {cmp.tables_dir}")
+        console.print(f"[green]figures:[/green]    {cmp.figures_dir}")
+        return
+    if len(output_uris) != 1:
+        raise InputError(f"report takes one run, got {len(output_uris)}",
+                         "add --compare to set several runs side by side")
     result = api.report(
-        output_uri, out, title=title, area_name=area_name, headline=headline, weight=weight,
-        export_dataset=export, polygon_vintage=polygon_vintage, lidar_date=lidar_date,
+        output_uris[0], out, title=title, area_name=area_name, headline=headline,
+        weight=weight, export_dataset=export, polygon_vintage=polygon_vintage,
+        lidar_date=lidar_date, regions=regions, region_col=region_col,
     )
     console.print(f"[green]report:[/green]  {result.html}")
     console.print(f"[green]tables:[/green]  {result.tables_dir}")

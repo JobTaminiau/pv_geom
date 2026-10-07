@@ -12,6 +12,7 @@ from shapely import wkb
 
 from pv_geom import __version__
 from pv_geom.pipeline.measure import Measurement, Segment
+from pv_geom.schema import is_recommended
 from pv_geom.utils.north import to_true_azimuth
 from pv_geom.vintage import NOT_MEASURED
 
@@ -56,6 +57,7 @@ def to_row(m: Measurement, prov: Provenance) -> dict[str, Any]:
         "lidar_date": m.lidar_date,
         "lidar_date_source": m.lidar_date_source,
         "vintage_gap_days": None if m.gap_days is None else np.int32(m.gap_days),
+        "recommended": is_recommended(m.status, m.basis, m.flags),
         "geometry_basis": m.basis,
         "n_points_panel": int(fit.n_total),
         "n_inliers_panel": int(fit.n_inliers),
@@ -137,6 +139,7 @@ def unmeasured_row(
         "geometry": wkb.dumps(polygon) if has_geom else None,
         "area_m2": np.float32(polygon.area) if polygonal else None,
         "polygon_vintage": polygon_vintage,
+        "recommended": False,
         "geometry_basis": NOT_MEASURED,
         "roof_ref_source": "none",
         "flags": list(flags),

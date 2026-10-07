@@ -12,6 +12,7 @@ import shapely
 
 from pv_geom.schema import (
     FLAG_DESCRIPTIONS,
+    RECOMMENDED_RULE,
     STATUS_DESCRIPTIONS,
     data_dictionary,
     output_schema,
@@ -161,6 +162,7 @@ def dataset_metadata(out, df: pd.DataFrame, manifest: dict) -> dict:
         "resource_type": "dataset",
         "version": manifest.get("pkg_version"),
         "schema_version": manifest.get("schema_version"),
+        "recommended_rule": RECOMMENDED_RULE,
         "run_id": manifest.get("run_id"),
         "created": manifest.get("run_timestamp_utc"),
         "software": {"name": "pv-geom", "version": manifest.get("pkg_version"),
@@ -252,8 +254,11 @@ Definitions are in `status_definitions.csv` and `geometry_basis_definitions.csv`
 
 ## Using it
 
-- For array geometry, keep `status == "measured"` and a `geometry_basis` of
-  `panel_confirmed` or `panel_by_vintage`.
+- For array geometry, start from `recommended == True`: measured, on a panel basis
+  (`panel_confirmed` or `panel_by_vintage`) and not flagged as sparse, undersized or
+  double-counted. The rule is provisional and is recorded in `metadata.json`.
+- Polygons covering more than one roof face have one row here, describing the
+  largest face, and one row per face in `pv_geom_segments`.
 - `surface_unresolved` rows are right for flush-mounted arrays and wrong for racks
   on flat roofs; `unscreened` rows are unverified.
 - `flags` lists quality notes per row (`flag_definitions.csv`). Polygons flagged

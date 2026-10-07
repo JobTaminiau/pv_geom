@@ -41,6 +41,9 @@ SECTIONS = [
      "{north}"),
     ("Array against roof", ["roof_relation"], ["roof_relation"], None),
     ("Measurement quality", ["fit_quality"], ["fit_quality", "flags"], None),
+    ("By region", ["regions"], ["regions"],
+     "Each polygon is assigned to the region its centroid falls in. Tilt and facing "
+     "describe the same group of polygons as the headline figures."),
     ("Spatial distribution", ["spatial_distribution"], [], None),
 ]
 
@@ -75,7 +78,7 @@ ul{padding-left:20px;margin:0 0 12px}li{margin-bottom:6px}
 """
 
 
-_TEXT_COLS = {"Facets in polygon", "Status", "No fit because", "Step", "Basis", "Meaning", "Stratum", "Measure", "Unit", "Flag", "Facing",
+_TEXT_COLS = {"Region", "Dominant facing", "Facets in polygon", "Status", "No fit because", "Step", "Basis", "Meaning", "Stratum", "Measure", "Unit", "Flag", "Facing",
               "Tilt (°)", "column", "type", "unit", "nullable", "description", "File",
               "Contents"}
 
@@ -133,7 +136,7 @@ def render_html(title: str, subtitle: str, s: dict, specs: dict[str, figs.Figure
              f'<div class="note">{html.escape(vintage_statement(s))}</div>']
     for heading, fig_names, table_keys, intro in SECTIONS:
         present = [n for n in fig_names if n in specs]
-        if not present and not table_keys:
+        if not present and not any(k in disp for k in table_keys):
             continue
         parts.append(f"<h2>{html.escape(heading)}</h2>")
         if intro:
@@ -147,7 +150,7 @@ def render_html(title: str, subtitle: str, s: dict, specs: dict[str, figs.Figure
                 f"<figcaption><b>{html.escape(specs[name].title)}.</b> "
                 f"{html.escape(specs[name].caption)}</figcaption></figure>")
         for key in table_keys:
-            if len(disp[key]):
+            if key in disp and len(disp[key]):
                 parts.append(_html_table(disp[key]))
     parts += ["<h2>Methods</h2>", f"<p>{html.escape(methods)}</p>",
               "<h2>Files</h2>", _html_table(files),
@@ -165,7 +168,7 @@ def render_markdown(title: str, subtitle: str, s: dict, specs: dict[str, figs.Fi
     parts += ["", f"> {vintage_statement(s)}", ""]
     for heading, fig_names, table_keys, intro in SECTIONS:
         present = [n for n in fig_names if n in specs]
-        if not present and not table_keys:
+        if not present and not any(k in disp for k in table_keys):
             continue
         parts += [f"## {heading}", ""]
         if intro:
@@ -175,7 +178,7 @@ def render_markdown(title: str, subtitle: str, s: dict, specs: dict[str, figs.Fi
             parts += [f"![{specs[name].title}](figures/{name}.png)", "",
                       f"**{specs[name].title}.** {specs[name].caption}", ""]
         for key in table_keys:
-            if len(disp[key]):
+            if key in disp and len(disp[key]):
                 parts += [_md_table(disp[key]), ""]
     parts += ["## Methods", "", methods, "", "## Files", "", _md_table(files), "",
               f"_Generated {s['generated_utc']} by pv-geom v{__version__}; run "

@@ -14,6 +14,8 @@ panel_plane:
   erosion_m: 0.15
   ransac_threshold_m: 0.05
   ransac_threshold_max_m: 0.15   # if a fit fails at 5 cm, refit at 2x the measured scatter
+  envelope_tilt_max_deg: 5.0     # a wide fit flatter than this is flagged envelope_fit:
+                                 # rows of tilted modules on a flat roof, not one plane
                                  # of the returns, up to this cap (flag: wide_tolerance_fit).
                                  # Noisier collections need it: Delaware 2023 scatters
                                  # ~7.5 cm about a roof plane, Phoenix 2020 ~2 cm.

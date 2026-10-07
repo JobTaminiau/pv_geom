@@ -160,3 +160,26 @@ def test_release_dataset_carries_a_flat_segments_table(tmp_path: Path) -> None:
     header = (report.dataset_dir / "pv_geom.csv").read_text().splitlines()[0]
     assert "segments" not in header.split(",")
     assert (report.tables_dir / "facets.csv").exists()
+
+
+def test_tilted_rows_on_a_flat_roof_are_flagged_as_an_envelope_fit() -> None:
+    """Rows of modules tilted 10 degrees south on a flat roof. No single plane
+    is the modules; the wide-tolerance plane through them is nearly flat. That
+    plane is reported, but flagged, and kept out of the recommended subset."""
+    rng = np.random.default_rng(6)
+    xy = rng.uniform([0.3, 0.3], [9.7, 5.7], size=(900, 2))
+    phase = xy[:, 1] % 1.5                         # a row every 1.5 m going north
+    on_module = phase < 1.0
+    z = np.where(on_module, 8.05 + np.tan(np.radians(10.0)) * phase, 8.0)
+    row = _row(np.column_stack([xy, z + rng.normal(0, 0.01, 900)]))
+    assert row["status"] == "measured" and row["panel_tilt_deg"] < 3.0
+    assert {"wide_tolerance_fit", "envelope_fit"} <= set(row["flags"])
+    assert row["recommended"] is False or not row["recommended"]
+
+
+def test_a_noisy_pitched_roof_is_not_an_envelope_fit() -> None:
+    rng = np.random.default_rng(1)
+    xy = rng.uniform([0.3, 0.3], [9.7, 5.7], size=(600, 2))
+    z = _plane_z(xy, 30.0, 180.0, 8.0, (5.0, 3.0)) + rng.normal(0, 0.075, 600)
+    row = _row(np.column_stack([xy, z]))
+    assert "wide_tolerance_fit" in row["flags"] and "envelope_fit" not in row["flags"]

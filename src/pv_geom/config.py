@@ -33,6 +33,13 @@ class PolygonsConfig(BaseModel):
 
 
 class PanelPlaneConfig(BaseModel):
+    # A fit that needed the wider tolerance AND came out flatter than this is
+    # flagged `envelope_fit`: scatter about a near-flat plane is what rows of
+    # tilted modules on a flat roof look like, and the plane then describes the
+    # envelope of the rows, not the modules. (Validation, 2026-10: a warehouse
+    # roof reported at 10 degrees measured 1.4; 80 of its 82 fits matched this
+    # signature against 0.2-0.3% of residential fits.)
+    envelope_tilt_max_deg: float = 5.0
     erosion_m: float = 0.15
     ransac_threshold_m: float = 0.05
     # Noise-adaptive tolerance. 5 cm suits clean, single-swath data (Phoenix:

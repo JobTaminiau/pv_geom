@@ -360,6 +360,8 @@ def measure_polygon(
     fit = panel.fit
     if panel.widened:
         flags.append("wide_tolerance_fit")
+        if panel.ok and fit.tilt_deg < cfg.panel_plane.envelope_tilt_max_deg:
+            flags.append("envelope_fit")
     if panel.multi_facet:
         flags.append("multi_facet")
     if not panel.ok:

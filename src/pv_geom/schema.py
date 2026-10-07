@@ -40,6 +40,7 @@ SEGMENT_TYPE = pa.list_(pa.struct([pa.field(n, t) for n, t, _, _ in SEGMENT_FIEL
 RECOMMENDED_BASES = frozenset({"panel_confirmed", "panel_by_vintage"})
 RECOMMENDED_EXCLUDING_FLAGS = frozenset({
     "low_density", "below_min_area", "overlaps_polygon", "duplicate_geometry",
+    "envelope_fit",
 })
 RECOMMENDED_RULE = (
     "status == 'measured' and geometry_basis in "
@@ -232,6 +233,9 @@ FLAG_DESCRIPTIONS: dict[str, str] = {
     "geometry_repaired": "Input geometry was invalid and was repaired before measuring.",
     "wide_tolerance_fit": "Fit accepted only at a wider inlier tolerance than the base "
                           "(noisy returns); see panel_fit_tolerance_m.",
+    "envelope_fit": "Wide-tolerance fit on a near-flat plane: the signature of rows of "
+                    "tilted modules on a flat roof (or rooftop clutter). Tilt and azimuth "
+                    "describe the envelope of the rows, not the modules.",
     "east_west_rack": "Two planes facing ~180 deg apart at similar tilt.",
     "roof_insufficient": "The roof ring never gathered enough returns.",
     "roof_no_consensus": "No single plane described the roof ring.",

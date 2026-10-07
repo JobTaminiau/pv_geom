@@ -105,3 +105,48 @@ So: PVDAQ can supply a **consistency check and a vintage negative control**
 from its self-reported systems in a study area, and a **small accuracy set**
 from its documented systems elsewhere. It does not by itself reach the 150
 arrays story A1 asks for.
+
+## USPVDB as a reference source
+
+The [U.S. Large-Scale Solar Photovoltaic Database](https://energy.usgs.gov/uspvdb/)
+maps about 6,600 facilities of roughly 1 MW and up, including large rooftops and
+parking canopies, with tilt, azimuth and operating year from EIA Form 860.
+
+```
+python scripts/uspvdb_references.py --bbox ... --polygons detections.parquet \
+    --id-col cluster_id --out refs.csv
+```
+
+- **Facility boundaries make the match objective.** Polygons are assigned to a
+  facility by lying inside its digitised boundary, so `polygon_ids` is filled
+  without anyone looking at angles. This is USPVDB's main advantage over PVDAQ.
+- **One angle pair per facility** (`scope = system`). Where a plant reports
+  several, the database stores their average, which may describe no array.
+- **Reported, not surveyed.** `present_by` is taken from the operating year.
+- Trackers are left out. A facility is one validation unit however many
+  polygons it holds: its rows are not independent examples.
+- Coverage is large commercial and utility systems only, so it complements
+  PVDAQ's residential systems rather than replacing them.
+
+## What the first comparisons showed (Phoenix, October 2026)
+
+Five systems, 149 polygons, 2020 LiDAR. Too few to state an accuracy, enough to
+find things out:
+
+- **Parking canopies agree closely.** One school's canopies, reported at 5
+  degrees facing south: consistent over all of the measured area, within a tenth
+  of a degree in tilt and half a degree in azimuth.
+- **Rows of tilted modules on a flat roof are not measured.** A warehouse roof
+  reported at 10 degrees measured 1.4. The polygon covers many short rows with
+  gaps; the fitted plane is the envelope of the rows. At about 8 returns per
+  square metre the row slope could not be recovered. These fits are now flagged
+  `envelope_fit` and left out of `recommended`.
+- **The vintage screen passed its one negative control.** A residential system
+  whose panels appear in imagery two years after the flight had none of its
+  area labelled `panel_confirmed`.
+- **The standoff screen cannot confirm canopies.** A canopy has no roof under
+  it to stand off from, so correctly measured canopies came out
+  `surface_unresolved` or `unscreened` and none was `recommended`.
+- **One whole-system record did not describe the whole system.** A residence
+  reported at 18 degrees has two blocks at 18 and two at 11; the record
+  describes about half its area.

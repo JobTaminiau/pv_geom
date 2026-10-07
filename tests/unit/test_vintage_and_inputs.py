@@ -27,6 +27,7 @@ from pv_geom.vintage import (
     parse_vintage,
     vintage_gap_days,
 )
+
 from .test_runner_smoke import _laz_flown_on, _rooftop_scene, _write_synthetic_laz
 
 # --------------------------------------------------------------------------- #
@@ -256,7 +257,7 @@ def test_auto_crs_comes_from_the_tile_index() -> None:
 
 
 def test_auto_crs_needs_a_projected_source() -> None:
-    with pytest.raises(ValueError, match="set crs.target explicitly"):
+    with pytest.raises(ValueError, match=r"set crs.target explicitly"):
         resolve_target_crs("auto", "EPSG:4326")
 
 
@@ -366,3 +367,60 @@ def test_data_dictionary_describes_every_column() -> None:
     rows = data_dictionary()
     assert [r["column"] for r in rows] == OUTPUT_SCHEMA.names
     assert all(r["description"] for r in rows)
+
+
+# --------------------------------------------------------------------------- #
+# Noise-adaptive fit tolerance + near-polygon point filter
+# --------------------------------------------------------------------------- #
+
+
+def _noisy_array_row(noise_m: float, cfg: PVGeomConfig | None = None):
+    from pv_geom.pipeline.tile_task import _build_row
+
+    rng = np.random.default_rng(7)
+    xy = rng.uniform([0, 0], [8, 5], size=(500, 2))
+    z = 6.0 - np.tan(np.radians(30.0)) * xy[:, 1] + rng.normal(0, noise_m, 500)
+    pts = np.column_stack([xy, z])
+    return _build_row(polygon=box(0, 0, 8, 5), polygon_id="n", cfg=cfg or PVGeomConfig(),
+                      config_hash="x", run_id="r", partition_id=0,
+                      panel_pts=pts, ground_xyz=np.zeros((0, 3)), roof_input_pts=pts,
+                      footprints=None,
+                      other_pv_polygons=gpd.GeoDataFrame(geometry=[], crs="EPSG:6347"),
+                      contributing_tile_ids=("t1",))
+
+
+def test_clean_returns_fit_at_the_base_tolerance() -> None:
+    row = _noisy_array_row(0.02)
+    assert row["panel_fit_tolerance_m"] == pytest.approx(0.05)
+    assert "wide_tolerance_fit" not in row["flags"]
+
+
+def test_noisy_returns_are_fitted_at_a_wider_tolerance() -> None:
+    """Delaware-like scatter (~7.5 cm): no consensus at 5 cm, but the plane is
+    real and the tilt is recoverable — flagged, with the tolerance recorded."""
+    row = _noisy_array_row(0.075)
+    assert row["panel_tilt_deg"] == pytest.approx(30.0, abs=1.5)
+    assert "wide_tolerance_fit" in row["flags"] and "poor_fit" not in row["flags"]
+    assert 0.05 < row["panel_fit_tolerance_m"] <= 0.15
+
+
+def test_adaptive_tolerance_can_be_disabled() -> None:
+    cfg = PVGeomConfig()
+    cfg.panel_plane.ransac_threshold_max_m = cfg.panel_plane.ransac_threshold_m
+    row = _noisy_array_row(0.075, cfg)
+    assert row["panel_tilt_deg"] is None and "poor_fit" in row["flags"]
+
+
+def test_scatter_beyond_the_cap_still_fails() -> None:
+    """A wider tolerance must not turn clutter into a plane."""
+    row = _noisy_array_row(0.60)
+    assert row["geometry_basis"] == NO_FIT
+
+
+def test_near_mask_keeps_only_points_around_polygons() -> None:
+    from pv_geom.pipeline.tile_task import _NearMask
+
+    near = _NearMask([box(100, 100, 110, 110), box(500, 500, 505, 505)], pad_m=20.0)
+    x = np.array([105.0, 125.0, 300.0, 502.0, 90.0, -1e6])
+    y = np.array([105.0, 105.0, 300.0, 502.0, 85.0, 105.0])
+    assert near(x, y).tolist() == [True, True, False, True, True, False]

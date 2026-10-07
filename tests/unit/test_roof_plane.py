@@ -11,7 +11,6 @@ from pv_geom.config import RoofPlaneConfig
 from pv_geom.geometry.plane_fit import fit_plane_ransac
 from pv_geom.geometry.roof_plane import _enforce_collar_agreement, extract_roof_plane
 
-
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #

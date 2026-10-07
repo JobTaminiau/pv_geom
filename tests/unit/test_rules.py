@@ -15,7 +15,6 @@ from pv_geom.classify.rules import (
 )
 from pv_geom.config import MountingRulesConfig
 
-
 # --------------------------------------------------------------------------- #
 # Confidence helpers
 # --------------------------------------------------------------------------- #

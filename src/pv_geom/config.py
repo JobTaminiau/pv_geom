@@ -23,6 +23,16 @@ class CRSConfig(BaseModel):
 class PanelPlaneConfig(BaseModel):
     erosion_m: float = 0.15
     ransac_threshold_m: float = 0.05
+    # Noise-adaptive tolerance. 5 cm suits clean, single-swath data (Phoenix:
+    # ~2 cm scatter about the plane) but rejects most arrays where the returns
+    # are noisier — on the Delaware 2023 collection the scatter is ~7.5 cm and
+    # only 24% of polygons reached consensus at 5 cm, against 80% at 15 cm.
+    # When the fit fails at ransac_threshold_m, the scatter of the returns
+    # about the best plane is measured and the fit is repeated at twice that,
+    # capped here. Such rows record the tolerance used and carry the
+    # `wide_tolerance_fit` flag. Set the cap equal to ransac_threshold_m to
+    # disable.
+    ransac_threshold_max_m: float = 0.15
     min_inlier_frac: float = 0.6
     max_iter: int = 200
     min_density_pts_per_m2: float = 3.0

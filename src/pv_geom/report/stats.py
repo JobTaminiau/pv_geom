@@ -86,7 +86,7 @@ def prepare(df: pd.DataFrame, manifest: dict | None = None, *,
         df["point_density"] = df["n_points_panel"] / df["area_m2"].where(df["area_m2"] > 0)
 
     for col in ("polygon_vintage", "lidar_date", "vintage_gap_days", "lidar_date_source",
-                "roof_ref_source"):
+                "roof_ref_source", "panel_fit_tolerance_m"):
         if col not in df.columns:
             df[col] = None
     supplied_gap = None
@@ -213,7 +213,7 @@ def basis_composition(df: pd.DataFrame) -> pd.DataFrame:
         rows.append({
             "geometry_basis": basis,
             "label": BASIS_LABELS[basis],
-            "n": int(len(sub)),
+            "n": len(sub),
             "share_count": len(sub) / n_total if n_total else np.nan,
             "area_m2": float(sub["w_area"].sum()),
             "share_area": float(sub["w_area"].sum()) / area_total if area_total else np.nan,
@@ -229,7 +229,7 @@ def summary_statistics(df: pd.DataFrame) -> pd.DataFrame:
         for weight in WEIGHTS:
             w = _weights(sub, weight)
             row: dict = {"stratum": key, "stratum_label": label, "weight": weight,
-                         "n": int(len(sub)), "area_m2": float(sub["w_area"].sum())}
+                         "n": len(sub), "area_m2": float(sub["w_area"].sum())}
             tilt = sub["panel_tilt_deg"].to_numpy(dtype=float)
             mean, sd = weighted_mean_sd(tilt, w)
             q = weighted_quantile(tilt, w, [0.05, 0.25, 0.5, 0.75, 0.95])
@@ -346,6 +346,7 @@ def fit_quality(df: pd.DataFrame) -> pd.DataFrame:
     fitted = df[df["fitted"]]
     specs = [
         ("panel_rmse_m", "Plane-fit RMSE", "m", fitted),
+        ("panel_fit_tolerance_m", "Fit tolerance used", "m", fitted),
         ("panel_tilt_unc_deg", "Tilt uncertainty (1 sigma)", "deg", fitted),
         ("panel_azimuth_unc_deg", "Azimuth uncertainty (1 sigma)", "deg", fitted),
         ("point_density", "Point density in polygon", "pts/m2", df),
@@ -354,8 +355,9 @@ def fit_quality(df: pd.DataFrame) -> pd.DataFrame:
     ]
     rows = []
     for col, label, unit, frame in specs:
+        values = pd.to_numeric(frame[col], errors="coerce")
         rows.append({"measure": col, "label": label, "unit": unit,
-                     "n": int(frame[col].notna().sum()), **_pct(frame[col])})
+                     "n": int(values.notna().sum()), **_pct(values)})
     return pd.DataFrame(rows)
 
 

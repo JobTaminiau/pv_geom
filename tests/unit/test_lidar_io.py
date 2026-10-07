@@ -7,7 +7,6 @@ from pathlib import Path
 
 import laspy
 import numpy as np
-import pytest
 from shapely.geometry import box
 
 from pv_geom.io.lidar import clip_points_to_polygon, read_tile_points

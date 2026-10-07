@@ -140,6 +140,35 @@ def _build_row(
         from pv_geom.geometry.plane_fit import _failed_fit
         panel_fit = _failed_fit(len(panel_pts))
 
+    # Noise-adaptive retry: no consensus at the base tolerance may only mean
+    # the returns are noisier than it assumes. Measure their scatter about the
+    # best plane in the widest allowed band and refit at twice that.
+    fit_tolerance = cfg.panel_plane.ransac_threshold_m
+    max_tol = cfg.panel_plane.ransac_threshold_max_m
+    if (
+        np.isnan(panel_fit.tilt_deg)
+        and max_tol > fit_tolerance
+        and len(panel_pts) >= cfg.panel_plane.min_points
+    ):
+        def _fit_at(tol: float):
+            return fit_plane_ransac(
+                panel_pts, ransac_threshold=tol,
+                min_inlier_frac=cfg.panel_plane.min_inlier_frac,
+                max_iter=cfg.panel_plane.max_iter,
+                tilt_floor_deg=cfg.panel_plane.tilt_floor_deg, seed=seed,
+            )
+
+        wide = _fit_at(max_tol)
+        if not np.isnan(wide.tilt_deg):
+            resid = (panel_pts[wide.inlier_mask] - wide.centroid) @ wide.normal
+            sigma = 1.4826 * float(np.median(np.abs(resid - np.median(resid))))
+            tol = float(np.clip(2.0 * sigma, fit_tolerance, max_tol))
+            refit = _fit_at(tol) if tol < max_tol else wide
+            panel_fit, fit_tolerance = (
+                (wide, max_tol) if np.isnan(refit.tilt_deg) else (refit, tol)
+            )
+            flags.append("wide_tolerance_fit")
+
     if np.isnan(panel_fit.tilt_deg):
         flags.append("poor_fit")
     elif np.isnan(panel_fit.azimuth_deg):
@@ -256,6 +285,7 @@ def _build_row(
         "panel_tilt_deg": _f32(panel_fit.tilt_deg),
         "panel_azimuth_deg": _f32(panel_fit.azimuth_deg),
         "panel_rmse_m": _f32(panel_fit.rmse),
+        "panel_fit_tolerance_m": np.float32(fit_tolerance) if fit_ok else None,
         "panel_tilt_unc_deg": _f32(tilt_unc),
         "panel_azimuth_unc_deg": _f32(az_unc),
         "n_planes_detected": np.int8(2 if secondary is not None else (1 if fit_ok else 0)),
@@ -424,6 +454,12 @@ def process_tile_group(
     # the runner doesn't have to pre-screen the whole bucket; if the *primary*
     # tile is missing we emit no rows because a tile group's polygons live on
     # its primary tile by construction.
+    roof_pad = cfg.roof_plane.buffer_max_m + 1.0
+    ground_pad = max(cfg.heights.ground_search_radius_m,
+                     cfg.heights.ground_fallback_max_radius_m)
+    near_ground = _NearMask(polygons.geometry, pad_m=ground_pad)
+    near_panel = _NearMask(polygons.geometry, pad_m=roof_pad)
+
     primary_vintage = None
     primary_loaded = False
     ground_chunks: list[np.ndarray] = []
@@ -438,11 +474,17 @@ def process_tile_group(
         except RemoteFileMissing:
             print(f"[tile_task] {uri} missing; skipping")
             continue
+        # Nothing farther from a polygon than the ground-search radius is
+        # ever used; dropping it here is what keeps a sparse inventory on big,
+        # dense tiles (Delaware: 44M returns per tile) inside worker memory.
         pts = data.points
+        pts = pts[near_ground(pts[:, 0], pts[:, 1])]
         cls = pts[:, 3].astype(np.int16)
         ground_chunks.append(pts[cls == cls_cfg.ground_class][:, :3])
-        primary_cls_chunks.append(pts[cls == cls_cfg.panel_class_primary][:, :3])
-        fallback_cls_chunks.append(pts[cls == cls_cfg.panel_class_fallback][:, :3])
+        for chunks, klass in ((primary_cls_chunks, cls_cfg.panel_class_primary),
+                              (fallback_cls_chunks, cls_cfg.panel_class_fallback)):
+            cand = pts[cls == klass][:, :3]
+            chunks.append(cand[near_panel(cand[:, 0], cand[:, 1])])
         if tid == primary_tile_id:
             primary_loaded = True
             primary_vintage = data.vintage
@@ -472,9 +514,6 @@ def process_tile_group(
     contributing_tile_ids = tuple(t for t in fetch_tile_ids if tile_uri_map.get(t))
     row_lidar_date, row_lidar_source = _lidar_date_for(primary_vintage, lidar_date)
 
-    roof_pad = cfg.roof_plane.buffer_max_m + 1.0
-    ground_pad = max(cfg.heights.ground_search_radius_m,
-                     cfg.heights.ground_fallback_max_radius_m)
     geoms = polygons.geometry.to_numpy()
     neighbours = shapely.STRtree(geoms)
     has_parent_col = "parent_polygon_id" in polygons.columns
@@ -526,6 +565,41 @@ def process_tile_group(
 
     cols = {f.name: [r.get(f.name) for r in rows] for f in schema}
     return pa.table(cols, schema=schema)
+
+
+class _NearMask:
+    """Which (x, y) lie within ``pad_m`` of any polygon's bounding box, answered
+    from a coarse raster so it costs one lookup per point."""
+
+    def __init__(self, geometries, pad_m: float, cell_m: float = 10.0) -> None:
+        bounds = np.asarray([g.bounds for g in geometries], dtype=float).reshape(-1, 4)
+        self.cell = float(cell_m)
+        self.empty = len(bounds) == 0
+        if self.empty:
+            return
+        lo = bounds[:, :2] - pad_m
+        hi = bounds[:, 2:] + pad_m
+        self.x0, self.y0 = lo.min(axis=0)
+        nx = int(np.floor((hi[:, 0].max() - self.x0) / self.cell)) + 1
+        ny = int(np.floor((hi[:, 1].max() - self.y0) / self.cell)) + 1
+        self.mask = np.zeros((nx, ny), dtype=bool)
+        i0 = np.floor((lo[:, 0] - self.x0) / self.cell).astype(int)
+        i1 = np.floor((hi[:, 0] - self.x0) / self.cell).astype(int)
+        j0 = np.floor((lo[:, 1] - self.y0) / self.cell).astype(int)
+        j1 = np.floor((hi[:, 1] - self.y0) / self.cell).astype(int)
+        for a, b, c, d in zip(i0, i1, j0, j1, strict=True):
+            self.mask[a:b + 1, c:d + 1] = True
+
+    def __call__(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        if self.empty:
+            return np.zeros(len(x), dtype=bool)
+        ix = np.floor((x - self.x0) / self.cell).astype(np.int64)
+        iy = np.floor((y - self.y0) / self.cell).astype(np.int64)
+        nx, ny = self.mask.shape
+        inside = (ix >= 0) & (ix < nx) & (iy >= 0) & (iy < ny)
+        out = np.zeros(len(x), dtype=bool)
+        out[inside] = self.mask[ix[inside], iy[inside]]
+        return out
 
 
 def _is_nat(v: Any) -> bool:

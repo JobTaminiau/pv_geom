@@ -6,7 +6,7 @@ from pathlib import Path
 
 import geopandas as gpd
 import pytest
-from shapely.geometry import MultiPolygon, Polygon, box
+from shapely.geometry import MultiPolygon, box
 
 from pv_geom.io.polygons import read_polygons
 

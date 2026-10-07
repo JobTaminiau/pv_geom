@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -39,7 +39,7 @@ def write_manifest(
         "crs": crs,
         "vintage": vintage or {},
         "cluster_spec": cluster_spec,
-        "run_timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "run_timestamp_utc": datetime.now(UTC).isoformat(),
         "counts": counts,
         "aggregate_stats": aggregate_stats,
         "tiles_touched": tiles_touched,

@@ -135,6 +135,7 @@ def _draw_tilt(ax, df: pd.DataFrame, headline: str, weight: str, *, max_deg: flo
     edges = np.arange(0.0, max_deg + bin_deg, bin_deg)
     series = _series(df, headline)
     ymax = 0.0
+    legend_loc = "upper right"
     for i, (_key, label, sub) in enumerate(series):
         tilt = np.clip(sub["panel_tilt_deg"].to_numpy(dtype=float), 0, max_deg - 1e-6)
         w = _w(sub, weight)
@@ -153,7 +154,11 @@ def _draw_tilt(ax, df: pd.DataFrame, headline: str, weight: str, *, max_deg: flo
             ax.stairs(share, edges, color=BLUE, linewidth=1.2, label=label, zorder=3)
             med = float(weighted_quantile(sub["panel_tilt_deg"], w, 0.5)[0])
             ax.axvline(med, color=BLUE, linewidth=0.6, zorder=2)
-            left = len(series) > 1 and med > 0.2 * max_deg
+            # Legend and median label take opposite sides of the median line.
+            if med > 0.4 * max_deg:
+                legend_loc, left = "upper left", False
+            else:
+                left = len(series) > 1 and med > 0.2 * max_deg
             ax.annotate(f"median {med:.1f}°", xy=(med, 1.0), xycoords=("data", "axes fraction"),
                         xytext=(-3 if left else 3, -2), textcoords="offset points", va="top",
                         ha="right" if left else "left", fontsize=6.5, color=INK_2)
@@ -164,7 +169,7 @@ def _draw_tilt(ax, df: pd.DataFrame, headline: str, weight: str, *, max_deg: flo
     ax.yaxis.grid(True)
     ax.set_axisbelow(True)
     if legend and len(series) > 1:
-        ax.legend(loc="upper right", handlelength=1.4, borderaxespad=0.2)
+        ax.legend(loc=legend_loc, handlelength=1.4, borderaxespad=0.2)
 
 
 def _draw_rose(ax, df: pd.DataFrame, headline: str, weight: str, *, n_sectors: int = 24) -> None:

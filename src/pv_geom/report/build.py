@@ -17,7 +17,7 @@ import base64
 import html
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -114,11 +114,17 @@ def summarise(df: pd.DataFrame, tables: dict[str, pd.DataFrame], manifest: dict,
         "crs": manifest.get("crs") or manifest.get("config", {}).get("crs", {}).get("target"),
         "inputs": manifest.get("inputs", {}),
         "n_input_polygons": manifest.get("counts", {}).get("polygons"),
-        "n_rows": int(len(df)),
+        "n_rows": len(df),
         "n_fitted": n_fit,
         "fit_rate": n_fit / len(df) if len(df) else float("nan"),
         "total_plan_area_m2": float(df["area_m2"].sum()),
         "polygon_vintage": _iso(poly.max()) if len(poly) else v.get("polygon_vintage"),
+        # How the vintage was declared ("2024"), when it was a window rather
+        # than a day and every row shares it.
+        "polygon_vintage_declared_as": (
+            v.get("polygon_vintage_declared_as")
+            if not v.get("polygon_vintage_column") and len(set(poly)) <= 1 else None
+        ),
         "polygon_vintage_min": _iso(poly.min()) if len(poly) else v.get("polygon_vintage"),
         "lidar_date_min": _iso(lidar.min()) if len(lidar) else v.get("lidar_flight_start"),
         "lidar_date_max": _iso(lidar.max()) if len(lidar) else v.get("lidar_flight_end"),
@@ -139,7 +145,12 @@ def summarise(df: pd.DataFrame, tables: dict[str, pd.DataFrame], manifest: dict,
         "panel_rmse_m_p50": float(rmse.median()) if len(rmse) else float("nan"),
         "panel_rmse_m_p90": float(rmse.quantile(0.9)) if len(rmse) else float("nan"),
         "point_density_p50": float(df["point_density"].median()),
-        "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "wide_tolerance_share_of_fitted": (
+            float(df.loc[df["fitted"], "flags"]
+                  .map(lambda f: f is not None and "wide_tolerance_fit" in f).mean())
+            if n_fit else float("nan")
+        ),
+        "generated_utc": datetime.now(UTC).isoformat(timespec="seconds"),
     }
 
 
@@ -238,6 +249,9 @@ def _years(days) -> str:
 def vintage_statement(s: dict) -> str:
     lid = s["lidar_date_max"]
     pol = s["polygon_vintage"]
+    declared = s.get("polygon_vintage_declared_as")
+    if pol is not None and declared and str(declared) != str(pol):
+        pol = f"{declared} (counted as {pol})"
     gap = s["vintage_gap_days"]
     src = {"gps_time": "measured from per-point GPS time",
            "declared": "as declared for the run",
@@ -251,14 +265,14 @@ def vintage_statement(s: dict) -> str:
                 f"so the panel-standoff screen is the only evidence that panels were present "
                 f"when the LiDAR was flown.")
     if lid is None:
-        return (f"The polygons derive from imagery captured by {pol}; the LiDAR capture "
+        return (f"The polygons derive from imagery dated {pol}; the LiDAR capture "
                 f"date could not be established.")
     if gap is not None and gap > 0:
-        return (f"The polygons derive from imagery captured by {pol}; the LiDAR was captured "
+        return (f"The polygons derive from imagery dated {pol}; the LiDAR was captured "
                 f"by {lid} ({src}). The polygons are therefore {_years(gap)} newer than the "
                 f"LiDAR: an installation built in that interval has a polygon but was not "
                 f"there to be measured, and its fitted plane is the surface that preceded it.")
-    return (f"The polygons derive from imagery captured by {pol}; the LiDAR was captured by "
+    return (f"The polygons derive from imagery dated {pol}; the LiDAR was captured by "
             f"{lid} ({src}). The polygons are no newer than the LiDAR, so each installation "
             f"was present when it was flown.")
 
@@ -308,6 +322,14 @@ def methods_text(s: dict, manifest: dict, area_name: str | None) -> str:
     ring = ("clipped to the building footprint the polygon overlaps where one exists and "
             "left unclipped otherwise" if footprints else
             "not clipped to building footprints, as none were supplied")
+    share = s.get("wide_tolerance_share_of_fitted")
+    cap = pp.get("ransac_threshold_max_m")
+    wide = ""
+    if cap and share is not None and np.isfinite(share) and share > 0:
+        wide = (f" Where no plane reached that consensus, the scatter of the returns about "
+                f"the best plane was measured and the fit repeated with an inlier distance "
+                f"of twice that scatter, up to {cap:g} m; {100 * share:.0f}% of fitted "
+                f"polygons were fitted this way and are flagged.")
     if s["lidar_date_max"] is None:
         lid = ""
     elif s["lidar_date_min"] != s["lidar_date_max"]:
@@ -323,7 +345,7 @@ def methods_text(s: dict, manifest: dict, area_name: str | None) -> str:
         f"RANSAC (inlier distance {pp.get('ransac_threshold_m', 0.05):g} m, "
         f"{pp.get('max_iter', 200)} iterations) and refined by least squares on the inliers; "
         f"a fit was accepted when at least {100 * pp.get('min_inlier_frac', 0.6):.0f}% of "
-        f"returns were inliers. Tilt is the angle of the plane from horizontal and azimuth "
+        f"returns were inliers.{wide} Tilt is the angle of the plane from horizontal and azimuth "
         f"the compass direction of its downslope normal; azimuth is not reported below "
         f"{pp.get('tilt_floor_deg', 1.0):g}° of tilt. Uncertainties are the standard "
         f"deviation over {pp.get('bootstrap_samples', 50)} bootstrap resamples of the "
@@ -595,7 +617,8 @@ def build_report(
         dictionary = dictionary[dictionary["column"].isin(gdf.columns)]
 
     title = title or (f"PV array geometry: {area_name}" if area_name else "PV array geometry")
-    subtitle = (f"{s['n_rows']:,} polygons · polygon vintage {s['polygon_vintage'] or 'not declared'}"
+    subtitle = (f"{s['n_rows']:,} polygons · polygon vintage "
+                f"{s.get('polygon_vintage_declared_as') or s['polygon_vintage'] or 'not declared'}"
                 f" · LiDAR {s['lidar_date_max'] or 'date unknown'} · pv-geom v{s['pkg_version']}")
     methods = methods_text(s, manifest, area_name)
     disp = display_tables(tables, headline)

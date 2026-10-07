@@ -1,6 +1,4 @@
-# Metro Phoenix overrides. Inherits all unset fields from default.yaml semantics
-# via Pydantic defaults; the loader does NOT merge — supply a complete config or
-# set sparse keys via Pydantic partial loading (see config.py).
+# Metro Phoenix overrides; unset keys take the defaults in default.yaml.
 crs:
   target: EPSG:6341           # USGS LPC AZ MaricopaPinal 2020 — verified via spike
 
@@ -9,8 +7,9 @@ vintage:
   # USGS 3DEP tiles were flown 2020-11-26/28 (GPS time — the LAS header says
   # 2021-06-30, which is the delivery date). Arrays built in the ~3.4-year gap
   # are in the inventory but not in the point cloud. Declaring it here makes
-  # the run say so instead of leaving it to tribal knowledge.
-  input_epoch: 2024-04-01
+  # the run say so instead of leaving it to tribal knowledge. The LiDAR date
+  # is left to be measured per tile.
+  polygon_vintage: 2024-04-01
 
 io:
   lidar_reader: laspy

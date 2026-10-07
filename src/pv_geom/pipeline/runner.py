@@ -172,7 +172,7 @@ def run_pipeline(
             name_col=tile_id_col,
             name_template=name_template,
         )
-    tile_uri_map = dict(zip(tindex[tile_id_col].astype(str), tindex["tile_path"]))
+    tile_uri_map = dict(zip(tindex[tile_id_col].astype(str), tindex["tile_path"], strict=True))
 
     # 2) Partition ------------------------------------------------------------
     assignments = assign_polygons_to_tiles(
@@ -198,8 +198,8 @@ def run_pipeline(
             inputs=inputs,
             crs=target_crs,
             cluster_spec={"backend": "dry_run"},
-            counts={"polygons": int(len(polygons)),
-                    "tile_groups": int(len(groups)),
+            counts={"polygons": len(polygons),
+                    "tile_groups": len(groups),
                     "attempted": 0, "succeeded": 0, "failed": 0},
             aggregate_stats={"dry_run": True},
             tiles_touched=sorted({t for g in groups for t in g.fetch_tile_ids}),
@@ -472,8 +472,8 @@ def run_pipeline(
         crs=target_crs,
         cluster_spec={"backend": cfg.compute.backend, "use_dask": use_dask},
         counts={
-            "polygons": int(len(polygons)),
-            "tile_groups": int(len(groups)),
+            "polygons": len(polygons),
+            "tile_groups": len(groups),
             "attempted": int(n_attempted),
             "succeeded": int(n_succeeded),
             "failed": int(n_attempted - n_succeeded),

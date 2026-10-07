@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from shapely.geometry import box
 
 from pv_geom.geometry.heights import (

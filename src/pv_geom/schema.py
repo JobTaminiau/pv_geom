@@ -64,6 +64,9 @@ _CORE_FIELDS: list[pa.Field] = [
             "below the tilt floor, where it is undefined."),
     _f("panel_rmse_m", pa.float32(), unit="m",
        desc="Perpendicular RMSE of the inliers about the fitted plane."),
+    _f("panel_fit_tolerance_m", pa.float32(), unit="m",
+       desc="RANSAC inlier distance the accepted fit used. Larger than the "
+            "configured base when the returns were too noisy for it."),
     _f("panel_tilt_unc_deg", pa.float32(), unit="deg",
        desc="Bootstrap 1-sigma uncertainty of the tilt."),
     _f("panel_azimuth_unc_deg", pa.float32(), unit="deg",
@@ -147,6 +150,8 @@ FLAG_DESCRIPTIONS: dict[str, str] = {
     "low_density": "Too few returns in the polygon for a robust fit.",
     "poor_fit": "No plane reached consensus; tilt and azimuth are null.",
     "near_horizontal": "Tilt below the floor; azimuth is undefined and null.",
+    "wide_tolerance_fit": "Fit accepted only at a wider inlier tolerance than the base "
+                          "(noisy returns); see panel_fit_tolerance_m.",
     "east_west_rack": "Two planes facing ~180 deg apart at similar tilt.",
     "roof_insufficient": "The roof ring never gathered enough returns.",
     "roof_no_consensus": "No single plane described the roof ring.",

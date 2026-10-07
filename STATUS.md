@@ -1,6 +1,62 @@
 # pv-geom — status
 
-PRD: `docs/pv_geom_PRD.md` (v0.1, 2026-05-01).
+PRD: `docs/pv_geom_PRD.md` (v0.1, 2026-05-01). Changes by version: `CHANGELOG.md`.
+
+**2026-10-07 — v0.2.0: THE PACKAGE'S JOB IS RESTATED, AND IT NOW RUNS ON A SECOND JURISDICTION.** Goal as set by the user: ingest a polygon set (with a vintage) and a LiDAR dataset (with a capture date) and produce datasets, visualizations and a report characterising the geometry of the polygons, fit for reporting or journal publication. **Mounting classification is archived** (off by default, columns out of the schema; code + tests kept in `classify/`) — it needs better heuristics with tested examples, and it no longer blocks anything. The parking-lot-first redesign (old pick-up item #1) is parked with it.
+
+What 0.2.0 does (branch `v0.2-geometry-report`; 254 unit tests, was 194):
+
+- **Vintage is an input.** `--polygon-vintage` (or a per-polygon column) and `--lidar-date`; undeclared, the LiDAR date is measured per tile from GPS time. Every row carries `polygon_vintage`, `lidar_date`, `lidar_date_source`, `vintage_gap_days` and **`geometry_basis`** — `panel_confirmed` (plane ≥ 5 cm above the roof reference), `panel_by_vintage` (polygon no newer than the LiDAR), `surface_unresolved` (coincides with the roof and polygons are newer: flush array or bare roof), `unscreened`, `no_fit`.
+- **`pv-geom report <output>`** → `report.html` (self-contained), `report.md`, `methods.md` (paragraph filled with the run's parameters), `summary.json`, `tables/*.csv`, `figures/*.{png,pdf,svg}` at journal column widths, and `dataset/` (consolidated GeoParquet + CSV + data dictionary). Everything is reported per polygon and weighted by array surface, for all fitted rows and per geometry basis; the report leads with the panel-basis rows. Works on pre-0.2.0 outputs (pass the dates).
+- **Two inputs suffice.** Footprints are optional (open-ring roof reference; `roof_ref_source` says which). Polygons: any vector format, id column optional. CRS comes from the tile index; non-metric CRSs are refused. `pv-geom inspect-tile` vets a new LiDAR source.
+- **Noise-adaptive fit tolerance** (`panel_plane.ransac_threshold_max_m`, flag `wide_tolerance_fit`, column `panel_fit_tolerance_m`) — found on Delaware, see below.
+- **Speed/memory**: per-group point grid, per-tile class + near-polygon filtering. Output is valid GeoParquet. Dead config keys removed.
+
+**Test runs (local, bounded; outputs + reports in the main checkout, gitignored):**
+
+| | Phoenix `out_v0.2.0_phoenix_test` | Delaware `out_v0.2.0_delaware_test` | Delaware + footprints `…_delaware_test_footprints` |
+|---|---|---|---|
+| Area | 3 × 2 km, west valley (`--bbox 365000 3721000 368000 3723000`) | 6 × 6 km, Sussex Co. (`--bbox 484500 4282500 490500 4288500`) | same |
+| Polygons | 3,390 (Mask R-CNN atlas) | 816 (`delaware-pv-detection` v1) | 816 |
+| Polygon vintage → LiDAR (measured) | 2024-04-01 → 2020-11-28, **+3.3 yr** | 2024 → 2023-03-31, **+1.8 yr** (year counted as 12-31) | same |
+| Wall time (5 / 4 local workers) | 3 min 56 s | 7 min 12 s | ~7 min |
+| Fitted | 2,994 (88.3%) | 683 (83.7%) | 683 (83.7%) |
+| panel_confirmed / unresolved / unscreened / no_fit | 1,021 / 896 / 1,077 / 396 | 183 / 188 / 312 / 133 | 183 / 211 / 289 / 133 |
+| Wide-tolerance share of fits | 23% | 60% | 60% |
+| Median fit RMSE | 2.2 cm | 4.8 cm | 4.8 cm |
+| Panel basis: median tilt (area-wtd), share facing S | 20.2°, 42% | 28.5°, 47% | 29.9°, 48% |
+
+Also: `pv-geom report` on the existing **v0.1.0 atlas (349,233 rows)** runs end to end and reproduces known numbers exactly (27,523 panel-confirmed / 43,932 unresolved = the pv-cooling tri-state split).
+
+**What Delaware broke (the "leaky abstractions"), all fixed in 0.2.0:**
+
+1. *No id column* in the polygon layer → ids synthesized, `input_row` added as a join key.
+2. *Tile-index id column is `NAME`, not `Name`* → auto-detected.
+3. *Fit tolerance was Phoenix-tuned.* Delaware returns scatter ~7.5 cm about a roof plane (Phoenix ~2 cm); at the 5 cm tolerance only **24%** of polygons on a test tile reached consensus (80% at 15 cm), and the first run fitted **35%**. The adaptive tolerance took that to **83.7%**. It also rescued 698 Phoenix rows (67.6% → 88.3%); these are real planes — 63% face within 10° of a cardinal direction vs 67% for base-tolerance fits and 22% by chance — but noisier (RMSE 5.9 vs 2.1 cm), hence the flag.
+4. *Memory.* DE tiles are 1.5 km at ~20 pts/m² (44M returns, 475 MB LAZ); one tile group was `KilledWorker` on 16 GB. Fixed by keeping only returns near polygons as each tile is read.
+5. *Documented S3 paths were stale*: DE LiDAR is at `s3://free-research-data-raw/US/delaware/top-level/lidar/point_cloud/tilecls/`; `…/national/fema_footprints/de.geoparquet` no longer exists (FEMA DE used here: `s3://de-database/data/delaware/pv_tep/inputs-de/footprints.parquet`). `../delaware-pv-geom` still points at the old ones.
+6. *DE tiles are named by their NW corner* (tile `4875004290000` spans northing 4288500–4290000). Irrelevant to the engine (it uses the index geometry) but a trap when fetching tiles by hand.
+7. Like Phoenix, DE tiles have **no class 6**, so the class-1 fallback is the normal path — now above *local* ground rather than one tile-wide median.
+
+**Open observations (not acted on):**
+
+- **Only 33% of the Delaware test polygons overlap a FEMA footprint** (270/816; Phoenix block: 78%). Either this rural block has many ground mounts, or the polygons / footprints are misregistered. Tilt is identical with and without footprints and both modes confirm 183 panels, so geometry is unaffected — but check before using `on_building` in Delaware.
+- 6 of 268 polygons on one DE tile contain only ground-level returns (ground mounts below the 0.8 m cutoff, or false detections).
+- The Delaware vintage is declared as the year 2024; the ortho's actual flight window would tighten the 1.8-year gap.
+- In both areas 36–46% of fitted rows are `unscreened` (no usable roof reference). Raising that share is the main lever on how much of the fleet is on a panel basis.
+
+**Pick-up list (replaces the 2026-08-03 list below):**
+
+1. **Review + merge `v0.2-geometry-report`**, then tag. Config hash and schema changed: v0.1.0 outputs cannot be resumed into.
+2. **Full reruns on Coiled** (not done here: they spend cluster budget and the Phoenix one supersedes the published `v0.1.0` prefix — write to a new `v0.2.0/` prefix). Phoenix: the STATUS launch command below plus `--polygon-vintage 2024-04-01`; expect well under the v0.1.0 campaign's cost given the indexing. Delaware: `configs/delaware.yaml`, 962 tiles carry polygons statewide (13,982 polygons); workers need ≥ 16 GiB.
+3. **Paper** (`docs/paper/`): still describes the SAM3 atlas and mounting labels. Rebuild §Data/§Results from `pv-geom report` output; `methods.md` is a drop-in for §Methods.
+4. **Validate `geometry_basis`** against the permit join in `../pv-cooling` (the 5 cm screen was calibrated on v0.1.0's 25% coverage; it now reaches ~⅔ of fitted rows, incl. open-ring references that have never been checked against permits).
+5. Release decisions (license, Zenodo) — unchanged, still the user's.
+6. Mounting classification — archived; revisit with tested examples.
+
+---
+
+*Everything below predates 0.2.0 and is kept as history; where it describes mounting labels or the old vintage flag as current, the entry above supersedes it.*
 
 **Sister project**: `../pv-cooling` consumes the v0.1.0 output (orientation vs cooling-demand coincidence; own STATUS.md + working paper). Two things flow back upstream from it — the vintage flag below, and Open improvement #9. It also carries a reusable **permit join**: an attribute join on normalized Assessor APN linking output rows to the metro-phoenix-solar-permits v1.0.0 archive (61,634 matched parcels), which is how any future install-date or policy analysis reaches this output.
 

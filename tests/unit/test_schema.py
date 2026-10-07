@@ -88,7 +88,7 @@ def test_mounting_labels_complete() -> None:
         "pole_mount",
         "ambiguous",
     }
-    assert MOUNTING_LABELS == expected
+    assert expected == MOUNTING_LABELS
 
 
 def test_quality_flags_cover_the_standoff_tri_state() -> None:

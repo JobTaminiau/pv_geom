@@ -32,31 +32,61 @@ def read_tile_points(
     Caches remote (``s3://``) tiles to local disk; local paths are read in
     place.
     """
+    data = read_tile(tile_uri, classes=classes, reader=reader, cache_dir=cache_dir)
+    return data.points, data.crs
+
+
+def read_tile(
+    tile_uri: str | Path,
+    *,
+    classes: tuple[int, ...] | None = None,
+    reader: str = "laspy",
+    cache_dir: Path | None = None,
+) -> TileData:
+    """Read a LAZ tile: points, CRS, and the dates it was flown.
+
+    The flight dates come from the GPS time of *every* point (the tile is being
+    decoded anyway), so they are exact for the tile rather than a sample.
+    """
     s = str(tile_uri)
     local = localize(s, cache_dir) if is_remote(s) else Path(s)
 
     if reader == "pdal":
         try:
-            return _read_via_pdal(local, classes)
+            pts, crs = _read_via_pdal(local, classes)
         except ImportError:
-            # PDAL not installed; fall through to laspy.
-            pass
+            pass                      # PDAL not installed; fall through to laspy
+        else:
+            # PDAL path does not carry GPS time; take the dates from the header.
+            return TileData(points=pts, crs=crs, vintage=read_tile_vintage(local))
 
-    return _read_via_laspy(local, classes)
+    pts, crs, vintage = _read_via_laspy(local, classes, tile_uri=s)
+    return TileData(points=pts, crs=crs, vintage=vintage)
 
 
 def _read_via_laspy(
-    local: Path, classes: tuple[int, ...] | None
-) -> tuple[np.ndarray, str | None]:
+    local: Path, classes: tuple[int, ...] | None, *, tile_uri: str | None = None
+) -> tuple[np.ndarray, str | None, TileVintage]:
     import laspy
 
     with laspy.open(str(local)) as src:
+        header = src.header
         try:
-            crs = src.header.parse_crs()
+            crs = header.parse_crs()
             crs_str = crs.to_string() if crs else None
         except Exception:
             crs_str = None
         las = src.read()
+
+    start = end = None
+    if "gps_time" in header.point_format.dimension_names and len(las.points):
+        start, end = _gps_range_to_dates(np.asarray(las.gps_time), header)
+    vintage = TileVintage(
+        tile_uri=tile_uri or str(local),
+        creation_date=header.creation_date,
+        flight_start=start,
+        flight_end=end,
+    )
 
     pts = np.column_stack(
         [
@@ -69,7 +99,7 @@ def _read_via_laspy(
     if classes is not None:
         mask = np.isin(pts[:, 3].astype(int), list(classes))
         pts = pts[mask]
-    return pts, crs_str
+    return pts, crs_str, vintage
 
 
 def _read_via_pdal(
@@ -137,6 +167,16 @@ class TileVintage:
         }
 
 
+@dataclass(frozen=True)
+class TileData:
+    """One decoded tile: ``(N, 4)`` ``[x, y, z, classification]``, its CRS
+    string (or None), and when it was flown."""
+
+    points: np.ndarray
+    crs: str | None
+    vintage: TileVintage
+
+
 # GPS week zero. LAS "Adjusted Standard GPS Time" is GPS seconds minus 1e9;
 # GPS time does not observe leap seconds, so converting to UTC subtracts the
 # offset in force. 18 s has held since 2017-01-01 and covers every 3DEP
@@ -151,6 +191,31 @@ def _adjusted_gps_to_date(adjusted: float) -> date:
     return (_GPS_EPOCH + delta).date()
 
 
+_SECONDS_PER_GPS_WEEK = 604_800
+
+
+def _gps_range_to_dates(gps: np.ndarray, header) -> tuple[date | None, date | None]:
+    """First and last flight date in a block of LAS GPS times, or (None, None).
+
+    LAS stores either *adjusted standard* GPS time (convertible to a date) or
+    *GPS week* time (seconds into an unnamed week — not convertible). The header
+    bit says which, but is mis-set often enough that a value larger than a week
+    is also accepted as standard time.
+    """
+    gps = np.asarray(gps, dtype=np.float64)
+    gps = gps[np.isfinite(gps) & (gps != 0.0)]
+    if not gps.size:
+        return None, None
+    lo, hi = float(gps.min()), float(gps.max())
+    try:
+        is_standard = int(header.global_encoding.gps_time_type) == 1
+    except Exception:
+        is_standard = False
+    if not is_standard and max(abs(lo), abs(hi)) <= _SECONDS_PER_GPS_WEEK:
+        return None, None
+    return _adjusted_gps_to_date(lo), _adjusted_gps_to_date(hi)
+
+
 def _vintage_from_open(src, tile_uri: str) -> TileVintage:
     header = src.header
     start = end = None
@@ -160,11 +225,7 @@ def _vintage_from_open(src, tile_uri: str) -> TileVintage:
         except StopIteration:
             chunk = None
         if chunk is not None:
-            gps = np.asarray(chunk.gps_time, dtype=np.float64)
-            gps = gps[np.isfinite(gps) & (gps != 0.0)]
-            if gps.size:
-                start = _adjusted_gps_to_date(gps.min())
-                end = _adjusted_gps_to_date(gps.max())
+            start, end = _gps_range_to_dates(np.asarray(chunk.gps_time), header)
     return TileVintage(
         tile_uri=tile_uri,
         creation_date=header.creation_date,
@@ -198,6 +259,55 @@ def read_tile_vintage(tile_uri: str | Path, cache_dir: Path | None = None) -> Ti
     local = localize(s, cache_dir) if is_remote(s) else Path(s)
     with laspy.open(str(local)) as src:
         return _vintage_from_open(src, s)
+
+
+def inspect_tile(tile_uri: str | Path, cache_dir: Path | None = None) -> dict:
+    """Summarise one LAZ tile: what a new LiDAR source has to be checked for
+    before a run can be trusted (classes present, density, CRS, units, dates)."""
+    import laspy
+
+    s = str(tile_uri)
+    local = localize(s, cache_dir) if is_remote(s) else Path(s)
+    with laspy.open(str(local)) as src:
+        header = src.header
+        try:
+            crs = header.parse_crs()
+        except Exception:
+            crs = None
+        las = src.read()
+
+    cls, counts = np.unique(np.asarray(las.classification), return_counts=True)
+    n = int(header.point_count)
+    dx = float(header.maxs[0] - header.mins[0])
+    dy = float(header.maxs[1] - header.mins[1])
+    start = end = None
+    if "gps_time" in header.point_format.dimension_names and n:
+        start, end = _gps_range_to_dates(np.asarray(las.gps_time), header)
+
+    horiz = units = None
+    if crs is not None:
+        h = crs.sub_crs_list[0] if crs.is_compound else crs
+        horiz = h.to_string() if h.to_epsg() is None else f"EPSG:{h.to_epsg()}"
+        units = h.axis_info[0].unit_name if h.axis_info else None
+    return {
+        "tile": s,
+        "las_version": str(header.version),
+        "point_format": int(header.point_format.id),
+        "n_points": n,
+        "extent_m": [dx, dy],
+        "density_pts_per_m2": n / (dx * dy) if dx > 0 and dy > 0 else None,
+        "z_range": [float(header.mins[2]), float(header.maxs[2])],
+        "classes": {int(c): int(k) for c, k in zip(cls, counts, strict=True)},
+        "has_building_class_6": bool((cls == 6).any()),
+        "has_ground_class_2": bool((cls == 2).any()),
+        "horizontal_crs": horiz,
+        "horizontal_units": units,
+        "flight_start": start.isoformat() if start else None,
+        "flight_end": end.isoformat() if end else None,
+        "header_creation_date": (
+            header.creation_date.isoformat() if header.creation_date else None
+        ),
+    }
 
 
 def clip_points_to_polygon(

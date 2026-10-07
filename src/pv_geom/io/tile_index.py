@@ -18,9 +18,10 @@ from pv_geom.io._localize import is_remote, localize
 
 def load_tile_index(
     uri: str | Path,
-    target_crs: str,
+    target_crs: str | None = None,
 ) -> gpd.GeoDataFrame:
-    """Load the tile-index dataset and reproject to ``target_crs``."""
+    """Load the tile-index dataset, reprojecting to ``target_crs`` when given
+    (``None`` keeps its native CRS, which is how ``crs.target: auto`` finds it)."""
     s = str(uri)
     suffix = s.lower().split("?", 1)[0]
 
@@ -36,9 +37,37 @@ def load_tile_index(
     else:
         gdf = gpd.read_file(s)
 
-    if gdf.crs is not None and str(gdf.crs).lower() != str(target_crs).lower():
+    if (
+        target_crs is not None
+        and gdf.crs is not None
+        and str(gdf.crs).lower() != str(target_crs).lower()
+    ):
         gdf = gdf.to_crs(target_crs)
     return gdf.reset_index(drop=True)
+
+
+_TILE_ID_ALIASES = ("name", "tile_id", "tilename", "tile_name", "filename", "location")
+
+
+def resolve_tile_id_col(tindex: gpd.GeoDataFrame, requested: str | None = None) -> str:
+    """Find the tile-id column: the requested name (case-insensitively), else
+    the first of the usual suspects. Tile indexes disagree on capitalisation
+    (USGS ships ``Name``, the Delaware state index ``NAME``)."""
+    lower = {c.lower(): c for c in tindex.columns}
+    if requested:
+        if requested in tindex.columns:
+            return requested
+        if requested.lower() in lower:
+            return lower[requested.lower()]
+        raise ValueError(
+            f"tile index has no '{requested}' column; columns are {list(tindex.columns)}"
+        )
+    for alias in _TILE_ID_ALIASES:
+        if alias in lower:
+            return lower[alias]
+    raise ValueError(
+        f"cannot find a tile-id column in {list(tindex.columns)}; pass tile_id_col"
+    )
 
 
 def build_tile_uris(

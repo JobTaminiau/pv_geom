@@ -1,19 +1,22 @@
-"""Per-tile-group worker. M6.
+"""Per-tile-group worker.
 
 Given a set of tiles to fetch and the polygons assigned to one primary tile,
-load all relevant LiDAR returns, apply the M3 panel fit + M4 roof plane and
-heights + M5 multi-plane and mounting classification, and emit one output row
-per polygon. Output is a pyarrow Table matching ``schema.OUTPUT_SCHEMA``.
+load the relevant LiDAR returns, fit the panel plane, the roof reference and the
+heights for each polygon, decide what each fit rests on (``geometry_basis``),
+and emit one output row per polygon as a pyarrow Table matching
+``schema.output_schema``.
 """
 
 from __future__ import annotations
 
 import hashlib
+from datetime import date
 from typing import Any
 
 import geopandas as gpd
 import numpy as np
 import pyarrow as pa
+import shapely
 from shapely import wkb
 
 from pv_geom import __version__
@@ -32,10 +35,12 @@ from pv_geom.geometry.multi_plane import (
     polygon_aspect_ratio,
 )
 from pv_geom.geometry.plane_fit import bootstrap_uncertainty, fit_plane_ransac
+from pv_geom.geometry.point_index import GroundModel, PointGrid
 from pv_geom.geometry.roof_plane import extract_roof_plane
 from pv_geom.io._localize import RemoteFileMissing
-from pv_geom.io.lidar import clip_points_to_polygon, read_tile_points
-from pv_geom.schema import OUTPUT_SCHEMA
+from pv_geom.io.lidar import clip_points_to_polygon, read_tile
+from pv_geom.schema import output_schema
+from pv_geom.vintage import geometry_basis, vintage_gap_days
 
 
 def _seed_for_polygon(polygon_id: str) -> int:
@@ -52,15 +57,14 @@ def _seed_for_polygon(polygon_id: str) -> int:
 def _split_classes_for_tile_group(
     pts: np.ndarray, cfg: PVGeomConfig
 ) -> tuple[np.ndarray, np.ndarray, int]:
-    """Split a tile-group point cloud into ground_xyz + panel-class points once.
+    """Split a tile-group point cloud into ground_xyz + panel-candidate points.
 
-    Returns ``(ground_xyz, panel_pts_xyz, class_used)``. When class 6 returns are
-    present they win; otherwise class-1 returns above the global ground median
-    plus ``fallback_height_above_ground_m`` are used. The fallback uses a single
-    tile-group-wide ground median (rather than a per-polygon neighborhood
-    median) because Phoenix terrain is flat at the 1 km tile scale and a
-    per-polygon class-equality scan over 50M+ points was the bottleneck for
-    1000-polygon runs (see HANDOFF.md).
+    Returns ``(ground_xyz, panel_pts_xyz, class_used)``. When the primary panel
+    class (ASPRS 6, building) is present it wins. Most public LiDAR does not
+    carry it — neither the Phoenix USGS tiles nor the Delaware state collection
+    do — so the usual path is the fallback: unclassified returns more than
+    ``fallback_height_above_ground_m`` above *local* ground, read from a grid of
+    ground elevations so the cut holds on sloping terrain.
     """
     if pts.size == 0:
         return np.zeros((0, 3)), np.zeros((0, 3)), cfg.io.classification.panel_class_primary
@@ -76,13 +80,17 @@ def _split_classes_for_tile_group(
         return ground_xyz, pts[cls == primary][:, :3], primary
 
     panel = pts[cls == fallback][:, :3]
-    if len(panel) == 0:
-        return ground_xyz, panel, fallback
+    return ground_xyz, _above_ground(panel, ground_xyz, cfg), fallback
 
-    if len(ground_xyz):
-        gz = float(np.median(ground_xyz[:, 2]))
-        panel = panel[panel[:, 2] > gz + cfg.io.classification.fallback_height_above_ground_m]
-    return ground_xyz, panel, fallback
+
+def _above_ground(candidates: np.ndarray, ground_xyz: np.ndarray, cfg: PVGeomConfig) -> np.ndarray:
+    """Keep candidate returns above the local-ground cutoff (all of them when
+    there is no ground reference at all)."""
+    if len(candidates) == 0 or len(ground_xyz) == 0:
+        return candidates
+    model = GroundModel(ground_xyz, cell_m=cfg.io.classification.ground_grid_cell_m)
+    gz = model.ground_z(candidates[:, 0], candidates[:, 1])
+    return candidates[candidates[:, 2] > gz + cfg.io.classification.fallback_height_above_ground_m]
 
 
 def _build_row(
@@ -95,11 +103,15 @@ def _build_row(
     *,
     panel_pts: np.ndarray,                  # (N, 3) panel-class points clipped to polygon
     ground_xyz: np.ndarray,                 # (G, 3) class-2 returns for the tile group
-    roof_input_pts: np.ndarray,             # (P, 3) panel-class returns for the tile group (ring-clipped inside extract_roof_plane)
-    footprints: gpd.GeoDataFrame,
+    roof_input_pts: np.ndarray,             # (P, 3) panel-class returns around the polygon (ring-clipped inside extract_roof_plane)
+    footprints: gpd.GeoDataFrame | None,    # None = run has no footprint layer
     other_pv_polygons: gpd.GeoDataFrame,
     contributing_tile_ids: tuple[str, ...],
     parent_polygon_id: str | None = None,   # defaults to polygon_id (single-part input)
+    input_row: int = 0,
+    polygon_vintage: date | None = None,    # imagery capture date for this polygon
+    lidar_date: date | None = None,         # LiDAR capture date for this polygon's tile
+    lidar_date_source: str | None = None,   # declared | gps_time | header_date
 ) -> dict[str, Any]:
     """Compute all per-row fields. Returns a dict keyed on schema names."""
     flags: list[str] = []
@@ -158,8 +170,9 @@ def _build_row(
         )
     else:
         from pv_geom.geometry.roof_plane import RoofPlaneResult
-        roof_res = RoofPlaneResult(fit=None, on_building=False, building_id=None,
-                                   flag=None, used_buffer_m=None)
+        roof_res = RoofPlaneResult(fit=None,
+                                   on_building=None if footprints is None else False,
+                                   building_id=None, flag=None, used_buffer_m=None)
 
     if roof_res.flag:
         flags.append(roof_res.flag)
@@ -209,6 +222,94 @@ def _build_row(
     elif har < cfg.heights.min_panel_standoff_m:
         flags.append("no_panel_standoff")
 
+    # What this row's tilt and azimuth rest on: the standoff screen is direct
+    # evidence that panels were in the cloud; failing that, the declared dates
+    # of the two inputs decide (see pv_geom.vintage).
+    fit_ok = not np.isnan(panel_fit.tilt_deg)
+    gap_days = vintage_gap_days(polygon_vintage, lidar_date)
+    basis = geometry_basis(
+        fit_ok=fit_ok,
+        standoff_passed=standoff_screenable and har >= cfg.heights.min_panel_standoff_m,
+        standoff_screened=standoff_screenable,
+        gap_days=gap_days,
+    )
+
+    row: dict[str, Any] = {
+        "polygon_id": str(polygon_id),
+        "parent_polygon_id": str(parent_polygon_id if parent_polygon_id is not None else polygon_id),
+        "input_row": np.int32(input_row),
+        "geometry": wkb.dumps(polygon),
+        "area_m2": np.float32(area_m2),
+        "surface_area_m2": (
+            np.float32(area_m2 / np.cos(np.radians(panel_fit.tilt_deg)))
+            if fit_ok and panel_fit.tilt_deg < 89.0 else None
+        ),
+        "aspect_ratio": _f32(aspect),
+        "polygon_vintage": polygon_vintage,
+        "lidar_date": lidar_date,
+        "lidar_date_source": lidar_date_source,
+        "vintage_gap_days": None if gap_days is None else np.int32(gap_days),
+        "geometry_basis": basis,
+        "n_points_panel": int(panel_fit.n_total),
+        "n_inliers_panel": int(panel_fit.n_inliers),
+        "point_density": np.float32(density),
+        "panel_tilt_deg": _f32(panel_fit.tilt_deg),
+        "panel_azimuth_deg": _f32(panel_fit.azimuth_deg),
+        "panel_rmse_m": _f32(panel_fit.rmse),
+        "panel_tilt_unc_deg": _f32(tilt_unc),
+        "panel_azimuth_unc_deg": _f32(az_unc),
+        "n_planes_detected": np.int8(2 if secondary is not None else (1 if fit_ok else 0)),
+        "secondary_tilt_deg": _f32(secondary.tilt_deg) if secondary is not None else None,
+        "secondary_azimuth_deg": _f32(secondary.azimuth_deg) if secondary is not None else None,
+        "roof_ref_source": roof_res.source,
+        "roof_tilt_deg": _f32(roof_res.fit.tilt_deg) if roof_res.fit is not None else None,
+        "roof_azimuth_deg": _f32(roof_res.fit.azimuth_deg) if roof_res.fit is not None else None,
+        "roof_rmse_m": _f32(roof_res.fit.rmse) if roof_res.fit is not None else None,
+        "panel_roof_angle_deg": _f32(pra),
+        "height_above_roof_m": _f32(har),
+        "height_above_ground_m": _f32(hag),   # null when unknown (schema nullable)
+        "on_building": None if roof_res.on_building is None else bool(roof_res.on_building),
+        "building_id": roof_res.building_id,
+        "flags": flags,
+        "lidar_tile_ids": list(contributing_tile_ids),
+        "pkg_version": __version__,
+        "config_hash": config_hash,
+        "run_id": run_id,
+        "partition_id": np.int32(partition_id),
+    }
+
+    if cfg.mounting_rules.enabled:
+        row.update(
+            _mounting_fields(
+                cfg, flags, polygon=polygon, panel_fit=panel_fit, panel_z=panel_z,
+                ground_xyz=ground_xyz, roof_res=roof_res,
+                roof_plane_available=roof_plane_available,
+                pra=pra, har=har, hag=hag, area_m2=area_m2, aspect=aspect,
+            )
+        )
+    return row
+
+
+def _mounting_fields(
+    cfg: PVGeomConfig,
+    flags: list[str],
+    *,
+    polygon: Any,
+    panel_fit: Any,
+    panel_z: np.ndarray,
+    ground_xyz: np.ndarray,
+    roof_res: Any,
+    roof_plane_available: bool,
+    pra: float,
+    har: float,
+    hag: float,
+    area_m2: float,
+    aspect: float,
+) -> dict[str, Any]:
+    """EXPERIMENTAL mounting classification (archived in 0.2.0; only runs when
+    ``mounting_rules.enabled``). Appends its own flags to ``flags`` in place."""
+    on_building = bool(roof_res.on_building)
+
     # Canopy evidence: ground-class returns under the panel polygon (NaN HAG
     # or footprint errors must not silently become "ground level"; the gap
     # under the panels is the direct LiDAR signal).
@@ -223,7 +324,7 @@ def _build_row(
     # building the footprint layer is missing. The R3/R8 height caps route it
     # toward ambiguous; the flag makes the population auditable.
     if (
-        not roof_res.on_building
+        not on_building
         and not canopy_evidence
         and not np.isnan(hag)
         and hag > cfg.mounting_rules.missing_footprint_hag_m
@@ -234,67 +335,39 @@ def _build_row(
     # NaN HAG/tilt propagate — is_tracker_suspected returns False on NaN,
     # which is the correct "unknown" behavior (was coerced to 0.0 pre-0.3).
     if is_tracker_suspected(
-        on_building=roof_res.on_building,
+        on_building=on_building,
         aspect_ratio=aspect,
         height_above_ground_m=hag,
         panel_tilt_deg=panel_fit.tilt_deg,
     ):
         flags.append("tracker_suspected")
 
-    # M5 mounting classification. NaN HAG propagates: the rules treat unknown
-    # heights as non-evidence and fall through to ambiguous rather than
-    # confidently classifying at "ground level".
+    # NaN HAG propagates: the rules treat unknown heights as non-evidence and
+    # fall through to ambiguous rather than classifying at "ground level". The
+    # rules only use roof features from a footprint ring — an open-ring
+    # reference exists for the standoff screen, not as evidence of a building.
+    use_roof = roof_plane_available and on_building
     feats = MountingFeatures(
-        on_building=roof_res.on_building,
+        on_building=on_building,
         panel_tilt_deg=panel_fit.tilt_deg,
         panel_azimuth_deg=panel_fit.azimuth_deg,
-        panel_roof_angle_deg=pra,
-        height_above_roof_m=har,
+        panel_roof_angle_deg=pra if use_roof else float("nan"),
+        height_above_roof_m=har if use_roof else float("nan"),
         height_above_ground_m=hag,
         area_m2=area_m2,
         aspect_ratio=aspect,
-        roof_plane_available=roof_plane_available,
-        roof_tilt_deg=float(roof_res.fit.tilt_deg) if roof_plane_available else None,
+        roof_plane_available=use_roof,
+        roof_tilt_deg=float(roof_res.fit.tilt_deg) if use_roof else None,
         east_west_rack="east_west_rack" in flags,
         n_ground_under=n_ground_under,
         ground_under_gap_m=ground_under_gap,
-        no_panel_standoff="no_panel_standoff" in flags,
+        no_panel_standoff=use_roof and "no_panel_standoff" in flags,
     )
     mr = classify_mounting(feats, cfg.mounting_rules)
-
     return {
-        "polygon_id": str(polygon_id),
-        "parent_polygon_id": str(parent_polygon_id if parent_polygon_id is not None else polygon_id),
-        "geometry": wkb.dumps(polygon),
-        "n_points_panel": int(panel_fit.n_total),
-        "n_inliers_panel": int(panel_fit.n_inliers),
-        "panel_tilt_deg": _f32(panel_fit.tilt_deg),
-        "panel_azimuth_deg": _f32(panel_fit.azimuth_deg),
-        "panel_rmse_m": _f32(panel_fit.rmse),
-        "panel_tilt_unc_deg": _f32(tilt_unc),
-        "panel_azimuth_unc_deg": _f32(az_unc),
-        "n_planes_detected": np.int8(2 if secondary is not None else (1 if not np.isnan(panel_fit.tilt_deg) else 0)),
-        "secondary_tilt_deg": _f32(secondary.tilt_deg) if secondary is not None else None,
-        "secondary_azimuth_deg": _f32(secondary.azimuth_deg) if secondary is not None else None,
-        "roof_tilt_deg": _f32(roof_res.fit.tilt_deg) if roof_res.fit is not None else None,
-        "roof_azimuth_deg": _f32(roof_res.fit.azimuth_deg) if roof_res.fit is not None else None,
-        "roof_rmse_m": _f32(roof_res.fit.rmse) if roof_res.fit is not None else None,
-        "panel_roof_angle_deg": _f32(pra),
-        "height_above_roof_m": _f32(har),
-        "height_above_ground_m": _f32(hag),   # null when unknown (schema nullable)
-        "on_building": bool(roof_res.on_building),
-        "building_id": roof_res.building_id,
-        "area_m2": np.float32(area_m2),
-        "aspect_ratio": _f32(aspect),
         "mounting_type": str(mr.label),
         "mounting_confidence": np.float32(mr.confidence),
         "mounting_rule": str(mr.triggered_rule),
-        "flags": list(flags),
-        "lidar_tile_ids": list(contributing_tile_ids),
-        "pkg_version": __version__,
-        "config_hash": config_hash,
-        "run_id": run_id,
-        "partition_id": np.int32(partition_id),
     }
 
 
@@ -307,94 +380,156 @@ def _f32(v) -> Any:
     return np.float32(v)
 
 
+def _lidar_date_for(vintage, declared: date | None) -> tuple[date | None, str | None]:
+    """The capture date to stamp on a tile's rows, and where it came from."""
+    if declared is not None:
+        return declared, "declared"
+    if vintage is None:
+        return None, None
+    if vintage.flight_end is not None:
+        return vintage.flight_end, "gps_time"
+    if vintage.creation_date is not None:
+        return vintage.creation_date, "header_date"
+    return None, None
+
+
 def process_tile_group(
     tile_uri_map: dict[str, str],
     primary_tile_id: str,
     polygons: gpd.GeoDataFrame,
     fetch_tile_ids: tuple[str, ...],
-    footprints: gpd.GeoDataFrame,
+    footprints: gpd.GeoDataFrame | None,
     cfg: PVGeomConfig,
     *,
     config_hash: str,
     run_id: str,
     partition_id: int,
     polygon_id_col: str = "polygon_id",
+    polygon_vintage: date | None = None,
+    lidar_date: date | None = None,
 ) -> pa.Table:
-    """Fetch all tiles in ``fetch_tile_ids``, run M3-M5 per polygon, return a table."""
-    # 1) Load all required tiles' points (caller-side caching via io.lidar).
-    # Missing tiles are tolerated so the runner doesn't have to pre-screen
-    # the whole bucket; if the *primary* tile is missing we emit no rows
-    # because a tile group's polygons live on its primary tile by
-    # construction.
+    """Fetch all tiles in ``fetch_tile_ids``, fit every polygon, return a table.
+
+    ``polygon_vintage`` is the run-level imagery date (a per-row
+    ``polygon_vintage`` column on ``polygons`` overrides it). ``lidar_date`` is
+    a *declared* capture date; when None each row gets the flight date measured
+    from its primary tile's GPS time.
+    """
+    schema = output_schema(cfg.mounting_rules.enabled)
+    cls_cfg = cfg.io.classification
+
+    # 1) Load the tiles one at a time, keeping only the returns that can matter
+    # (ground, and the two panel-candidate classes) so peak memory tracks those
+    # rather than every column of every tile. Missing tiles are tolerated so
+    # the runner doesn't have to pre-screen the whole bucket; if the *primary*
+    # tile is missing we emit no rows because a tile group's polygons live on
+    # its primary tile by construction.
+    primary_vintage = None
     primary_loaded = False
-    chunks: list[np.ndarray] = []
+    ground_chunks: list[np.ndarray] = []
+    primary_cls_chunks: list[np.ndarray] = []
+    fallback_cls_chunks: list[np.ndarray] = []
     for tid in fetch_tile_ids:
         uri = tile_uri_map.get(tid)
         if uri is None:
             continue
         try:
-            pts, _ = read_tile_points(uri)
+            data = read_tile(uri, reader=cfg.io.lidar_reader)
         except RemoteFileMissing:
             print(f"[tile_task] {uri} missing; skipping")
             continue
-        chunks.append(pts)
+        pts = data.points
+        cls = pts[:, 3].astype(np.int16)
+        ground_chunks.append(pts[cls == cls_cfg.ground_class][:, :3])
+        primary_cls_chunks.append(pts[cls == cls_cfg.panel_class_primary][:, :3])
+        fallback_cls_chunks.append(pts[cls == cls_cfg.panel_class_fallback][:, :3])
         if tid == primary_tile_id:
             primary_loaded = True
+            primary_vintage = data.vintage
+        del pts, cls, data              # release the raw tile before the next read
 
     if not primary_loaded:
         print(f"[tile_task] primary tile {primary_tile_id} unavailable; "
               f"emitting empty table for partition {partition_id}")
-        return pa.table(
-            {f.name: [] for f in OUTPUT_SCHEMA},
-            schema=OUTPUT_SCHEMA,
-        )
+        return pa.table({f.name: [] for f in schema}, schema=schema)
 
-    all_pts = np.concatenate(chunks, axis=0) if chunks else np.zeros((0, 4))
+    def _cat(chunks: list[np.ndarray]) -> np.ndarray:
+        return np.concatenate(chunks, axis=0) if chunks else np.zeros((0, 3))
 
-    # 2) Filter classes ONCE for the whole tile group, not per polygon. The
-    # 50M-point class-equality scan was the per-polygon-loop bottleneck that
-    # OOM-killed Dask workers on the 1000-polygon benchmark (HANDOFF.md).
-    ground_xyz, panel_pts_all, _ = _split_classes_for_tile_group(all_pts, cfg)
-    del all_pts  # ~1.5 GB freed before the per-polygon loop
+    # 2) Choose the panel-candidate pool ONCE for the whole group: the primary
+    # class when the tiles carry it, else the fallback class above local ground.
+    ground_xyz = _cat(ground_chunks)
+    panel_pts_all = _cat(primary_cls_chunks)
+    if len(panel_pts_all) == 0:
+        panel_pts_all = _above_ground(_cat(fallback_cls_chunks), ground_xyz, cfg)
+    del ground_chunks, primary_cls_chunks, fallback_cls_chunks
+
+    # 3) Index both pools so each polygon only touches the points around it.
+    panel_grid = PointGrid(panel_pts_all)
+    ground_grid = PointGrid(ground_xyz)
+    del panel_pts_all, ground_xyz
 
     contributing_tile_ids = tuple(t for t in fetch_tile_ids if tile_uri_map.get(t))
+    row_lidar_date, row_lidar_source = _lidar_date_for(primary_vintage, lidar_date)
 
-    # 3) For each polygon, just clip the pre-filtered panel pool and build a row.
-    rows: list[dict[str, Any]] = []
+    roof_pad = cfg.roof_plane.buffer_max_m + 1.0
+    ground_pad = max(cfg.heights.ground_search_radius_m,
+                     cfg.heights.ground_fallback_max_radius_m)
+    geoms = polygons.geometry.to_numpy()
+    neighbours = shapely.STRtree(geoms)
     has_parent_col = "parent_polygon_id" in polygons.columns
-    for _, row in polygons.iterrows():
+    has_row_col = "input_row" in polygons.columns
+    has_vintage_col = "polygon_vintage" in polygons.columns
+
+    rows: list[dict[str, Any]] = []
+    for i, (_, row) in enumerate(polygons.iterrows()):
         poly = row.geometry
         pid = str(row[polygon_id_col])
-        parent_id = str(row["parent_polygon_id"]) if has_parent_col else pid
 
         in_panel = clip_points_to_polygon(
-            panel_pts_all,
+            panel_grid.query_polygon_bounds(poly),
             poly,
             erosion_m=cfg.panel_plane.erosion_m,
         )
 
-        # Other PV polygons sharing this group
-        other_pvs = polygons[polygons[polygon_id_col] != pid][["geometry"]]
-        other_pvs = gpd.GeoDataFrame(other_pvs.reset_index(drop=True), crs=polygons.crs)
+        # Other PV polygons close enough to intrude on this one's roof ring.
+        near = neighbours.query(poly.buffer(roof_pad))
+        other_pvs = gpd.GeoDataFrame(
+            geometry=[geoms[j] for j in near if j != i], crs=polygons.crs
+        )
+
+        row_vintage = polygon_vintage
+        if has_vintage_col and row["polygon_vintage"] is not None and not _is_nat(row["polygon_vintage"]):
+            row_vintage = row["polygon_vintage"]
 
         rows.append(
             _build_row(
                 polygon=poly,
                 polygon_id=pid,
-                parent_polygon_id=parent_id,
+                parent_polygon_id=str(row["parent_polygon_id"]) if has_parent_col else pid,
+                input_row=int(row["input_row"]) if has_row_col else i,
                 cfg=cfg,
                 config_hash=config_hash,
                 run_id=run_id,
                 partition_id=partition_id,
                 panel_pts=in_panel,
-                ground_xyz=ground_xyz,
-                roof_input_pts=panel_pts_all,
+                ground_xyz=ground_grid.query_polygon_bounds(poly, pad_m=ground_pad),
+                roof_input_pts=panel_grid.query_polygon_bounds(poly, pad_m=roof_pad),
                 footprints=footprints,
                 other_pv_polygons=other_pvs,
                 contributing_tile_ids=contributing_tile_ids,
+                polygon_vintage=row_vintage,
+                lidar_date=row_lidar_date,
+                lidar_date_source=row_lidar_source,
             )
         )
 
-    # Build pyarrow table aligned to OUTPUT_SCHEMA
-    cols = {f.name: [r.get(f.name) for r in rows] for f in OUTPUT_SCHEMA}
-    return pa.table(cols, schema=OUTPUT_SCHEMA)
+    cols = {f.name: [r.get(f.name) for r in rows] for f in schema}
+    return pa.table(cols, schema=schema)
+
+
+def _is_nat(v: Any) -> bool:
+    try:
+        return bool(v != v)             # NaN / NaT are the only values unequal to themselves
+    except Exception:
+        return False

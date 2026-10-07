@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 import traceback
 import uuid
+from datetime import date
 from pathlib import Path
 
 import pyarrow as pa
@@ -20,8 +21,9 @@ from pv_geom.config import PVGeomConfig
 from pv_geom.io._localize import RemoteFileMissing, is_remote, list_s3_uris, localize
 from pv_geom.io.footprints import read_footprints
 from pv_geom.io.lidar import read_tile_vintage
+from pv_geom.io.output import write_partition
 from pv_geom.io.polygons import read_polygons
-from pv_geom.io.tile_index import build_tile_uris, load_tile_index
+from pv_geom.io.tile_index import build_tile_uris, load_tile_index, resolve_tile_id_col
 from pv_geom.pipeline.partition import (
     TileGroup,
     assign_polygons_to_tiles,
@@ -29,6 +31,8 @@ from pv_geom.pipeline.partition import (
 )
 from pv_geom.pipeline.tile_task import process_tile_group
 from pv_geom.provenance import write_manifest
+from pv_geom.utils.crs import resolve_target_crs
+from pv_geom.vintage import GEOMETRY_BASIS, PANEL_BASES, parse_vintage
 
 
 def run_pipeline(
@@ -36,12 +40,12 @@ def run_pipeline(
     polygons_uri: str,
     tile_index_uri: str,
     lidar_prefix: str,
-    footprints_uri: str,
     output_uri: str,
     cfg: PVGeomConfig,
+    footprints_uri: str | None = None,
     name_template: str = "{name}.laz",
-    tile_id_col: str = "Name",
-    polygon_id_col: str = "polygon_id",
+    tile_id_col: str | None = None,
+    polygon_id_col: str | None = None,
     max_polygons: int | None = None,
     bbox: tuple[float, float, float, float] | None = None,
     dry_run: bool = False,
@@ -49,6 +53,11 @@ def run_pipeline(
     use_dask: bool = True,
 ) -> Path | str:
     """End-to-end pipeline. Returns the manifest path (str when output is s3://).
+
+    Two inputs are required — the polygon layer and the LiDAR (tiles plus their
+    index) — each with a capture date under ``cfg.vintage``. Building
+    footprints are optional: without them ``on_building`` is null and the roof
+    reference comes from an open ring around each polygon.
 
     Output layout::
 
@@ -112,18 +121,49 @@ def run_pipeline(
     )
 
     run_id = uuid.uuid4().hex
-    config_hash = cfg.hash()
 
     # 1) Inputs ---------------------------------------------------------------
+    # The tile index is read first: with `crs.target: auto` it is what says
+    # which CRS the LiDAR — and therefore the whole run — lives in.
+    tindex = load_tile_index(tile_index_uri)
+    cfg = cfg.model_copy(deep=True)
+    cfg.crs.target = resolve_target_crs(cfg.crs.target, tindex.crs)
+    target_crs = cfg.crs.target
+    config_hash = cfg.hash()
+    tindex = tindex.to_crs(target_crs) if tindex.crs is not None else tindex.set_crs(target_crs)
+    tile_id_col = resolve_tile_id_col(tindex, tile_id_col)
+
+    polygon_vintage = parse_vintage(cfg.vintage.polygon_vintage)
+    lidar_date_declared = parse_vintage(cfg.vintage.lidar_date)
+
     polygons = read_polygons(
         polygons_uri,
-        target_crs=cfg.crs.target,
+        target_crs=target_crs,
         id_col=polygon_id_col,
         bbox=bbox,
         max_polygons=max_polygons,
+        vintage_col=cfg.vintage.polygon_vintage_column,
     )
-    footprints = read_footprints(footprints_uri, target_crs=cfg.crs.target)
-    tindex = load_tile_index(tile_index_uri, target_crs=cfg.crs.target)
+    polygon_id_col = "polygon_id"       # read_polygons settles the canonical column
+    # Carry only what the workers need; detector outputs drag along wide
+    # attribute columns that would be pickled into every task.
+    polygons = polygons[
+        [c for c in ("polygon_id", "parent_polygon_id", "input_row", "polygon_vintage")
+         if c in polygons.columns] + ["geometry"]
+    ]
+    footprints = (
+        read_footprints(footprints_uri, target_crs=target_crs)
+        if footprints_uri else None
+    )
+    if footprints is None:
+        print("[runner] no footprint layer: on_building will be null and roof "
+              "references come from open rings")
+    inputs = {
+        "polygons": str(polygons_uri),
+        "tile_index": str(tile_index_uri),
+        "lidar_prefix": str(lidar_prefix),
+        "footprints": str(footprints_uri) if footprints_uri else None,
+    }
 
     if "tile_path" not in tindex.columns:
         tindex = build_tile_uris(
@@ -146,7 +186,7 @@ def run_pipeline(
     # ask the question on its own.
     vintage = _probe_lidar_vintage(
         cfg,
-        [uri for tid in {t for g in groups for t in g.fetch_tile_ids}
+        [uri for tid in {g.primary_tile_id for g in groups}
          if (uri := tile_uri_map.get(tid))],
     )
 
@@ -155,12 +195,8 @@ def run_pipeline(
             manifest_target,
             config_dict=cfg.model_dump(mode="json"),
             config_hash=config_hash,
-            inputs={
-                "polygons": str(polygons_uri),
-                "tile_index": str(tile_index_uri),
-                "lidar_prefix": str(lidar_prefix),
-                "footprints": str(footprints_uri),
-            },
+            inputs=inputs,
+            crs=target_crs,
             cluster_spec={"backend": "dry_run"},
             counts={"polygons": int(len(polygons)),
                     "tile_groups": int(len(groups)),
@@ -276,7 +312,7 @@ def run_pipeline(
         sub = polygons_indexed.loc[list(polygon_id_set_per_group[partition_id])].copy()
         sub_bbox = sub.total_bounds
         margin = max(50.0, cfg.roof_plane.buffer_max_m * 4.0)
-        fp_sub = footprints.cx[
+        fp_sub = None if footprints is None else footprints.cx[
             sub_bbox[0] - margin: sub_bbox[2] + margin,
             sub_bbox[1] - margin: sub_bbox[3] + margin,
         ]
@@ -299,6 +335,8 @@ def run_pipeline(
             run_id=run_id,
             partition_id=partition_id,
             polygon_id_col=polygon_id_col,
+            polygon_vintage=polygon_vintage,
+            lidar_date=lidar_date_declared,
         )
 
     # 4) Dispatch + write each partition as soon as its group finishes. A
@@ -317,11 +355,7 @@ def run_pipeline(
         if len(table) == 0:
             return
         target = _part_target(partition_id)
-        if s3_output:
-            with out_fs.open(str(target), "wb") as f:
-                pq.write_table(table, f)
-        else:
-            pq.write_table(table, target)
+        write_partition(table, target, target_crs, fs=out_fs if s3_output else None)
         n_succeeded_new += len(table)
         print(f"[runner] wrote {target} ({len(table)} rows)")
 
@@ -422,21 +456,20 @@ def run_pipeline(
     tables = list(new_tables) + skipped_tables
 
     # 5) Aggregate stats + manifest ------------------------------------------
-    full_table = pa.concat_tables(list(tables)) if tables else None
+    tables = [t.replace_schema_metadata(None) for t in tables if len(t)]
+    full_table = pa.concat_tables(tables, promote_options="default") if tables else None
     aggregate_stats = _aggregate(full_table) if full_table is not None and len(full_table) else {}
     if failed_groups:
         aggregate_stats["task_errors"] = failed_groups
+    if full_table is not None and len(full_table):
+        vintage.update(_row_vintage_summary(full_table))
 
     write_manifest(
         manifest_target,
         config_dict=cfg.model_dump(mode="json"),
         config_hash=config_hash,
-        inputs={
-            "polygons": str(polygons_uri),
-            "tile_index": str(tile_index_uri),
-            "lidar_prefix": str(lidar_prefix),
-            "footprints": str(footprints_uri),
-        },
+        inputs=inputs,
+        crs=target_crs,
         cluster_spec={"backend": cfg.compute.backend, "use_dask": use_dask},
         counts={
             "polygons": int(len(polygons)),
@@ -455,85 +488,117 @@ def run_pipeline(
 
 
 def _probe_lidar_vintage(cfg: PVGeomConfig, tile_uris: list[str]) -> dict:
-    """Measure when the LiDAR was flown and compare it to the declared inputs.
+    """Establish both input dates before compute starts, and compare them.
 
-    Returns the manifest's ``vintage`` block and prints a warning when the
-    inventory's imagery postdates the point cloud — the case where arrays exist
-    in the input but not in the data being used to measure them, so the panel
-    columns silently report bare roof. Never raises: an unreadable tile costs a
-    sample, not the run.
+    Returns the manifest's ``vintage`` block. The polygon vintage is declared;
+    the LiDAR date is declared too if given, otherwise measured from a sample of
+    tiles (per-point GPS time). Prints a warning when the polygons postdate the
+    LiDAR — the case where installations exist in the input but not in the data
+    used to measure them. Never raises: an unreadable tile costs a sample, not
+    the run. Every row later carries its own tile's exact date; this is the
+    up-front, whole-run view, and what ``--dry-run`` reports.
     """
-    declared = cfg.vintage.input_epoch
+    polygon_vintage = parse_vintage(cfg.vintage.polygon_vintage)
+    declared_lidar = parse_vintage(cfg.vintage.lidar_date)
     out: dict = {
-        "input_epoch": declared.isoformat() if declared else None,
+        "polygon_vintage": polygon_vintage.isoformat() if polygon_vintage else None,
+        "polygon_vintage_declared_as": (
+            str(cfg.vintage.polygon_vintage) if cfg.vintage.polygon_vintage is not None else None
+        ),
+        "polygon_vintage_column": cfg.vintage.polygon_vintage_column,
+        "lidar_date_declared": declared_lidar.isoformat() if declared_lidar else None,
         "lidar_tiles_sampled": 0,
     }
+
+    latest: date | None = declared_lidar
     n = int(cfg.vintage.sample_tiles)
-    if n <= 0 or not tile_uris:
-        return out
+    if n > 0 and tile_uris:
+        # Even stride over the sorted URIs so the sample spans the AOI. A
+        # collection is flown in strips over weeks, so one corner is not
+        # representative.
+        ordered = sorted(set(tile_uris))
+        step = max(1, len(ordered) // n)
+        samples = []
+        n_errors = 0
+        for uri in ordered[::step][:n]:
+            try:
+                samples.append(read_tile_vintage(uri))
+            except Exception:
+                n_errors += 1
+        out["lidar_tiles_sampled"] = len(samples)
+        out["lidar_tiles_unreadable"] = n_errors
 
-    # Even stride over the sorted URIs so the sample spans the AOI. A 3DEP work
-    # unit is flown in strips over weeks, so one corner is not representative.
-    ordered = sorted(set(tile_uris))
-    step = max(1, len(ordered) // n)
-    candidates = ordered[::step][:n]
+        starts = [s.flight_start for s in samples if s.flight_start]
+        ends = [s.flight_end for s in samples if s.flight_end]
+        creations = [s.creation_date for s in samples if s.creation_date]
+        out["lidar_flight_start"] = min(starts).isoformat() if starts else None
+        out["lidar_flight_end"] = max(ends).isoformat() if ends else None
+        out["lidar_header_date_max"] = max(creations).isoformat() if creations else None
+        observed = ends or creations
+        if observed:
+            out["lidar_date_source"] = "gps_time" if ends else "header_date"
+            print(
+                f"[runner] vintage: LiDAR flown "
+                f"{min(starts).isoformat() if starts else '?'} -> {max(observed).isoformat()} "
+                f"(source: {out['lidar_date_source']}, {len(samples)} tiles sampled)"
+            )
+            if declared_lidar is None:
+                latest = max(observed)
+            elif abs((declared_lidar - max(observed)).days) > 366:
+                print(
+                    f"[runner] vintage: declared lidar_date {declared_lidar.isoformat()} "
+                    f"differs from the measured {max(observed).isoformat()} by more than "
+                    f"a year; rows will use the declared date"
+                )
+        elif not samples:
+            print("[runner] vintage: no tile could be read; LiDAR date not measured")
+    if declared_lidar is not None:
+        out["lidar_date_source"] = "declared"
 
-    samples = []
-    n_errors = 0
-    for uri in candidates:
-        try:
-            samples.append(read_tile_vintage(uri))
-        except Exception:
-            n_errors += 1
-
-    out["lidar_tiles_sampled"] = len(samples)
-    out["lidar_tiles_unreadable"] = n_errors
-    if not samples:
-        print("[runner] vintage: no tile could be read; LiDAR epoch unknown")
-        return out
-
-    starts = [s.flight_start for s in samples if s.flight_start]
-    ends = [s.flight_end for s in samples if s.flight_end]
-    creations = [s.creation_date for s in samples if s.creation_date]
-    observed = ends or creations
-
-    out["lidar_flight_start"] = min(starts).isoformat() if starts else None
-    out["lidar_flight_end"] = max(ends).isoformat() if ends else None
-    out["lidar_creation_date_max"] = max(creations).isoformat() if creations else None
-    out["lidar_epoch_source"] = "gps_time" if ends else "header_creation_date"
-    out["per_tile"] = [s.to_dict() for s in samples]
-
-    if not observed:
-        return out
-    latest = max(observed)
-    print(
-        f"[runner] vintage: LiDAR flown "
-        f"{min(starts).isoformat() if starts else '?'} -> {latest.isoformat()} "
-        f"(source: {out['lidar_epoch_source']}, {len(samples)} tiles sampled)"
-    )
-
-    if declared is None:
+    if polygon_vintage is None and cfg.vintage.polygon_vintage_column is None:
         print(
-            "[runner] vintage: vintage.input_epoch is unset — cannot check whether "
-            "the inventory postdates the LiDAR. Arrays built after "
-            f"{latest.isoformat()} would be measured as bare roof."
+            "[runner] vintage: no polygon vintage declared — rows cannot be "
+            "credited as present-by-date; geometry_basis rests on the standoff "
+            "screen alone. Pass --polygon-vintage."
         )
         return out
+    if polygon_vintage is None or latest is None:
+        return out
 
-    gap_days = (declared - latest).days
+    gap_days = (polygon_vintage - latest).days
     out["vintage_gap_days"] = gap_days
     if gap_days > 0:
-        out["vintage_gap_warning"] = (
-            f"input imagery postdates LiDAR by {gap_days} days"
-        )
+        out["vintage_gap_warning"] = f"polygons postdate LiDAR by {gap_days} days"
         print(
-            f"[runner] *** VINTAGE GAP: the inventory's imagery ({declared.isoformat()}) "
-            f"postdates the LiDAR ({latest.isoformat()}) by {gap_days} days "
-            f"({gap_days / 365.25:.1f} years). Arrays installed in that window are "
-            f"in the input but not in the point cloud: their rows will report the "
-            f"bare roof under the panel columns. Screen on the `no_panel_standoff` "
-            f"and `standoff_unscreenable` flags before using panel geometry. ***"
+            f"[runner] *** VINTAGE GAP: the polygons ({polygon_vintage.isoformat()}) "
+            f"postdate the LiDAR ({latest.isoformat()}) by {gap_days} days "
+            f"({gap_days / 365.25:.1f} years). Installations built in that window are "
+            f"in the polygon set but not in the point cloud; their rows measure the "
+            f"surface that was there before. See the geometry_basis column. ***"
         )
+    else:
+        print(
+            f"[runner] vintage: polygons ({polygon_vintage.isoformat()}) are no newer "
+            f"than the LiDAR ({latest.isoformat()}); installations were present at capture"
+        )
+    return out
+
+
+def _row_vintage_summary(table: pa.Table) -> dict:
+    """Vintage facts as actually stamped on the rows (exact, not sampled)."""
+    df = table.select(["lidar_date", "lidar_date_source", "vintage_gap_days"]).to_pandas()
+    out: dict = {}
+    dates = df["lidar_date"].dropna()
+    if len(dates):
+        out["rows_lidar_date_min"] = min(dates).isoformat()
+        out["rows_lidar_date_max"] = max(dates).isoformat()
+    out["rows_lidar_date_source_counts"] = {
+        str(k): int(v) for k, v in df["lidar_date_source"].fillna("unknown").value_counts().items()
+    }
+    gaps = df["vintage_gap_days"].dropna()
+    if len(gaps):
+        out["rows_vintage_gap_days_median"] = float(gaps.median())
+        out["rows_polygons_newer_than_lidar"] = int((gaps > 0).sum())
     return out
 
 
@@ -585,18 +650,57 @@ def _cluster_for(cfg: PVGeomConfig):
 
 
 def _aggregate(table: pa.Table) -> dict:
-    """Manifest-friendly summary stats."""
+    """Manifest-friendly summary stats. The full profile tables live in
+    ``pv_geom.report``; this is the at-a-glance version that travels with the
+    data."""
+    import numpy as np
+    import pandas as pd
+
     df = table.to_pandas()
-    out: dict = {
-        "mounting_type_counts": df["mounting_type"].value_counts().to_dict(),
-        "mounting_rule_counts": df["mounting_rule"].value_counts().to_dict(),
-        "on_building_count": int(df["on_building"].sum()),
-        "off_building_count": int((~df["on_building"]).sum()),
-    }
-    confidences = df["mounting_confidence"].dropna()
-    if len(confidences):
-        out["mounting_confidence_p50"] = float(confidences.median())
-        out["mounting_confidence_p10"] = float(confidences.quantile(0.10))
+    n = len(df)
+    out: dict = {"rows": int(n)}
+
+    fitted = df["panel_tilt_deg"].notna()
+    out["fitted"] = int(fitted.sum())
+    out["fit_rate"] = float(fitted.mean()) if n else 0.0
+
+    if "geometry_basis" in df.columns:
+        counts = df["geometry_basis"].value_counts()
+        out["geometry_basis_counts"] = {b: int(counts.get(b, 0)) for b in GEOMETRY_BASIS}
+        panel = df["geometry_basis"].isin(PANEL_BASES)
+        out["panel_basis_frac_of_fitted"] = (
+            float(panel.sum() / fitted.sum()) if fitted.sum() else None
+        )
+
+    tilt = df.loc[fitted, "panel_tilt_deg"]
+    if len(tilt):
+        out["panel_tilt_deg"] = {
+            f"p{q}": float(np.percentile(tilt, q)) for q in (10, 25, 50, 75, 90)
+        }
+    az = df["panel_azimuth_deg"].dropna()
+    if len(az):
+        sector = pd.cut(
+            (az + 45.0) % 360.0, bins=[0, 90, 180, 270, 360],
+            labels=["N", "E", "S", "W"], include_lowest=True, right=False,
+        )
+        out["azimuth_quadrant_counts"] = {
+            str(k): int(v) for k, v in sector.value_counts().sort_index().items()
+        }
+
+    if "on_building" in df.columns:
+        ob = df["on_building"]
+        out["on_building_count"] = int((ob == True).sum())      # noqa: E712 (nullable)
+        out["off_building_count"] = int((ob == False).sum())    # noqa: E712
+        out["on_building_unknown_count"] = int(ob.isna().sum())
+
+    if "mounting_type" in df.columns:
+        out["mounting_type_counts"] = df["mounting_type"].value_counts().to_dict()
+        out["mounting_rule_counts"] = df["mounting_rule"].value_counts().to_dict()
+        confidences = df["mounting_confidence"].dropna()
+        if len(confidences):
+            out["mounting_confidence_p50"] = float(confidences.median())
+            out["mounting_confidence_p10"] = float(confidences.quantile(0.10))
+
     rmses = df["panel_rmse_m"].dropna()
     if len(rmses):
         out["panel_rmse_p50"] = float(rmses.median())
@@ -611,18 +715,13 @@ def _aggregate(table: pa.Table) -> dict:
             flag_counts[f] = flag_counts.get(f, 0) + 1
     out["flag_counts"] = flag_counts
 
-    # Panel-standoff (vintage) screen. The README asks callers to report the
-    # flagged fraction alongside any fleet-level geometry statistic; reporting
-    # it here means they cannot forget to. The cross-tab is the part that
-    # matters: it shows which labels rest on unmeasured panel geometry.
-    import pandas as pd
-
+    # Panel-standoff screen: how many rows could be tested for panels being
+    # physically above the roof, and how many passed.
     failed = pd.Series([("no_panel_standoff" in s) for s in flag_sets], index=df.index)
     unscreenable = pd.Series([("standoff_unscreenable" in s) for s in flag_sets], index=df.index)
     state = pd.Series("passed", index=df.index)
     state[failed] = "no_panel_standoff"
     state[unscreenable] = "unscreenable"
-    n = len(df)
     out["standoff_screen"] = {
         "passed": int((state == "passed").sum()),
         "no_panel_standoff": int(failed.sum()),
@@ -631,11 +730,12 @@ def _aggregate(table: pa.Table) -> dict:
         "failed_frac_of_screened": (
             float(failed.sum() / (~unscreenable).sum()) if (~unscreenable).sum() else None
         ),
-        "by_mounting_type": {
+    }
+    if "mounting_type" in df.columns:
+        out["standoff_screen"]["by_mounting_type"] = {
             str(k): {str(kk): int(vv) for kk, vv in v.items()}
             for k, v in pd.crosstab(df["mounting_type"], state).to_dict("index").items()
-        },
-    }
+        }
 
     har = df["height_above_roof_m"].dropna()
     if len(har):

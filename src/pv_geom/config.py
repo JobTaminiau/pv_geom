@@ -9,11 +9,15 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class CRSConfig(BaseModel):
-    target: str = "EPSG:6341"           # NAD83(2011) / UTM 12N (metres); USGS LPC AZ
+    # CRS everything is computed in. Points are NOT reprojected, so this must be
+    # the LiDAR's own horizontal CRS, and it must be metric (every threshold in
+    # this file is in metres). "auto" takes it from the tile index, falling back
+    # to a LAZ header; set an explicit "EPSG:xxxx" to assert it instead.
+    target: str = "auto"
 
 
 class PanelPlaneConfig(BaseModel):
@@ -67,6 +71,12 @@ class RoofPlaneConfig(BaseModel):
     collar_m: float = 1.2
     collar_min_points: int = 40
     collar_agreement_min: float = 0.5
+    # Fit a roof reference from an *open* ring (not clipped to a footprint) when
+    # no footprint layer was supplied, or the polygon misses every footprint.
+    # The ring is then just the elevated returns around the array; the consensus
+    # floor, RMSE gate and collar guard decide whether that is a usable plane.
+    # Rows record which kind they got in `roof_ref_source`.
+    open_ring: bool = True
     # Minimum (footprint ∩ polygon area) / polygon area for on_building=True.
     # A sliver touch must not route ground mounts / adjacent carports down the
     # rooftop rules; 0.5 tolerates typical ML-footprint misregistration (1-3 m)
@@ -87,7 +97,6 @@ class HeightsConfig(BaseModel):
     # that a panel is physically present above the roof surface; below it the
     # row gets the `no_panel_standoff` flag. See README (Quality flags).
     min_panel_standoff_m: float = 0.05
-    use_whitebox_dem: bool = False
 
 
 class MountingRule1(BaseModel):
@@ -139,6 +148,12 @@ class MountingRule8(BaseModel):
 
 
 class MountingRulesConfig(BaseModel):
+    # ARCHIVED in 0.2.0. Ground-truth validation (300 labelled polygons,
+    # 2026-07-30) put carport precision at 5% and pole-mount at 0%, so mounting
+    # classification is off by default and its columns are not part of the core
+    # output schema. Enable to get the experimental mounting_* columns back; the
+    # labels need better heuristics and tested examples before they are trusted.
+    enabled: bool = False
     R1: MountingRule1 = Field(default_factory=MountingRule1)
     R2: MountingRule2 = Field(default_factory=MountingRule2)
     R3: MountingRule3 = Field(default_factory=MountingRule3)
@@ -187,11 +202,15 @@ class ClassificationConfig(BaseModel):
     panel_class_primary: int = 6        # building
     panel_class_fallback: int = 1       # unclassified
     ground_class: int = 2
-    # Min height above the tile-group ground median to keep a class-1 return as
-    # a panel candidate. Ground-mount panels live at ~0.5-2.5 m, so 1.5 m was
+    # Min height above *local* ground to keep a class-1 return as a panel
+    # candidate. Ground-mount panels live at ~0.5-2.5 m, so 1.5 m was
     # deleting their lower halves (biasing tilt + HAG and starving density);
     # 0.8 keeps them while still rejecting near-ground clutter.
     fallback_height_above_ground_m: float = 0.8
+    # Cell size of the ground-elevation grid that "local ground" is read from.
+    # (Before 0.2.0 this was one median per tile group, which only holds on
+    # flat terrain.)
+    ground_grid_cell_m: float = 5.0
 
 
 class IOConfig(BaseModel):
@@ -220,32 +239,43 @@ class ComputeConfig(BaseModel):
 
 
 class VintageConfig(BaseModel):
-    """Acquisition epochs of the two inputs, and how hard to check them.
+    """Acquisition dates of the two inputs.
 
-    pv_geom measures panel geometry from LiDAR against an inventory detected
-    some other way — usually orthoimagery. If the imagery postdates the LiDAR,
-    arrays built in between are in the inventory but not in the point cloud, and
-    the pipeline will happily fit and report the bare roof under the panel
-    column names. This is a property of the *pairing*, not of any one row, so it
-    cannot be inferred from the data; declare it and the run will check itself.
+    pv_geom measures geometry from LiDAR at polygons detected some other way —
+    usually aerial or satellite imagery. The two are rarely captured at the same
+    time. If the imagery postdates the LiDAR, arrays built in between are in the
+    polygon set but not in the point cloud, and the plane fitted there is the
+    bare roof (or ground). Both dates are therefore run inputs: they are stamped
+    on every row and decide each row's ``geometry_basis``.
     """
 
-    # When the detection inventory's source imagery was captured (ISO date, or
-    # the later bound of a mosaic). Leave unset to skip the co-temporality
-    # check; the LiDAR side is measured from the tiles either way.
-    input_epoch: date | None = None
-    # Tiles sampled for LiDAR flight dates. Only the header and first point
-    # chunk are read per tile, streamed rather than downloaded. 0 disables.
+    model_config = ConfigDict(populate_by_name=True)
+
+    # When the polygon set's source imagery was captured: "2024", "2024-04" or
+    # "2024-04-01". A year or month is treated as a window and its *latest* day
+    # is used, so the gap to the LiDAR is never understated. (`input_epoch` is
+    # the pre-0.2.0 name and still accepted.)
+    polygon_vintage: str | int | date | None = Field(
+        default=None, validation_alias=AliasChoices("polygon_vintage", "input_epoch")
+    )
+    # Optional per-polygon date column in the polygon file (mosaics, permit
+    # dates). Rows where it is null fall back to `polygon_vintage`.
+    polygon_vintage_column: str | None = None
+    # Declared LiDAR capture date (same formats). Leave unset to have it
+    # *measured* per tile from per-point GPS time, which is the flight date; the
+    # LAS header date is the delivery date and can lag by more than a year.
+    lidar_date: str | int | date | None = None
+    # Tiles sampled up front for the run-level flight window reported before
+    # compute starts (header + first chunk only). 0 disables the preview; rows
+    # still get their own tile's measured date.
     sample_tiles: int = 25
 
 
-class OutputConfig(BaseModel):
-    partition_size: int = 100000
-    write_geoparquet: bool = True
-    also_write_csv: bool = False
-
-
 class PVGeomConfig(BaseModel):
+    # Unknown keys are ignored so configs written for older versions (which
+    # carried a never-implemented `output:` block) still load.
+    model_config = ConfigDict(extra="ignore")
+
     crs: CRSConfig = Field(default_factory=CRSConfig)
     panel_plane: PanelPlaneConfig = Field(default_factory=PanelPlaneConfig)
     multi_plane: MultiPlaneConfig = Field(default_factory=MultiPlaneConfig)
@@ -254,7 +284,6 @@ class PVGeomConfig(BaseModel):
     mounting_rules: MountingRulesConfig = Field(default_factory=MountingRulesConfig)
     io: IOConfig = Field(default_factory=IOConfig)
     compute: ComputeConfig = Field(default_factory=ComputeConfig)
-    output: OutputConfig = Field(default_factory=OutputConfig)
     vintage: VintageConfig = Field(default_factory=VintageConfig)
 
     @classmethod

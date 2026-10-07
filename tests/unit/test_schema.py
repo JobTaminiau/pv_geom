@@ -2,7 +2,7 @@
 
 import pyarrow as pa
 
-from pv_geom.schema import MOUNTING_LABELS, OUTPUT_SCHEMA
+from pv_geom.schema import MOUNTING_LABELS, OUTPUT_SCHEMA, output_schema
 
 
 def test_required_fields_present() -> None:
@@ -12,9 +12,10 @@ def test_required_fields_present() -> None:
         "geometry",
         "panel_tilt_deg",
         "panel_azimuth_deg",
-        "mounting_type",
-        "mounting_confidence",
-        "mounting_rule",
+        "geometry_basis",
+        "polygon_vintage",
+        "lidar_date",
+        "vintage_gap_days",
         "flags",
         "lidar_tile_ids",
         "pkg_version",
@@ -23,6 +24,14 @@ def test_required_fields_present() -> None:
         "partition_id",
     }
     assert required <= names
+
+
+def test_mounting_columns_are_experimental_only() -> None:
+    """Mounting classification is archived: its columns exist only when the
+    classifier is switched on."""
+    mounting = {"mounting_type", "mounting_confidence", "mounting_rule"}
+    assert not mounting & set(OUTPUT_SCHEMA.names)
+    assert mounting <= set(output_schema(include_mounting=True).names)
 
 
 def test_polygon_id_not_nullable() -> None:

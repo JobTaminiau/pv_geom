@@ -1,11 +1,10 @@
-"""PV polygon reader + reprojector. M2.
+"""PV polygon reader + reprojector.
 
-Reads a GeoParquet of PV polygons, normalizes the polygon-id column,
-reprojects to the LiDAR target CRS, and (by default) explodes any
-MultiPolygons into one row per part with a ``parent_polygon_id`` link
-column. PRD §3.1 accepts both Polygon and MultiPolygon input; we treat
-MultiPolygon parts as independent panel arrays since they typically
-correspond to distinct facets / panel orientations.
+Reads a polygon layer in any vector format GeoPandas can open (GeoParquet,
+GeoPackage, GeoJSON, Shapefile, FlatGeobuf), settles a row id, reprojects to
+the run CRS, and (by default) explodes MultiPolygons into one row per part with
+a ``parent_polygon_id`` link. MultiPolygon parts are treated as independent
+arrays since they typically sit on distinct facets.
 """
 
 from __future__ import annotations
@@ -14,61 +13,104 @@ from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
+
+from pv_geom.vintage import parse_vintage
+
+# Tried in order when the caller does not name the id column.
+_ID_ALIASES = ("polygon_id", "detection_id", "id", "fid", "objectid")
+
+
+def _read_vector(uri: str | Path) -> gpd.GeoDataFrame:
+    s = str(uri)
+    if s.lower().split("?", 1)[0].endswith((".parquet", ".geoparquet")):
+        return gpd.read_parquet(s)
+    if s.startswith("s3://"):
+        from pv_geom.io._localize import localize
+
+        return gpd.read_file(localize(s))
+    return gpd.read_file(s)
 
 
 def read_polygons(
     uri: str | Path,
     target_crs: str,
     *,
-    id_col: str = "polygon_id",
+    id_col: str | None = None,
     explode_multipolygons: bool = True,
     bbox: tuple[float, float, float, float] | None = None,
     max_polygons: int | None = None,
+    vintage_col: str | None = None,
 ) -> gpd.GeoDataFrame:
-    """Read PV polygons from GeoParquet (path or s3://).
+    """Read PV polygons (path or ``s3://``) into the run CRS.
+
+    The result always has ``polygon_id`` (unique per row), ``parent_polygon_id``
+    (the input feature's id) and ``input_row`` (the input feature's 0-based row
+    position). With ``vintage_col`` it also has ``polygon_vintage`` (a
+    ``datetime.date`` or None per row).
 
     Parameters
     ----------
-    uri
-        Local path or ``s3://`` URI to a GeoParquet file.
-    target_crs
-        EPSG-string CRS to reproject to (e.g. ``"EPSG:6341"``).
     id_col
-        Canonical id column name. If absent in the input, ``detection_id``
-        is accepted as an alias and copied to ``id_col``.
+        Column holding the input ids. ``None`` tries ``polygon_id``,
+        ``detection_id``, ``id``, ``fid``, ``objectid`` (case-insensitive) and,
+        failing those, synthesizes ``poly_<input_row>`` ids — detector outputs
+        often have none, and ``input_row`` still joins the output back.
     explode_multipolygons
-        If True (default), explode each MultiPolygon into one row per part
-        and append ``parent_polygon_id`` (the original id). Per-part ids get
-        ``__p<i>`` suffixes when more than one part shares a parent.
+        Explode each MultiPolygon into one row per part; parts of a multi-part
+        parent get ``__p<i>`` suffixes on ``polygon_id``.
     bbox
-        Optional ``(xmin, ymin, xmax, ymax)`` filter, in ``target_crs`` units,
+        Optional ``(xmin, ymin, xmax, ymax)`` filter in ``target_crs`` units,
         applied after reprojection.
     max_polygons
         Optional row limit (for dev/smoke runs).
+    vintage_col
+        Optional per-polygon capture-date column (dates, timestamps, or
+        ``YYYY`` / ``YYYY-MM`` / ``YYYY-MM-DD`` strings).
     """
-    gdf = gpd.read_parquet(str(uri))
+    gdf = _read_vector(uri)
+    if gdf.crs is None:
+        raise ValueError(f"polygon layer {uri} has no CRS; cannot place it on the LiDAR")
+    gdf = gdf.reset_index(drop=True)
+    gdf["input_row"] = np.arange(len(gdf), dtype=np.int32)
 
-    # Normalize id column.
-    if id_col not in gdf.columns:
-        if "detection_id" in gdf.columns:
-            gdf = gdf.assign(**{id_col: gdf["detection_id"].astype(str)})
-        else:
-            raise ValueError(
-                f"polygon parquet has neither '{id_col}' nor 'detection_id' column"
-            )
+    # Settle the id column.
+    lower = {c.lower(): c for c in gdf.columns}
+    if id_col is not None:
+        if id_col not in gdf.columns:
+            raise ValueError(f"polygon layer has no '{id_col}' column")
+        source = id_col
     else:
-        gdf[id_col] = gdf[id_col].astype(str)
+        source = next((lower[a] for a in _ID_ALIASES if a in lower), None)
+    if source is None:
+        ids = pd.Series([f"poly_{i:07d}" for i in gdf["input_row"]], index=gdf.index)
+    else:
+        ids = gdf[source].astype(str)
+        if ids.duplicated().any():
+            raise ValueError(
+                f"polygon id column '{source}' has duplicate values; pass a unique "
+                f"column via id_col, or drop it to have ids synthesized"
+            )
+    gdf["polygon_id"] = ids
+
+    if vintage_col is not None:
+        if vintage_col not in gdf.columns:
+            raise ValueError(f"polygon layer has no '{vintage_col}' vintage column")
+        gdf["polygon_vintage"] = [
+            None if pd.isna(v) else parse_vintage(v) for v in gdf[vintage_col]
+        ]
 
     # Reproject (cheap no-op if already in target).
-    if gdf.crs is not None and str(gdf.crs).lower() != str(target_crs).lower():
+    if str(gdf.crs).lower() != str(target_crs).lower():
         gdf = gdf.to_crs(target_crs)
 
+    gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty]
     if bbox is not None:
         x0, y0, x1, y1 = bbox
         gdf = gdf.cx[x0:x1, y0:y1]
 
+    gdf = gdf.assign(parent_polygon_id=gdf["polygon_id"])
     if explode_multipolygons:
-        gdf = gdf.assign(parent_polygon_id=gdf[id_col])
         gdf = gdf.explode(index_parts=False, ignore_index=True)
         # Suffix ids that now repeat (i.e. came from a MultiPolygon parent).
         is_dup = gdf["parent_polygon_id"].duplicated(keep=False)
@@ -78,13 +120,8 @@ def read_polygons(
             gdf["parent_polygon_id"] + "__p" + cumcount.astype(str),
             gdf["parent_polygon_id"],
         )
-        gdf[id_col] = new_ids.astype(str)
-    else:
-        gdf = gdf.assign(parent_polygon_id=gdf[id_col])
+        gdf["polygon_id"] = new_ids.astype(str)
 
     if max_polygons is not None:
-        gdf = gdf.head(max_polygons).reset_index(drop=True)
-    else:
-        gdf = gdf.reset_index(drop=True)
-
-    return gdf
+        gdf = gdf.head(max_polygons)
+    return gdf.reset_index(drop=True)

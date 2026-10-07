@@ -20,7 +20,14 @@ from shapely.geometry import box
 
 from pv_geom.config import PVGeomConfig
 from pv_geom.pipeline.runner import run_pipeline
-from pv_geom.schema import OUTPUT_SCHEMA
+from pv_geom.schema import OUTPUT_SCHEMA, OUTPUT_SCHEMA_WITH_MOUNTING
+
+
+def _mounting_cfg() -> PVGeomConfig:
+    """Config with the archived (experimental) mounting classifier switched on."""
+    cfg = PVGeomConfig()
+    cfg.mounting_rules.enabled = True
+    return cfg
 
 
 def _write_synthetic_laz(
@@ -135,7 +142,7 @@ def synth_inputs(tmp_path: Path) -> dict[str, Path]:
 
 
 def test_runner_end_to_end(synth_inputs: dict[str, Path]) -> None:
-    cfg = PVGeomConfig()
+    cfg = _mounting_cfg()
     # Synthetic LAZ has class 6, so primary class is used; HAG threshold relaxed
     cfg.compute.backend = "local"
 
@@ -155,7 +162,7 @@ def test_runner_end_to_end(synth_inputs: dict[str, Path]) -> None:
     assert len(out_files) == 1
 
     table = pq.read_table(out_files[0])
-    assert set(table.schema.names) == set(OUTPUT_SCHEMA.names)
+    assert set(table.schema.names) == set(OUTPUT_SCHEMA_WITH_MOUNTING.names)
     assert len(table) == 1
     row = table.to_pylist()[0]
     assert row["polygon_id"] == "panel_1"
@@ -292,8 +299,8 @@ def test_process_tile_group_missing_primary_tile(synth_inputs: dict[str, Path]) 
 
     import pv_geom.pipeline.tile_task as tile_task_mod
 
-    orig = tile_task_mod.read_tile_points
-    tile_task_mod.read_tile_points = _raise_missing
+    orig = tile_task_mod.read_tile
+    tile_task_mod.read_tile = _raise_missing
     try:
         table = process_tile_group(
             tile_uri_map={"t1": "s3://fake/missing.laz"},
@@ -307,7 +314,7 @@ def test_process_tile_group_missing_primary_tile(synth_inputs: dict[str, Path]) 
             partition_id=0,
         )
     finally:
-        tile_task_mod.read_tile_points = orig
+        tile_task_mod.read_tile = orig
 
     # Empty table, but with the canonical schema (so pyarrow.concat_tables works).
     assert len(table) == 0
@@ -332,7 +339,7 @@ def test_build_row_carport_from_under_panel_returns() -> None:
     others = gpd.GeoDataFrame(geometry=[], crs="EPSG:6341")
 
     row = _build_row(
-        polygon=poly, polygon_id="c1", cfg=PVGeomConfig(), config_hash="x",
+        polygon=poly, polygon_id="c1", cfg=_mounting_cfg(), config_hash="x",
         run_id="r", partition_id=0,
         panel_pts=panel_pts, ground_xyz=ground, roof_input_pts=panel_pts,
         footprints=footprints, other_pv_polygons=others,
@@ -364,7 +371,7 @@ def test_build_row_nan_hag_stays_unknown() -> None:
     others = gpd.GeoDataFrame(geometry=[], crs="EPSG:6341")
 
     row = _build_row(
-        polygon=poly, polygon_id="u1", cfg=PVGeomConfig(), config_hash="x",
+        polygon=poly, polygon_id="u1", cfg=_mounting_cfg(), config_hash="x",
         run_id="r", partition_id=0,
         panel_pts=panel_pts, ground_xyz=ground, roof_input_pts=panel_pts,
         footprints=footprints, other_pv_polygons=others,
@@ -584,7 +591,7 @@ def test_absent_panels_do_not_earn_full_confidence() -> None:
     labelled a flush mount, but must not outrank a measured one."""
     from pv_geom.pipeline.tile_task import _build_row
 
-    cfg = PVGeomConfig()
+    cfg = _mounting_cfg()
     absent = _build_row(polygon_id="c0", cfg=cfg, config_hash="x", run_id="r",
                         partition_id=0, contributing_tile_ids=("t1",),
                         **_rooftop_scene(standoff_m=0.0))
@@ -637,12 +644,12 @@ def test_probe_lidar_vintage_reports_gap_when_input_postdates_lidar(tmp_path) ->
     p = tmp_path / "t.laz"
     _laz_flown_on(p, date(2020, 11, 26))
     cfg = PVGeomConfig()
-    cfg.vintage.input_epoch = date(2024, 4, 1)
+    cfg.vintage.polygon_vintage = date(2024, 4, 1)
 
     v = _probe_lidar_vintage(cfg, [str(p)])
     assert v["lidar_flight_end"] == "2020-11-26"
-    assert v["lidar_epoch_source"] == "gps_time"
-    assert v["input_epoch"] == "2024-04-01"
+    assert v["lidar_date_source"] == "gps_time"
+    assert v["polygon_vintage"] == "2024-04-01"
     assert v["vintage_gap_days"] == (date(2024, 4, 1) - date(2020, 11, 26)).days
     assert "vintage_gap_warning" in v
 
@@ -653,7 +660,7 @@ def test_probe_lidar_vintage_no_warning_when_cotemporal(tmp_path) -> None:
     p = tmp_path / "t.laz"
     _laz_flown_on(p, date(2024, 6, 1))
     cfg = PVGeomConfig()
-    cfg.vintage.input_epoch = date(2024, 4, 1)
+    cfg.vintage.polygon_vintage = date(2024, 4, 1)
 
     v = _probe_lidar_vintage(cfg, [str(p)])
     assert v["vintage_gap_days"] < 0
@@ -689,6 +696,8 @@ def test_aggregate_reports_the_standoff_screen() -> None:
         "mounting_rule": ["R1", "R1", "R2", "R3"],
         "mounting_confidence": [0.5, 1.0, 1.0, 1.0],
         "on_building": [True, True, True, False],
+        "panel_tilt_deg": [5.0, 5.0, 20.0, 8.0],
+        "panel_azimuth_deg": [180.0, 180.0, 180.0, 90.0],
         "panel_rmse_m": [0.02, 0.02, 0.03, 0.04],
         "height_above_roof_m": [0.0, 0.12, None, None],
         "flags": [["no_panel_standoff"], [], ["standoff_unscreenable"],

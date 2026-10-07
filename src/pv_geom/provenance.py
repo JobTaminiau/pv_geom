@@ -22,6 +22,7 @@ def write_manifest(
     tiles_touched: list[str],
     run_id: str,
     vintage: dict[str, Any] | None = None,
+    crs: str | None = None,
 ) -> None:
     """Write the run manifest JSON sidecar at the output prefix root.
 
@@ -35,6 +36,7 @@ def write_manifest(
         "config_hash": config_hash,
         "config": config_dict,
         "inputs": inputs,
+        "crs": crs,
         "vintage": vintage or {},
         "cluster_spec": cluster_spec,
         "run_timestamp_utc": datetime.now(timezone.utc).isoformat(),

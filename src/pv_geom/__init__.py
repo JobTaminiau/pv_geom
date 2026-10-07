@@ -9,9 +9,10 @@
 
 __version__ = "0.4.0.dev0"
 
-__all__ = ["RunResult", "__version__", "describe", "load", "report", "run"]
+__all__ = ["RunResult", "__version__", "compare_reference", "describe", "load", "report",
+           "run"]
 
-_API = frozenset({"RunResult", "describe", "load", "report", "run"})
+_API = frozenset({"RunResult", "compare_reference", "describe", "load", "report", "run"})
 
 
 def __getattr__(name: str):

@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     import geopandas as gpd
 
     from pv_geom.report import ReportResult
+    from pv_geom.validation import ValidationResult
 
 _REQUIRED = {
     "polygons": "--polygons / inputs.polygons",
@@ -174,6 +175,22 @@ def report(output: str | Path, out_dir: str | Path | None = None, **kwargs: Any)
     from pv_geom.report import build_report
 
     return build_report(output, out_dir, **kwargs)
+
+
+def compare_reference(output: str | Path, reference: str | Path,
+                      out_dir: str | Path | None = None, **kwargs: Any) -> ValidationResult:
+    """Compare a run's measurements with externally reported geometry.
+
+    ``reference`` is a table of reference mounts (see
+    ``pv_geom.validation.REFERENCE_COLUMNS``). Tables are written to ``out_dir``
+    when given. Keyword arguments set the tolerances.
+    """
+    from pv_geom.validation import compare_to_reference, read_references
+
+    result = compare_to_reference(load(output), read_references(reference), **kwargs)
+    if out_dir is not None:
+        result.write(out_dir)
+    return result
 
 
 def describe(output: str | Path) -> dict[str, Any]:

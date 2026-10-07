@@ -74,6 +74,9 @@ The single most important gap. Everything else assumes it.
 | A4 | As Mia, I want a regression benchmark, so that a refactor cannot silently move the numbers. | A frozen set of ~200 real polygons with their points (a few MB, in the repo or a release asset) and a golden output; CI fails if tilt changes by more than 0.05° on any row without an explicit golden update. | M | M |
 | A5 | As Ravi, I want wide-tolerance fits characterised, so that I know whether to keep them. | A1 metrics split by `wide_tolerance_fit`; recommendation in the README (keep / down-weight / exclude). | S | S |
 | A6 | As Mia, I want synthetic end-to-end truth tests across the parameter space. | Property tests: for tilt 0–60°, all azimuths, noise 1–10 cm, density 2–30 pts/m², recovered tilt within a stated bound. | S | M |
+| A7 | As Ravi, I want measurements compared with externally *reported* geometry (PVDAQ, permits, as-builts), so that I have an outside check before survey-grade truth exists. | `pv-geom compare-reference`: a reference table of reported mounts, each with its resolution, evidence grade and presence dates; every measured facet of the matched polygons compared; result per reference is the share of measured area it describes, never the best-agreeing facet; error statistics only for mount-scope references; placeholders excluded; arrays evidenced absent at the LiDAR date reported as a negative control for the vintage screen. Protocol in `docs/validation.md`. | M | M |
+
+> **A7 progress (2026-10-07, owner request).** Implemented (`pv_geom.validation`, `pv-geom compare-reference`, `scripts/pvdaq_references.py`, `docs/validation.md`), adapting the owner's PVDAQ pilot. PVDAQ findings: 1,456 of its 1,862 systems are PVOutput-derived — azimuth always a compass point (45° steps), 18% with a 1° placeholder tilt, one mount per system, approximate coordinates (3 of 15 Phoenix systems matched to a property). They support a consistency check and a vintage negative control, not an accuracy figure. The other ~400 are documented sites with real angles and per-array records; scoring those means running on 3DEP LiDAR with hand-drawn polygons at their locations. On the three Phoenix pilot properties: the one eligible system is *partly consistent* (the record describes 55% of its area; azimuth offset is uniform and inside the reference's resolution); the one evidenced absent at the LiDAR date had 0% of its area labelled `panel_confirmed`.
 
 ### Epic B — Complete accounting
 
@@ -321,6 +324,9 @@ before 1.0.
 
 1. **Truth data for A1.** Which source of independently known tilt/azimuth is obtainable?
    This gates the whole "evidence" milestone.
+   *Update 2026-10-07:* PVDAQ is usable in part (see A7). Its documented (non-PVOutput)
+   systems are the realistic route to a small A1 set: a few dozen sites nationally,
+   measured from public 3DEP LiDAR with hand-drawn polygons. Decision needed: do that?
 2. **Segments (E1).** Add segment rows as a second table (clean, two files) or widen the
    polygon table (one file, awkward beyond two planes)? Recommendation: second table.
 3. **Column naming (R14).** Rename `panel_*` to something neutral (`surface_*` / `fit_*`)

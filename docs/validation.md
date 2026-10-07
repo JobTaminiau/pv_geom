@@ -150,3 +150,22 @@ find things out:
 - **One whole-system record did not describe the whole system.** A residence
   reported at 18 degrees has two blocks at 18 and two at 11; the record
   describes about half its area.
+
+## Accuracy set from PVDAQ's documented systems
+
+`validation/pvdaq_documented/` holds a small set built entirely from public
+data: PVDAQ's documented systems, 3DEP LiDAR fetched around each site, and
+outlines drawn by hand on the LiDAR (`scripts/accuracy_set.py`). Of 30
+locatable sites, eight were outlined and three give a clean test:
+
+- **NREL Research Support Facility roofs:** tilt within 0.08 degrees of the
+  reported 10, azimuth within 0.04 degrees of the reported 165 and 180.
+- **Two ground-mounted farms:** tilt within 0.1 and 1.0 degrees. Azimuth is 2
+  to 6 degrees east of the reported 180 as measured, and within 0.2 degrees
+  once the ground's slope along the rows is removed: tables that follow
+  falling ground really do face off south.
+- Two further sites measure very consistently but against references that are
+  doubtful; flat-roof rows fail as expected and are flagged.
+
+See that folder's README for the table, every site's disposition, and how to
+rebuild it.

@@ -339,7 +339,7 @@ def cmd_polygons(args: argparse.Namespace) -> None:
         geoms = [Polygon([(cx + x / unit, cy + y / unit) for x, y in d["xy"]]) for d in drawn]
         gdf = gpd.GeoDataFrame(
             {"polygon_id": [f"{spec.parent.name}-{d['label']}" for d in drawn],
-             "system_id": [int(d["system_id"]) for d in drawn]},
+             "system_id": [str(d["system_id"]) for d in drawn]},
             geometry=geoms, crs=frame["crs"])
         gdf.to_parquet(spec.parent / "polygons.parquet")
         half = frame["half_width_m"]
@@ -389,14 +389,20 @@ def cmd_measure(args: argparse.Namespace) -> None:
         rows = pv_geom.load(out)
         rows["site"] = site_dir.name
         measured.append(pd.DataFrame(rows.drop(columns="geometry")))
-        for sid, group in polys.groupby("system_id"):
+        # A polygon lists every system it may belong to ("1283;1433") when the
+        # records cannot be told apart on the ground.
+        ids = sorted({int(v) for joined in polys["system_id"] for v in str(joined).split(";")})
+        for sid in ids:
+            group = polys[[str(sid) in str(j).split(";") for j in polys["system_id"]]]
+            shared = any(";" in str(j) for j in group["system_id"])
             for i, m in enumerate(sites[sites["system_id"] == sid].itertuples()):
                 refs.append({
                     "reference_id": f"pvdaq-{sid}-m{i}", "system_id": sid,
                     "polygon_ids": ";".join(group["polygon_id"]),
                     "tilt_deg": m.tilt_deg, "azimuth_deg": m.azimuth_deg,
                     "source": f"PVDAQ {sid}: {m.name}",
-                    "scope": "mount" if (sites["system_id"] == sid).sum() == 1 else "system",
+                    "scope": ("mount" if (sites["system_id"] == sid).sum() == 1 and not shared
+                              else "system"),
                     "grade": "documented", "present_by": m.first_data,
                     "notes": f"{m.mount_type}; {m.dc_kw:.1f} kW DC; {m.location}"})
     table = pd.concat(measured, ignore_index=True)

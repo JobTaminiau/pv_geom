@@ -133,8 +133,8 @@ def fit_panel(points: np.ndarray, cfg: PanelPlaneConfig, seed: int) -> PanelFit:
     return PanelFit(refit, tol, widened=True)
 
 
-def roof_reference(task: PolygonTask, pts: LocalPoints, cfg: PVGeomConfig,
-                   seed: int) -> RoofPlaneResult:
+def roof_reference(task: PolygonTask, pts: LocalPoints, cfg: PVGeomConfig, seed: int,
+                   panel_normal: np.ndarray | None = None) -> RoofPlaneResult:
     """The plane of the roof around the polygon, or a result saying why not."""
     if not cfg.roof_plane.enabled:
         return RoofPlaneResult(
@@ -143,7 +143,7 @@ def roof_reference(task: PolygonTask, pts: LocalPoints, cfg: PVGeomConfig,
         )
     return extract_roof_plane(
         task.polygon, pts.footprints, pts.other_polygons, pts.surroundings,
-        cfg.roof_plane, seed=seed,
+        cfg.roof_plane, panel_normal=panel_normal, seed=seed,
     )
 
 
@@ -290,7 +290,7 @@ def measure_polygon(
 
     # Roof reference. A flagged result still reports its fit for QC, but only
     # an unflagged one is precise enough to measure a panel against.
-    roof = roof_reference(task, pts, cfg, seed)
+    roof = roof_reference(task, pts, cfg, seed, fit.normal if panel.ok else None)
     if roof.flag:
         flags.append(roof.flag)
 

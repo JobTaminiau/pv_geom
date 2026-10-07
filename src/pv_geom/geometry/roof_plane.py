@@ -11,7 +11,7 @@ from shapely.geometry import Polygon
 from shapely.ops import unary_union
 
 from pv_geom.config import RoofPlaneConfig
-from pv_geom.geometry.plane_fit import PlaneFit, fit_plane_ransac
+from pv_geom.geometry.plane_fit import PlaneFit, fit_plane_ransac, fit_planes_sequential
 
 
 @dataclass(frozen=True)
@@ -40,6 +40,9 @@ class RoofPlaneResult:
     building_id: str | None
     flag: str | None
     used_buffer_m: float | None
+    # How the plane was chosen within the ring (DOMINANT, COLLAR_FACET,
+    # PARALLEL_FACET, COLLAR_ONLY), or None without a usable fit.
+    method: str | None = None
     # How the reference ring was built: "footprint_ring" (clipped to the
     # overlapped building footprint), "open_ring" (no footprint available, so
     # just the elevated returns around the array) or "none" (no fit attempted
@@ -76,46 +79,117 @@ def _build_ring(
     return ring
 
 
-def _enforce_collar_agreement(
-    fit: PlaneFit,
+def _collar_agreement(fit: PlaneFit, collar_pts: np.ndarray, threshold: float) -> float:
+    """Share of the collar that lies on the plane."""
+    if len(collar_pts) == 0:
+        return 0.0
+    return float((np.abs((collar_pts - fit.centroid) @ fit.normal) < threshold).mean())
+
+
+# How a reference plane was chosen (the `roof_ref_method` column).
+DOMINANT = "dominant_plane"          # the ring's main plane, and the collar agrees
+COLLAR_FACET = "collar_facet"        # the ring facet a clear majority of the collar lies on
+COLLAR_ONLY = "collar_only"          # a plane fitted to the collar alone
+PARALLEL_FACET = "panel_parallel_facet"   # the ring facet parallel to the array plane
+
+
+def _reference_plane(
     pv_polygon: Polygon,
     points_in_ring: np.ndarray,
     cfg: RoofPlaneConfig,
     *,
+    panel_normal: np.ndarray | None = None,
     seed: int | None = None,
-) -> PlaneFit:
-    """Re-fit on the collar when the ring plane doesn't describe it.
+) -> tuple[PlaneFit, str | None]:
+    """The plane of the roof the array rests on, and how it was chosen.
 
-    The collar is the band of ring points within ``cfg.collar_m`` of the array —
-    the roof it is physically resting against. A wide ring can span a ridge, and
-    RANSAC reports the facet with the most points, which on an array set near
-    one edge of a roof is the *other* one. Measuring a panel against the far
-    facet is worse than not measuring it at all, so when the ring plane explains
-    less than ``cfg.collar_agreement_min`` of the collar we discard it and fit
-    the collar alone. A collar too small to fit, or too non-planar to reach
-    consensus (an array straddling the ridge), leaves a NaN-tilt fit — which the
-    caller turns into ``roof_no_consensus``, the honest answer.
+    The *collar* — ring points within ``cfg.collar_m`` of the array — is the
+    authority on which facet that is. Attempts, in order:
+
+    1. **The ring's dominant plane**, if it holds ``min_inlier_frac`` of the
+       ring and the collar agrees with it. The simple case: one facet.
+    2. **Facet search.** The ring spans a ridge or a hip, so either no plane
+       dominates or the dominant one is the facet *across* the ridge (RANSAC
+       reports whichever has more points, which for an array set near one edge
+       is the other one — measuring a panel against that is worse than not
+       measuring it). The ring's planes are peeled off one at a time and the
+       one a clear majority (``facet_agreement_min``) of the collar lies on is
+       taken.
+    3. **The facet parallel to the array plane**, when the collar is genuinely
+       split (an array at a ridge or hip, a polygon covering two facets) and
+       ``panel_normal`` is known: the ring facet within
+       ``parallel_angle_max_deg`` of the array's plane that also holds
+       ``parallel_collar_min`` of the collar.
+    4. **The collar alone**.
+
+    Returns a fit with NaN tilt (and no method) when none succeeds, which the
+    caller reports as ``roof_no_consensus``.
     """
-    if np.isnan(fit.tilt_deg) or len(points_in_ring) == 0:
-        return fit
+    def _fit(pts: np.ndarray, floor: float) -> PlaneFit:
+        return fit_plane_ransac(
+            pts, ransac_threshold=cfg.ransac_threshold_m, min_inlier_frac=floor,
+            max_iter=200, seed=seed,
+        )
 
+    def _done(fit: PlaneFit, method: str) -> tuple[PlaneFit, str | None]:
+        return fit, (None if np.isnan(fit.tilt_deg) else method)
+
+    ring_fit = _fit(points_in_ring, cfg.min_inlier_frac)
     collar_zone = pv_polygon.buffer(cfg.collar_m)
-    in_collar = contains_xy(collar_zone, points_in_ring[:, 0], points_in_ring[:, 1])
-    collar_pts = points_in_ring[in_collar]
+    collar_pts = points_in_ring[
+        contains_xy(collar_zone, points_in_ring[:, 0], points_in_ring[:, 1])]
     if len(collar_pts) < cfg.collar_min_points:
-        return fit                      # nothing better to go on; keep the ring fit
+        return _done(ring_fit, DOMINANT)        # no collar to consult
 
-    dists = np.abs((collar_pts - fit.centroid) @ fit.normal)
-    if float((dists < cfg.ransac_threshold_m).mean()) >= cfg.collar_agreement_min:
-        return fit                      # the ring plane is the collar's plane
+    ring_ok = not np.isnan(ring_fit.tilt_deg)
+    if ring_ok and (_collar_agreement(ring_fit, collar_pts, cfg.ransac_threshold_m)
+                    >= cfg.collar_agreement_min):
+        return ring_fit, DOMINANT
 
-    return fit_plane_ransac(
-        collar_pts,
-        ransac_threshold=cfg.ransac_threshold_m,
-        min_inlier_frac=cfg.min_inlier_frac,
-        max_iter=200,
-        seed=seed,
-    )
+    facets: list[PlaneFit] = []
+    scores: list[float] = []
+    if cfg.facet_search:
+        facets = fit_planes_sequential(
+            points_in_ring, ransac_threshold=cfg.ransac_threshold_m,
+            min_points=cfg.collar_min_points, max_planes=cfg.max_facets, seed=seed,
+        )
+        scores = [_collar_agreement(f, collar_pts, cfg.ransac_threshold_m) for f in facets]
+        if facets and max(scores) >= cfg.facet_agreement_min:
+            return facets[int(np.argmax(scores))], COLLAR_FACET
+
+    # The ring facet parallel to the array plane that also touches the array.
+    parallel: PlaneFit | None = None
+    if panel_normal is not None and cfg.parallel_angle_max_deg > 0:
+        cos_max = np.cos(np.radians(cfg.parallel_angle_max_deg))
+        touching = [
+            (score, f) for score, f in zip(scores, facets, strict=True)
+            if score >= cfg.parallel_collar_min
+            and abs(float(np.dot(f.normal, panel_normal))) >= cos_max
+        ]
+        if touching:
+            parallel = max(touching, key=lambda sf: sf[0])[1]
+
+    if ring_ok:
+        # The ring has a dominant plane, just not the collar's. The collar is
+        # refitted at the ordinary consensus floor, as it always was, and that
+        # result stands — unless it is grossly unlike the array's plane while a
+        # parallel facet is at hand, which is the signature of the collar fit
+        # having landed across the ridge.
+        collar_fit = _fit(collar_pts, cfg.min_inlier_frac)
+        if np.isnan(collar_fit.tilt_deg):
+            return (parallel, PARALLEL_FACET) if parallel is not None else (collar_fit, None)
+        if parallel is not None and panel_normal is not None:
+            gross = np.cos(np.radians(2.0 * cfg.parallel_angle_max_deg))
+            if abs(float(np.dot(collar_fit.normal, panel_normal))) < gross:
+                return parallel, PARALLEL_FACET
+        return collar_fit, COLLAR_ONLY
+
+    # The ring has no dominant plane: new ground. The parallel facet first; else
+    # the collar alone, which must show the clear majority a searched facet needs.
+    if parallel is not None:
+        return parallel, PARALLEL_FACET
+    return _done(_fit(collar_pts, max(cfg.min_inlier_frac, cfg.facet_agreement_min)),
+                 COLLAR_ONLY)
 
 
 def _overlapped_footprint(
@@ -187,6 +261,7 @@ def extract_roof_plane(
     cfg: RoofPlaneConfig,
     *,
     building_id_col: str = "building_id",
+    panel_normal: np.ndarray | None = None,
     seed: int | None = None,
 ) -> RoofPlaneResult:
     """Fit the roof plane in a ring around the PV polygon.
@@ -207,6 +282,10 @@ def extract_roof_plane(
         ``(N, 3)`` panel-candidate returns around the polygon.
     cfg
         Roof-plane settings (buffer, min_points, RANSAC threshold, RMSE max).
+    panel_normal
+        Unit normal of the plane fitted inside the polygon, when there is one.
+        Used only as a last resort, to pick the parallel facet where the collar
+        is split between facets.
     """
     pts = np.asarray(panel_class_points, dtype=np.float64)
     if pts.ndim != 2 or pts.shape[1] != 3:
@@ -237,11 +316,8 @@ def extract_roof_plane(
     # The consensus floor is the ring-specific `min_inlier_frac`, not the
     # panel-tuned default — see RoofPlaneConfig.min_inlier_frac. The collar
     # guard then makes sure the facet fitted is the one the array is on.
-    fit = fit_plane_ransac(
-        in_ring, ransac_threshold=cfg.ransac_threshold_m,
-        min_inlier_frac=cfg.min_inlier_frac, max_iter=200, seed=seed,
-    )
-    fit = _enforce_collar_agreement(fit, pv_polygon, in_ring, cfg, seed=seed)
+    fit, method = _reference_plane(pv_polygon, in_ring, cfg, panel_normal=panel_normal,
+                                   seed=seed)
 
     # No plane held enough of the ring: there is no single roof surface to
     # measure against (and the RMSE describes only the minority that agreed).
@@ -252,4 +328,4 @@ def extract_roof_plane(
         return _rejected("roof_complex", fit, buf)
 
     return RoofPlaneResult(fit=fit, on_building=on_building, building_id=bid, flag=None,
-                           used_buffer_m=buf, source=source)
+                           used_buffer_m=buf, source=source, method=method)

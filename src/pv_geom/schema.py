@@ -13,7 +13,7 @@ import pyarrow as pa
 # Compatibility rule: within a major version, columns are only ever ADDED and
 # added columns are nullable, so a reader written for x.0 reads every x.y.
 # Before 1.0 the major version is 0 and minor versions may still change types.
-SCHEMA_VERSION = "0.4"
+SCHEMA_VERSION = "0.5"
 
 
 def _f(name: str, typ: pa.DataType, *, nullable: bool = True, unit: str = "",
@@ -100,6 +100,12 @@ _CORE_FIELDS: list[pa.Field] = [
     _f("roof_ref_source", pa.string(), nullable=False,
        desc="How the roof reference ring was built: footprint_ring (clipped to "
             "a building footprint), open_ring (no footprint) or none."),
+    _f("roof_ref_method", pa.string(),
+       desc="How the roof plane was chosen within the ring: dominant_plane (the "
+            "ring's main plane), collar_facet (the facet the band beside the array "
+            "lies on), panel_parallel_facet (the facet parallel to the array plane, "
+            "where that band is split between facets) or collar_only. Null without "
+            "a usable roof reference."),
     _f("roof_tilt_deg", pa.float32(), unit="deg",
        desc="Tilt of the plane fitted to the ring around the polygon."),
     _f("roof_azimuth_deg", pa.float32(), unit="deg",

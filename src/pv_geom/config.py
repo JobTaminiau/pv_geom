@@ -93,6 +93,31 @@ class RoofPlaneConfig(BaseModel):
     collar_m: float = 1.2
     collar_min_points: int = 40
     collar_agreement_min: float = 0.5
+    # Facet search. On a hip or cross-gabled roof the ring covers several
+    # facets and no single plane holds `min_inlier_frac` of it — on the Phoenix
+    # test block that left 785 of 2,994 fitted polygons without a reference
+    # (`roof_no_consensus`), the largest single cause of unscreened rows. When
+    # the ring has no dominant plane, or its dominant plane is not the one beside
+    # the array, the ring's planes are peeled off one at a time (up to
+    # `max_facets`) and the one the collar agrees with is taken. Set
+    # `facet_search: false` for the pre-0.5 behaviour.
+    facet_search: bool = True
+    max_facets: int = 4
+    # A facet found by the search (or a fit to the collar alone) must explain a
+    # clear majority of the collar. An array straddling a ridge has a collar
+    # split about evenly between two facets; neither is its roof, and at a bare
+    # majority one of them would be picked.
+    facet_agreement_min: float = 0.65
+    # Last resort, for arrays at a ridge or hip (or polygons covering two
+    # facets), whose collar is genuinely split so that no facet holds a clear
+    # majority of it: take the facet that is PARALLEL to the fitted array plane,
+    # provided it also touches the array (holds `parallel_collar_min` of the
+    # collar). A flush array is parallel to its own roof; so is a bare roof to
+    # itself, which the standoff screen then correctly reports as unresolved. A
+    # rack on a flat roof has no parallel facet and stays unscreened. Rows
+    # referenced this way say so in `roof_ref_method`. 0 disables it.
+    parallel_angle_max_deg: float = 10.0
+    parallel_collar_min: float = 0.25
     # Fit a roof reference from an *open* ring (not clipped to a footprint) when
     # no footprint layer was supplied, or the polygon misses every footprint.
     # The ring is then just the elevated returns around the array; the consensus

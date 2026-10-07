@@ -52,6 +52,14 @@ roof_plane:
   open_ring: true                # with no footprint layer, or a polygon missing every
                                  # footprint, fit the reference from an unclipped ring
                                  # (rows say which in roof_ref_source)
+  facet_search: true             # when the ring has no dominant plane (hip and cross-gable
+  max_facets: 4                  # roofs), peel off its facets and take the one the collar
+                                 # agrees with, instead of giving up
+  facet_agreement_min: 0.65      # ...which must be a clear majority of the collar: an array
+                                 # straddling a ridge has no single roof plane
+  parallel_angle_max_deg: 10.0   # last resort where the collar is split: the facet parallel
+  parallel_collar_min: 0.25      # to the array plane that also holds this share of the collar
+                                 # (rows say so in roof_ref_method; 0 disables)
   min_overlap_frac: 0.5          # footprint∩polygon / polygon area for on_building=True
                                  # (sliver touches must not become "rooftop")
 

@@ -72,6 +72,21 @@ def test_multipolygon_parts_sharing_an_edge_stay_separate(tmp_path: Path) -> Non
     assert out["input_flags"].tolist() == [(), ()]
 
 
+def test_geometry_collection_keeps_its_polygons_and_sheds_debris(tmp_path: Path) -> None:
+    """A dissolve can return polygons with a stray line attached: the polygons
+    are the arrays, the line is nothing, and it must not become a row."""
+    from shapely.geometry import GeometryCollection
+
+    mixed = GeometryCollection([box(0, 0, 4, 4), LineString([(4, 4), (9, 9)]),
+                                box(10, 10, 14, 14)])
+    only_line = GeometryCollection([LineString([(0, 0), (1, 1)])])
+    out = read_polygons(_layer(tmp_path, [mixed, only_line], polygon_id=["c", "junk"]),
+                        target_crs=CRS)
+    assert out["polygon_id"].tolist() == ["c__p0", "c__p1", "junk"]
+    assert out["input_issue"].tolist() == [None, None, "not_polygonal"]
+    assert out.geometry.iloc[:2].area.tolist() == [16.0, 16.0]
+
+
 def test_input_quality_flags(tmp_path: Path) -> None:
     geoms = [
         box(0, 0, 4, 4),                 # 0: fine

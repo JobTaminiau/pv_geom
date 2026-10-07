@@ -19,6 +19,12 @@ open-sided canopy. When present, the polygon is routed down the canopy rules
 mapped as buildings), and the ground-mount rules (R4/R5) are suppressed.
 Unknown (NaN) heights never satisfy evidence conditions — they propagate to
 ``ambiguous`` — but an unknown height does not veto an *upper-cap* guard.
+
+Panel standoff (0.4.0): when the panel plane is not resolvably above the roof
+plane, every panel-vs-roof feature is uninformative — the row is equally
+consistent with a low-profile flush mount and with an array that was not in the
+point cloud at all. The label still stands, but its confidence is capped at
+``no_panel_standoff_confidence_max``.
 """
 
 from __future__ import annotations
@@ -89,6 +95,20 @@ class RulesMountingClassifier(MountingClassifier):
         self.cfg = cfg
 
     def classify(self, f: MountingFeatures) -> MountingResult:
+        result = self._classify(f)
+        # A row whose panel plane is indistinguishable from the roof beneath it
+        # scores *maximally* on R1's two conditions while being exactly what an
+        # array missing from the point cloud looks like. Cap the confidence so
+        # the label survives but cannot be mistaken for strong evidence.
+        # `ambiguous` is exempt: its confidence measures how far the row was
+        # from any rule firing, which the standoff tells us nothing about.
+        if f.no_panel_standoff and result.label != "ambiguous":
+            capped = min(result.confidence, self.cfg.no_panel_standoff_confidence_max)
+            if capped != result.confidence:
+                return MountingResult(result.label, float(capped), result.triggered_rule)
+        return result
+
+    def _classify(self, f: MountingFeatures) -> MountingResult:
         cfg = self.cfg
         m = cfg.confidence_margin
         near_misses: list[float] = []

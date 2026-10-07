@@ -67,8 +67,12 @@ QUALITY_FLAGS: frozenset[str] = frozenset(
         "east_west_rack",
         "tracker_suspected",
         "roof_insufficient",
+        "roof_no_consensus",
         "roof_complex",
         "possible_missing_footprint",
+        # Panel-standoff (vintage) screen: failed / not applicable. Neither
+        # flag present means the row was screened and passed. See tile_task.
         "no_panel_standoff",
+        "standoff_unscreenable",
     }
 )

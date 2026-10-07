@@ -164,7 +164,9 @@ def _build_row(
     if roof_res.flag:
         flags.append(roof_res.flag)
 
-    roof_plane_available = roof_res.fit is not None and not np.isnan(roof_res.fit.tilt_deg)
+    # A flagged roof result still reports its fit in the roof_* columns for QC,
+    # but only an unflagged one is precise enough to measure a panel against.
+    roof_plane_available = roof_res.usable
 
     # M4 heights
     panel_inliers = panel_pts[panel_fit.inlier_mask] if panel_fit.n_inliers > 0 else panel_pts[:0]
@@ -183,14 +185,28 @@ def _build_row(
         har = float("nan")
         pra = float("nan")
 
-    # Panel plane indistinguishable from the roof plane beneath it. Expected on
-    # a genuinely low-profile flush mount, but also the signature of an input
-    # polygon whose panels were absent from the point cloud — when the imagery
-    # the detection came from postdates the LiDAR, there are no panel returns
-    # to fit and the "panel" plane IS the roof. Such rows carry roof geometry
-    # under panel column names, so downstream work that needs measured *panel*
-    # geometry (tilt/azimuth of a rack, panel-roof angle) should exclude them.
-    if roof_plane_available and not np.isnan(har) and har < cfg.heights.min_panel_standoff_m:
+    # Panel-standoff screen. Three outcomes, and the row must say which:
+    #
+    #   no_panel_standoff     — screened, FAILED. The panel plane is not
+    #       resolvably above the roof. Expected on a genuinely low-profile
+    #       flush mount, but also the signature of an input polygon whose
+    #       panels were absent from the point cloud: when the imagery the
+    #       detection came from postdates the LiDAR there are no panel returns
+    #       to fit, so RANSAC fits the bare roof and the row reports *roof*
+    #       geometry under the panel column names.
+    #   standoff_unscreenable — could not be screened. No trustworthy roof
+    #       reference (off-building, or the ring fit failed), so there is
+    #       nothing to measure the panel plane against. Says nothing about
+    #       whether the panels were there; it is the absence of a test, and on
+    #       the v0.1.0 Phoenix run this was the majority of rows.
+    #   neither flag          — screened, PASSED.
+    #
+    # Downstream work that needs measured *panel* geometry (rack tilt/azimuth,
+    # panel-roof angle) should keep only the third case.
+    standoff_screenable = roof_plane_available and not np.isnan(har)
+    if not standoff_screenable:
+        flags.append("standoff_unscreenable")
+    elif har < cfg.heights.min_panel_standoff_m:
         flags.append("no_panel_standoff")
 
     # Canopy evidence: ground-class returns under the panel polygon (NaN HAG
@@ -242,6 +258,7 @@ def _build_row(
         east_west_rack="east_west_rack" in flags,
         n_ground_under=n_ground_under,
         ground_under_gap_m=ground_under_gap,
+        no_panel_standoff="no_panel_standoff" in flags,
     )
     mr = classify_mounting(feats, cfg.mounting_rules)
 

@@ -115,38 +115,68 @@ missing from the footprint layer degrades to `ambiguous` +
 (NaN) heights are never treated as evidence — they propagate to `ambiguous`.
 
 `flags` is a list drawn from `low_density`, `poor_fit`, `near_horizontal`,
-`east_west_rack`, `tracker_suspected`, `roof_insufficient`, `roof_complex`,
-`possible_missing_footprint`, `no_panel_standoff`.
+`east_west_rack`, `tracker_suspected`, `roof_insufficient`,
+`roof_no_consensus`, `roof_complex`, `possible_missing_footprint`,
+`no_panel_standoff`, `standoff_unscreenable`.
 
-### `no_panel_standoff` and input/LiDAR vintage
+The three roof-fit failures are distinct and worth keeping apart:
+`roof_insufficient` (the ring never gathered `roof_plane.min_points`),
+`roof_no_consensus` (no single plane held `roof_plane.min_inlier_frac` of the
+ring — typically an array straddling a ridge), and `roof_complex` (a plane
+*was* agreed but its RMSE exceeded `roof_plane.rmse_max_m`). None of the three
+yields a usable roof reference, so all three suppress `height_above_roof_m`
+and `panel_roof_angle_deg`; the `roof_*` columns still report the attempted fit
+for QC.
 
-`no_panel_standoff` fires when a roof plane was fitted and the panel plane
-sits less than `heights.min_panel_standoff_m` (default 5 cm) above it — below
-what two fits carrying ~2 cm RMSE each can resolve. It has two causes, and
-the flag deliberately describes the observation rather than guessing between
-them:
+### Input/LiDAR vintage: the panel-standoff screen
 
-1. a genuinely low-profile flush mount, and
-2. **an input polygon whose panels were not in the point cloud.** If the
-   inventory being enriched was detected on imagery that postdates the LiDAR,
-   the array may not have existed when the tile was flown. There are then no
-   panel returns to fit, RANSAC fits the bare roof, and the row reports *roof*
-   geometry under the panel column names — a plausible-looking flush mount
-   with tight RMSE.
+pv-geom measures panel geometry from LiDAR against an inventory detected some
+other way — usually orthoimagery. **If the imagery postdates the LiDAR, arrays
+built in between are in the inventory but not in the point cloud.** There are
+then no panel returns to fit, RANSAC fits the bare roof, and the row reports
+*roof* geometry under the panel column names: a plausible-looking flush mount
+with tight RMSE. This is a property of the input *pairing*, not of any row, so
+it cannot be inferred from the data — declare it:
 
-Cause 2 is a property of the input pairing, not of a tile, so pv-geom cannot
-rule it out per row; the flag is a screening filter. Calibration against
-dated permit records for metropolitan Phoenix (2024 imagery, 2020 LiDAR;
-34,837 single-permit parcels) puts the 5 cm threshold at **90% of
-known-post-LiDAR arrays flagged, against 32% of known-pre-LiDAR arrays** —
-so use it to *exclude* rows when measured panel geometry is required (rack
-tilt/azimuth, panel–roof angle), not to date individual installations. Panel
-*azimuth* is the least affected quantity, since a flush array is parallel to
-the facet the roof fit recovers anyway.
+```yaml
+vintage:
+  input_epoch: 2024-04-01     # when your detection imagery was captured
+  sample_tiles: 25
+```
 
-Before running, check whether your detection imagery and LiDAR are
-co-temporal, and report the fraction flagged alongside any fleet-level
-geometry statistic.
+The run then measures the LiDAR side itself — per-point GPS time from a sample
+of tiles, which is the true flight date; the LAS header's creation date is the
+*delivery* date and can lag badly (the Phoenix 3DEP tiles were flown
+2020-11-26/28 and stamped 2021-06-30) — and warns if the two do not overlap.
+Both epochs and `vintage_gap_days` land in the manifest, so the pairing is
+recoverable from the artifact instead of from tribal knowledge. `--dry-run`
+performs the check on its own, before a multi-hour run.
+
+Per row, the screen is tri-state:
+
+| Row carries | Meaning |
+| --- | --- |
+| `no_panel_standoff` | Screened, **failed**. The panel plane is less than `heights.min_panel_standoff_m` (default 5 cm) above the roof — below what two fits at ~2 cm RMSE can resolve. Either a genuinely low-profile flush mount or an array absent from the cloud; the flag describes the observation rather than guessing. |
+| `standoff_unscreenable` | **Not applicable.** No usable roof reference (off-building, or the roof fit failed), so there was nothing to measure against. Says nothing about whether the panels were there. |
+| neither | Screened, **passed**. |
+
+Calibration against dated permit records for metropolitan Phoenix (34,837
+single-permit parcels) puts the 5 cm threshold at **90% of known-post-LiDAR
+arrays flagged, against 32% of known-pre-LiDAR arrays** — use it to *exclude*
+rows when measured panel geometry is required (rack tilt/azimuth, panel–roof
+angle), not to date individual installations. Panel *azimuth* is the least
+affected quantity, since a flush array is parallel to the facet the roof fit
+recovers anyway.
+
+A labelled row carrying `no_panel_standoff` also has its `mounting_confidence`
+capped at `mounting_rules.no_panel_standoff_confidence_max` (default 0.5).
+Without the cap such rows score *maximally* on R1 — panel–roof angle ~0, height
+above roof ~0 — so filtering on high confidence selected precisely the
+unmeasured rows.
+
+The manifest reports the whole screen under `aggregate_stats.standoff_screen`,
+including the cross-tab against `mounting_type`, so the flagged fraction
+travels with any fleet-level geometry statistic automatically.
 
 The manifest captures aggregate stats (mounting-type counts, RMSE
 percentiles, flag counts), the config hash, the input URIs, the cluster
@@ -169,9 +199,18 @@ Key knobs you'll likely touch:
 - `io.classification` — ASPRS class assignments and the class-1 fallback
   height (USGS LPC tiles often lack class 6; `pv_geom` falls back to
   class-1 returns above local ground).
+- `roof_plane.{min_inlier_frac, collar_m, collar_agreement_min}` — how much of
+  the ring must agree on one plane, and the guard that keeps the fit on the
+  facet the array actually rests on rather than the one across the ridge.
+  Loosening `min_inlier_frac` without the collar guard produces confident fits
+  to the wrong facet; see the config comments for the measured numbers.
 - `mounting_rules` — thresholds for each of R1–R8 in `classify/rules.py`,
   plus the canopy-evidence knobs (`canopy_min_ground_points_under`,
-  `canopy_gap_m_min`) and the missing-footprint flag threshold.
+  `canopy_gap_m_min`), the missing-footprint flag threshold, and
+  `no_panel_standoff_confidence_max`.
+- `vintage.input_epoch` — when your detection imagery was captured. See
+  "Input/LiDAR vintage" above; leaving it unset disables the co-temporality
+  check but not the LiDAR-side measurement.
 - `compute.backend` — `local` or `coiled`.
 
 ## Compute backends

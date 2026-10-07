@@ -21,13 +21,21 @@ def write_manifest(
     aggregate_stats: dict[str, Any],
     tiles_touched: list[str],
     run_id: str,
+    vintage: dict[str, Any] | None = None,
 ) -> None:
-    """Write the run manifest JSON sidecar at the output prefix root."""
+    """Write the run manifest JSON sidecar at the output prefix root.
+
+    ``vintage`` records the measured LiDAR flight window, the declared epoch of
+    the inventory being enriched, and the gap between them — the one property of
+    a run that the output rows cannot express but that decides whether their
+    panel geometry means anything. See :func:`pv_geom.pipeline.runner._probe_lidar_vintage`.
+    """
     manifest = {
         "pkg_version": __version__,
         "config_hash": config_hash,
         "config": config_dict,
         "inputs": inputs,
+        "vintage": vintage or {},
         "cluster_spec": cluster_spec,
         "run_timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "counts": counts,

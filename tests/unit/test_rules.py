@@ -438,3 +438,53 @@ def test_classifier_class_can_be_reused() -> None:
     r2 = clf.classify(f2)
     assert r1.triggered_rule == "R1"
     assert r2.triggered_rule == "R5"
+
+
+# --------------------------------------------------------------------------- #
+# Panel standoff (input/LiDAR vintage) confidence cap
+# --------------------------------------------------------------------------- #
+
+
+def test_no_panel_standoff_caps_confidence() -> None:
+    """A row with no resolvable panel standoff satisfies R1 *maximally* — panel
+    -roof angle ~0, height above roof ~0 — which is also exactly what an array
+    missing from the point cloud looks like. The label stands; the confidence
+    must not."""
+    cfg = MountingRulesConfig()
+    clean = _features(panel_roof_angle_deg=0.5, height_above_roof_m=0.10)
+    flat = classify_mounting(clean, cfg)
+    assert flat.triggered_rule == "R1"
+    assert flat.confidence == pytest.approx(1.0)
+
+    suspect = _features(panel_roof_angle_deg=0.0, height_above_roof_m=0.0,
+                        no_panel_standoff=True)
+    r = classify_mounting(suspect, cfg)
+    assert r.triggered_rule == "R1"
+    assert r.label == flat.label                       # same reading of the evidence
+    assert r.confidence == pytest.approx(cfg.no_panel_standoff_confidence_max)
+
+
+def test_no_panel_standoff_cap_is_configurable_and_never_raises_confidence() -> None:
+    disabled = MountingRulesConfig(no_panel_standoff_confidence_max=1.0)
+    f = _features(panel_roof_angle_deg=0.0, height_above_roof_m=0.0,
+                  no_panel_standoff=True)
+    assert classify_mounting(f, disabled).confidence == pytest.approx(1.0)
+
+    # A row that was already below the cap keeps its (lower) confidence.
+    low = _features(panel_roof_angle_deg=4.5, height_above_roof_m=0.0,
+                    no_panel_standoff=True)
+    cfg = MountingRulesConfig()
+    assert classify_mounting(low, cfg).confidence <= cfg.no_panel_standoff_confidence_max
+
+
+def test_no_panel_standoff_does_not_touch_ambiguous() -> None:
+    """`ambiguous` confidence means "how far from any rule firing", which the
+    standoff says nothing about — capping it would be meaningless."""
+    f = _features(on_building=False, roof_plane_available=False,
+                  panel_roof_angle_deg=float("nan"),
+                  height_above_roof_m=float("nan"),
+                  height_above_ground_m=float("nan"),
+                  panel_tilt_deg=float("nan"), no_panel_standoff=True)
+    r = classify_mounting(f, MountingRulesConfig())
+    assert r.label == "ambiguous"
+    assert r.confidence == pytest.approx(1.0)

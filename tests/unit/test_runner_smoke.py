@@ -8,6 +8,7 @@ and verifies the output schema + the recovered tilt/azimuth + mounting label.
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from pathlib import Path
 
 import geopandas as gpd
@@ -533,3 +534,171 @@ def test_runner_dry_run(synth_inputs: dict[str, Path]) -> None:
     assert manifest.exists()
     # No partition files written in dry-run mode
     assert not list(synth_inputs["out"].glob("part-*.parquet"))
+
+
+def test_build_row_marks_unscreenable_when_no_roof_reference() -> None:
+    """Off-building: there is no roof to measure the panel plane against, so the
+    vintage screen could not run. The row must say so rather than look like it
+    passed — the distinction is the whole point of the tri-state."""
+    from pv_geom.pipeline.tile_task import _build_row
+
+    rng = np.random.default_rng(3)
+    poly = box(0.0, 0.0, 6.0, 4.0)
+    p_xy = rng.uniform([0.0, 0.0], [6.0, 4.0], size=(400, 2))
+    panel_pts = np.column_stack([p_xy, np.full(400, 1.5) + rng.normal(0, 0.01, 400)])
+    g_xy = rng.uniform([-20.0, -20.0], [20.0, 20.0], size=(600, 2))
+    ground = np.column_stack([g_xy, np.zeros(len(g_xy))])
+
+    row = _build_row(
+        polygon=poly, polygon_id="w0", cfg=PVGeomConfig(), config_hash="x",
+        run_id="r", partition_id=0,
+        panel_pts=panel_pts, ground_xyz=ground, roof_input_pts=panel_pts,
+        footprints=gpd.GeoDataFrame({"building_id": []}, geometry=[], crs="EPSG:6341"),
+        other_pv_polygons=gpd.GeoDataFrame(geometry=[], crs="EPSG:6341"),
+        contributing_tile_ids=("t1",),
+    )
+    assert row["on_building"] is False
+    assert row["height_above_roof_m"] is None
+    assert "standoff_unscreenable" in row["flags"]
+    assert "no_panel_standoff" not in row["flags"]
+
+
+def test_standoff_screen_states_are_mutually_exclusive() -> None:
+    """The three outcomes must partition the rows: failed, unscreenable, or
+    (neither flag) screened and passed."""
+    from pv_geom.pipeline.tile_task import _build_row
+
+    for standoff, expect in ((0.0, "no_panel_standoff"), (0.10, None)):
+        scene = _rooftop_scene(standoff_m=standoff)
+        row = _build_row(
+            polygon_id=f"s{standoff}", cfg=PVGeomConfig(), config_hash="x",
+            run_id="r", partition_id=0, contributing_tile_ids=("t1",), **scene,
+        )
+        flags = set(row["flags"])
+        assert "standoff_unscreenable" not in flags       # a roof fit existed
+        assert ("no_panel_standoff" in flags) is (expect == "no_panel_standoff")
+
+
+def test_absent_panels_do_not_earn_full_confidence() -> None:
+    """End-to-end version of the rules-level cap: the bare-roof row is still
+    labelled a flush mount, but must not outrank a measured one."""
+    from pv_geom.pipeline.tile_task import _build_row
+
+    cfg = PVGeomConfig()
+    absent = _build_row(polygon_id="c0", cfg=cfg, config_hash="x", run_id="r",
+                        partition_id=0, contributing_tile_ids=("t1",),
+                        **_rooftop_scene(standoff_m=0.0))
+    real = _build_row(polygon_id="c1", cfg=cfg, config_hash="x", run_id="r",
+                      partition_id=0, contributing_tile_ids=("t1",),
+                      **_rooftop_scene(standoff_m=0.10))
+
+    assert absent["mounting_type"].startswith("flush_mount")
+    assert real["mounting_type"].startswith("flush_mount")
+    assert absent["mounting_confidence"] <= cfg.mounting_rules.no_panel_standoff_confidence_max
+    assert real["mounting_confidence"] > absent["mounting_confidence"]
+
+
+# --------------------------------------------------------------------------- #
+# Vintage probe + standoff aggregate (manifest surface)
+# --------------------------------------------------------------------------- #
+
+
+def _laz_flown_on(path, flight, n: int = 200) -> None:
+    import laspy
+
+    from pv_geom.io.lidar import (
+        _GPS_EPOCH,
+        _GPS_UTC_LEAP_SECONDS,
+        _LAS_GPS_TIME_OFFSET,
+    )
+
+    rng = np.random.default_rng(0)
+    header = laspy.LasHeader(point_format=6, version="1.4")
+    header.scales = np.array([0.001, 0.001, 0.001])
+    header.offsets = np.array([0.0, 0.0, 0.0])
+    las = laspy.LasData(header)
+    las.x = rng.uniform(0, 10, size=n)
+    las.y = rng.uniform(0, 10, size=n)
+    las.z = rng.uniform(0, 5, size=n)
+    las.classification = np.full(n, 6, dtype=np.uint8)
+    secs = (
+        (datetime.combine(flight, datetime.min.time()) - _GPS_EPOCH).total_seconds()
+        + _GPS_UTC_LEAP_SECONDS - _LAS_GPS_TIME_OFFSET
+    )
+    las.gps_time = np.full(n, secs)
+    las.write(str(path))
+
+
+def test_probe_lidar_vintage_reports_gap_when_input_postdates_lidar(tmp_path) -> None:
+    """The Phoenix pairing: 2024 imagery against a 2020 flight. The run must
+    measure the LiDAR side itself and record the gap in the manifest."""
+    from pv_geom.pipeline.runner import _probe_lidar_vintage
+
+    p = tmp_path / "t.laz"
+    _laz_flown_on(p, date(2020, 11, 26))
+    cfg = PVGeomConfig()
+    cfg.vintage.input_epoch = date(2024, 4, 1)
+
+    v = _probe_lidar_vintage(cfg, [str(p)])
+    assert v["lidar_flight_end"] == "2020-11-26"
+    assert v["lidar_epoch_source"] == "gps_time"
+    assert v["input_epoch"] == "2024-04-01"
+    assert v["vintage_gap_days"] == (date(2024, 4, 1) - date(2020, 11, 26)).days
+    assert "vintage_gap_warning" in v
+
+
+def test_probe_lidar_vintage_no_warning_when_cotemporal(tmp_path) -> None:
+    from pv_geom.pipeline.runner import _probe_lidar_vintage
+
+    p = tmp_path / "t.laz"
+    _laz_flown_on(p, date(2024, 6, 1))
+    cfg = PVGeomConfig()
+    cfg.vintage.input_epoch = date(2024, 4, 1)
+
+    v = _probe_lidar_vintage(cfg, [str(p)])
+    assert v["vintage_gap_days"] < 0
+    assert "vintage_gap_warning" not in v
+
+
+def test_probe_lidar_vintage_survives_unreadable_tiles(tmp_path) -> None:
+    """A bad tile costs a sample, never the run."""
+    from pv_geom.pipeline.runner import _probe_lidar_vintage
+
+    good = tmp_path / "good.laz"
+    _laz_flown_on(good, date(2020, 11, 26))
+    bad = tmp_path / "bad.laz"
+    bad.write_bytes(b"not a laz file")
+
+    v = _probe_lidar_vintage(PVGeomConfig(), [str(good), str(bad)])
+    assert v["lidar_tiles_sampled"] == 1
+    assert v["lidar_tiles_unreadable"] == 1
+    assert v["lidar_flight_end"] == "2020-11-26"
+
+
+def test_aggregate_reports_the_standoff_screen() -> None:
+    """Manifest must carry the screen as a partition plus the cross-tab against
+    mounting_type — that is what tells a reader which labels rest on unmeasured
+    panel geometry."""
+    import pyarrow as pa
+
+    from pv_geom.pipeline.runner import _aggregate
+
+    tbl = pa.table({
+        "mounting_type": ["flush_mount_flat_roof", "flush_mount_flat_roof",
+                          "tilted_rack_rooftop", "carport"],
+        "mounting_rule": ["R1", "R1", "R2", "R3"],
+        "mounting_confidence": [0.5, 1.0, 1.0, 1.0],
+        "on_building": [True, True, True, False],
+        "panel_rmse_m": [0.02, 0.02, 0.03, 0.04],
+        "height_above_roof_m": [0.0, 0.12, None, None],
+        "flags": [["no_panel_standoff"], [], ["standoff_unscreenable"],
+                  ["standoff_unscreenable"]],
+    })
+    out = _aggregate(tbl)["standoff_screen"]
+    assert out["no_panel_standoff"] == 1
+    assert out["passed"] == 1
+    assert out["unscreenable"] == 2
+    assert out["screened_frac"] == pytest.approx(0.5)
+    assert out["failed_frac_of_screened"] == pytest.approx(0.5)
+    assert out["by_mounting_type"]["flush_mount_flat_roof"]["no_panel_standoff"] == 1
+    assert out["by_mounting_type"]["flush_mount_flat_roof"]["passed"] == 1

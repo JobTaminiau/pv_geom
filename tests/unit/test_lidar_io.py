@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from pathlib import Path
 
 import laspy
@@ -90,3 +91,68 @@ def test_clip_full_erosion_returns_empty(tmp_path: Path) -> None:
 def test_clip_empty_input() -> None:
     out = clip_points_to_polygon(np.zeros((0, 4)), box(0, 0, 1, 1))
     assert out.shape == (0, 4)
+
+
+# --------------------------------------------------------------------------- #
+# Vintage (input/LiDAR co-temporality)
+# --------------------------------------------------------------------------- #
+
+
+def _write_laz_with_gps(path: Path, flight: date, n: int = 300) -> None:
+    """Synthetic tile whose points carry adjusted-standard GPS time for ``flight``."""
+    from pv_geom.io.lidar import (
+        _GPS_EPOCH,
+        _GPS_UTC_LEAP_SECONDS,
+        _LAS_GPS_TIME_OFFSET,
+    )
+
+    rng = np.random.default_rng(0)
+    header = laspy.LasHeader(point_format=6, version="1.4")
+    header.scales = np.array([0.001, 0.001, 0.001])
+    header.offsets = np.array([0.0, 0.0, 0.0])
+    las = laspy.LasData(header)
+    las.x = rng.uniform(0, 10, size=n)
+    las.y = rng.uniform(0, 10, size=n)
+    las.z = rng.uniform(0, 5, size=n)
+    las.classification = np.full(n, 6, dtype=np.uint8)
+    seconds = (
+        (datetime.combine(flight, datetime.min.time()) - _GPS_EPOCH).total_seconds()
+        + _GPS_UTC_LEAP_SECONDS - _LAS_GPS_TIME_OFFSET
+    )
+    las.gps_time = np.full(n, seconds) + rng.uniform(0, 3600, size=n)
+    las.write(str(path))
+
+
+def test_read_tile_vintage_recovers_flight_date_from_gps_time(tmp_path: Path) -> None:
+    """GPS time is the authoritative acquisition date — the LAS header's
+    creation date is the *delivery* date and can lag by months (the Phoenix
+    2020 tiles were flown 2020-11-26/28 and stamped 2021-06-30)."""
+    from pv_geom.io.lidar import read_tile_vintage
+
+    p = tmp_path / "tile.laz"
+    _write_laz_with_gps(p, date(2020, 11, 26))
+    v = read_tile_vintage(p)
+    assert v.flight_start == date(2020, 11, 26)
+    assert v.flight_end == date(2020, 11, 26)
+    assert v.best_estimate == date(2020, 11, 26)
+
+
+def test_read_tile_vintage_falls_back_to_creation_date(tmp_path: Path) -> None:
+    """Point formats without GPS time still yield the header date."""
+    from pv_geom.io.lidar import read_tile_vintage
+
+    p = tmp_path / "nogps.laz"
+    rng = np.random.default_rng(0)
+    header = laspy.LasHeader(point_format=0, version="1.2")
+    header.scales = np.array([0.001, 0.001, 0.001])
+    header.offsets = np.array([0.0, 0.0, 0.0])
+    las = laspy.LasData(header)
+    las.x = rng.uniform(0, 10, size=50)
+    las.y = rng.uniform(0, 10, size=50)
+    las.z = rng.uniform(0, 5, size=50)
+    las.write(str(p))
+
+    v = read_tile_vintage(p)
+    assert v.flight_start is None
+    assert v.creation_date is not None
+    assert v.best_estimate == v.creation_date

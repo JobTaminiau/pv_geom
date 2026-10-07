@@ -21,6 +21,11 @@ class MountingFeatures:
     east_west_rack: bool = False           # M5 multi-plane EW signature present
     n_ground_under: int = 0                # ground-class returns inside the polygon
     ground_under_gap_m: float | None = None  # median panel z - median under-polygon ground z
+    # Panel plane not resolvably above the roof plane. Either a very low-profile
+    # flush mount or — the case this exists for — an array absent from the point
+    # cloud, so the "panel" plane IS the roof. Both make every panel-vs-roof
+    # feature above uninformative, so the classifier caps its confidence.
+    no_panel_standoff: bool = False
 
 
 @dataclass(frozen=True)

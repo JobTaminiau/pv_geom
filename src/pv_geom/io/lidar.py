@@ -9,6 +9,8 @@ on a 4 GB worker).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -102,6 +104,100 @@ def _read_via_pdal(
     except Exception:
         crs_str = None
     return pts, crs_str
+
+
+@dataclass(frozen=True)
+class TileVintage:
+    """When a LiDAR tile was actually flown.
+
+    ``flight_start`` / ``flight_end`` come from per-point GPS time and are the
+    authoritative answer. ``creation_date`` is the LAS header field, which is
+    the *delivery* date and can lag the flight badly — the Phoenix
+    ``MaricopaPinal_2020`` tiles were flown 2020-11-26/28 but stamped
+    2021-06-30, a seven-month overstatement. Prefer the GPS dates and fall back
+    to ``creation_date`` only when the point format carries no GPS time.
+    """
+
+    tile_uri: str
+    creation_date: date | None
+    flight_start: date | None
+    flight_end: date | None
+
+    @property
+    def best_estimate(self) -> date | None:
+        """Latest date at which this tile could have observed the ground."""
+        return self.flight_end or self.creation_date
+
+    def to_dict(self) -> dict[str, str | None]:
+        return {
+            "tile_uri": self.tile_uri,
+            "creation_date": self.creation_date.isoformat() if self.creation_date else None,
+            "flight_start": self.flight_start.isoformat() if self.flight_start else None,
+            "flight_end": self.flight_end.isoformat() if self.flight_end else None,
+        }
+
+
+# GPS week zero. LAS "Adjusted Standard GPS Time" is GPS seconds minus 1e9;
+# GPS time does not observe leap seconds, so converting to UTC subtracts the
+# offset in force. 18 s has held since 2017-01-01 and covers every 3DEP
+# collection to date; a stale value shifts the result by seconds, not days.
+_GPS_EPOCH = datetime(1980, 1, 6)
+_GPS_UTC_LEAP_SECONDS = 18
+_LAS_GPS_TIME_OFFSET = 1_000_000_000
+
+
+def _adjusted_gps_to_date(adjusted: float) -> date:
+    delta = timedelta(seconds=float(adjusted) + _LAS_GPS_TIME_OFFSET - _GPS_UTC_LEAP_SECONDS)
+    return (_GPS_EPOCH + delta).date()
+
+
+def _vintage_from_open(src, tile_uri: str) -> TileVintage:
+    header = src.header
+    start = end = None
+    if "gps_time" in header.point_format.dimension_names and header.point_count:
+        try:
+            chunk = next(src.chunk_iterator(min(1_000_000, header.point_count)))
+        except StopIteration:
+            chunk = None
+        if chunk is not None:
+            gps = np.asarray(chunk.gps_time, dtype=np.float64)
+            gps = gps[np.isfinite(gps) & (gps != 0.0)]
+            if gps.size:
+                start = _adjusted_gps_to_date(gps.min())
+                end = _adjusted_gps_to_date(gps.max())
+    return TileVintage(
+        tile_uri=tile_uri,
+        creation_date=header.creation_date,
+        flight_start=start,
+        flight_end=end,
+    )
+
+
+def read_tile_vintage(tile_uri: str | Path, cache_dir: Path | None = None) -> TileVintage:
+    """Read acquisition dates from a LAZ tile without decoding all of it.
+
+    Reads the header plus a single point chunk — enough for the GPS-time range
+    of a contiguous flight strip, which is what a 3DEP tile is. A remote tile is
+    streamed through fsspec so only those leading bytes cross the network; if
+    the object store won't support the ranged reads laspy wants, we fall back to
+    the same local cache :func:`read_tile_points` uses.
+    """
+    import laspy
+
+    s = str(tile_uri)
+
+    if is_remote(s):
+        try:
+            import fsspec
+
+            with fsspec.open(s, "rb") as f, laspy.open(f) as src:
+                return _vintage_from_open(src, s)
+        except Exception:
+            pass  # fall through to the full download
+
+    local = localize(s, cache_dir) if is_remote(s) else Path(s)
+    with laspy.open(str(local)) as src:
+        return _vintage_from_open(src, s)
 
 
 def clip_points_to_polygon(

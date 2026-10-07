@@ -80,3 +80,21 @@ def test_mounting_labels_complete() -> None:
         "ambiguous",
     }
     assert MOUNTING_LABELS == expected
+
+
+def test_quality_flags_cover_the_standoff_tri_state() -> None:
+    """Failed / not-applicable are distinct flags; "passed" is the absence of
+    both. Without `standoff_unscreenable`, an unscreenable row is
+    indistinguishable from a screened one."""
+    from pv_geom.schema import QUALITY_FLAGS
+
+    assert {"no_panel_standoff", "standoff_unscreenable"} <= QUALITY_FLAGS
+
+
+def test_roof_failure_flags_are_split() -> None:
+    """A roof fit can fail on consensus (no single plane in the ring) or on
+    quality (RMSE above the gate). Reporting both as `roof_complex` hid that
+    nearly every rejection was well inside the RMSE gate."""
+    from pv_geom.schema import QUALITY_FLAGS
+
+    assert {"roof_no_consensus", "roof_complex", "roof_insufficient"} <= QUALITY_FLAGS

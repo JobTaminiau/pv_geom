@@ -25,7 +25,19 @@ roof_plane:
   buffer_m: 3.0
   buffer_max_m: 5.0
   min_points: 100
+  ransac_threshold_m: 0.15
   rmse_max_m: 0.10
+  min_inlier_frac: 0.4           # ring-specific consensus floor, BELOW the panel fit's
+                                 # 0.6: a ring spans facets/eaves/parapets, so no single
+                                 # plane holds 60% of it on a gable. At 0.6 the v0.1.0
+                                 # Phoenix run rejected 46.9% of rows whose fits would
+                                 # have passed rmse_max_m — and an unfitted roof means
+                                 # no panel-standoff (vintage) screen is possible.
+  collar_m: 1.2                  # the ring band adjacent to the array. If the wide-ring
+  collar_min_points: 40          # plane doesn't explain collar_agreement_min of it, refit
+  collar_agreement_min: 0.5      # on the collar — otherwise RANSAC can report the facet
+                                 # ACROSS the ridge (measured: 3 of 7 recovered rows were
+                                 # 20-45 deg off before this guard).
   min_overlap_frac: 0.5          # footprint∩polygon / polygon area for on_building=True
                                  # (sliver touches must not become "rooftop")
 
@@ -33,7 +45,18 @@ heights:
   ground_search_radius_m: 10.0
   ground_fallback_k: 50          # k-nearest ground fallback when the disk is empty
   ground_fallback_max_radius_m: 100.0   # (large commercial roofs; 0 disables)
+  min_panel_standoff_m: 0.05     # below this the panel plane is not resolvably above the
+                                 # roof -> `no_panel_standoff` (see README, Quality flags)
   use_whitebox_dem: false
+
+vintage:
+  # When the detection inventory's source imagery was captured (ISO date). Set
+  # it and the run checks itself against the LiDAR's measured flight dates,
+  # warning if arrays could exist in the input but not in the point cloud.
+  # Unset = no check; the LiDAR side is measured and recorded either way.
+  input_epoch: null
+  sample_tiles: 25               # tiles sampled for flight dates (header + first chunk
+                                 # only, streamed not downloaded); 0 disables
 
 mounting_rules:
   R1: { panel_roof_angle_deg_max: 5.0, height_above_roof_m_max: 0.5 }
@@ -51,6 +74,10 @@ mounting_rules:
   canopy_min_ground_points_under: 15   # ground returns inside the polygon +
   canopy_gap_m_min: 2.0                #   multi-metre gap = open-sided canopy signature
   missing_footprint_hag_m: 6.0   # off-building above this w/o canopy evidence -> flag
+  no_panel_standoff_confidence_max: 0.5   # confidence ceiling for a labelled row carrying
+                                          # `no_panel_standoff`: it satisfies R1 maximally
+                                          # while being exactly what an array missing from
+                                          # the cloud looks like. 1.0 disables.
 
 io:
   lidar_reader: laspy          # laspy | pdal (pdal needs the [pdal] extra + system libs)

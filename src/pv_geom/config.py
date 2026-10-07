@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -43,6 +44,29 @@ class RoofPlaneConfig(BaseModel):
     min_points: int = 100
     ransac_threshold_m: float = 0.15    # RANSAC inlier distance for the roof fit
     rmse_max_m: float = 0.10            # rejection threshold on the post-fit inlier RMSE
+    # Consensus floor for the *ring* fit. Deliberately below the panel fit's
+    # 0.6: a ring buffered around an array straddles roof facets, eaves and
+    # parapets, so no single plane holds 60% of it on a gable roof. At 0.6 the
+    # v0.1.0 Phoenix run rejected 163,716 rows (46.9%) as `roof_complex` whose
+    # ring fits had a median RMSE of 5.8 cm — 99.999% of them would have passed
+    # the rmse_max_m quality gate. Those rows lost their roof reference and with
+    # it any chance of a panel-standoff (vintage) screen. Quality is enforced by
+    # rmse_max_m; this only decides whether one plane describes enough of the
+    # ring to be worth reporting.
+    min_inlier_frac: float = 0.4
+    # Collar guard. A ring wide enough to hold min_points can reach across a
+    # ridge, and RANSAC then reports whichever facet is *larger* — not
+    # necessarily the one the array sits on. Measured on real Phoenix polygons:
+    # at min_inlier_frac=0.4 with no guard, 3 of 7 newly-recovered rows picked a
+    # facet 20-45 deg away from the roof directly beside the array, which would
+    # corrupt panel_roof_angle_deg and height_above_roof_m far worse than having
+    # no roof fit at all. So the collar — ring points within `collar_m` of the
+    # polygon, i.e. the roof the array is physically resting against — is the
+    # authority: if the wide-ring plane does not explain at least
+    # `collar_agreement_min` of it, the fit is redone on the collar alone.
+    collar_m: float = 1.2
+    collar_min_points: int = 40
+    collar_agreement_min: float = 0.5
     # Minimum (footprint ∩ polygon area) / polygon area for on_building=True.
     # A sliver touch must not route ground mounts / adjacent carports down the
     # rooftop rules; 0.5 tolerates typical ML-footprint misregistration (1-3 m)
@@ -140,6 +164,16 @@ class MountingRulesConfig(BaseModel):
     # possible_missing_footprint (the R3/R8 height caps then usually route the
     # polygon to ambiguous rather than a confident canopy label).
     missing_footprint_hag_m: float = 6.0
+    # Confidence ceiling for a labelled row carrying `no_panel_standoff`. Such a
+    # row satisfies R1 maximally (panel-roof angle ~0, height above roof ~0) —
+    # on the v0.1.0 Phoenix run 34,873 of them scored >= 0.999 — even though the
+    # evidence is equally consistent with there being no panel in the cloud at
+    # all. Without the cap, filtering on high confidence selects *for* the
+    # unmeasured rows. 0.5 keeps the label (it is still the best reading of what
+    # was observed) while marking it as no better than borderline. Set to 1.0 to
+    # disable. Does not apply to `ambiguous`, whose confidence means the
+    # opposite thing.
+    no_panel_standoff_confidence_max: float = 0.5
 
 
 class S3Config(BaseModel):
@@ -185,6 +219,26 @@ class ComputeConfig(BaseModel):
     local: LocalConfig = Field(default_factory=LocalConfig)
 
 
+class VintageConfig(BaseModel):
+    """Acquisition epochs of the two inputs, and how hard to check them.
+
+    pv_geom measures panel geometry from LiDAR against an inventory detected
+    some other way — usually orthoimagery. If the imagery postdates the LiDAR,
+    arrays built in between are in the inventory but not in the point cloud, and
+    the pipeline will happily fit and report the bare roof under the panel
+    column names. This is a property of the *pairing*, not of any one row, so it
+    cannot be inferred from the data; declare it and the run will check itself.
+    """
+
+    # When the detection inventory's source imagery was captured (ISO date, or
+    # the later bound of a mosaic). Leave unset to skip the co-temporality
+    # check; the LiDAR side is measured from the tiles either way.
+    input_epoch: date | None = None
+    # Tiles sampled for LiDAR flight dates. Only the header and first point
+    # chunk are read per tile, streamed rather than downloaded. 0 disables.
+    sample_tiles: int = 25
+
+
 class OutputConfig(BaseModel):
     partition_size: int = 100000
     write_geoparquet: bool = True
@@ -201,6 +255,7 @@ class PVGeomConfig(BaseModel):
     io: IOConfig = Field(default_factory=IOConfig)
     compute: ComputeConfig = Field(default_factory=ComputeConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
+    vintage: VintageConfig = Field(default_factory=VintageConfig)
 
     @classmethod
     def from_yaml(cls, path: Path | str) -> PVGeomConfig:

@@ -25,6 +25,11 @@ SECTIONS = [
      "covered polygons have no fit."),
     ("Input vintages and geometry basis", ["vintage_timeline", "geometry_basis"],
      ["geometry_basis"], None),
+    ("Facets", [], ["facets"],
+     "A polygon can cover more than one roof face. Each distinct plane in it is a "
+     "facet with its own tilt and azimuth; the figures and tables below describe each "
+     "polygon by its primary (largest) facet, and the release dataset carries every "
+     "facet in pv_geom_segments."),
     ("Array geometry", ["geometry_overview"], ["summary_statistics"],
      "Statistics are for {unit}; every stratum under both weightings is in "
      "tables/summary_statistics.csv. Brackets give 95% bootstrap intervals over "
@@ -70,7 +75,7 @@ ul{padding-left:20px;margin:0 0 12px}li{margin-bottom:6px}
 """
 
 
-_TEXT_COLS = {"Status", "No fit because", "Step", "Basis", "Meaning", "Stratum", "Measure", "Unit", "Flag", "Facing",
+_TEXT_COLS = {"Facets in polygon", "Status", "No fit because", "Step", "Basis", "Meaning", "Stratum", "Measure", "Unit", "Flag", "Facing",
               "Tilt (°)", "column", "type", "unit", "nullable", "description", "File",
               "Contents"}
 

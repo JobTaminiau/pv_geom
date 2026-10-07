@@ -56,8 +56,21 @@ class PanelPlaneConfig(BaseModel):
 
 
 class MultiPlaneConfig(BaseModel):
+    """Polygons that hold more than one plane are split into segments (facets)."""
+
     enabled: bool = True
+    # A plane is a facet when it holds at least this share of the polygon's
+    # returns (and at least panel_plane.min_points of them) ...
     secondary_min_frac: float = 0.20
+    # ... and differs in orientation from every other facet by at least this.
+    # Without it a single noisy surface is sliced into parallel "facets".
+    segment_min_angle_deg: float = 10.0
+    max_segments: int = 4
+    # A further facet steeper than this is not an array: on the benchmarks the
+    # planes found at 87-90 degrees are returns off walls, parapets and roof
+    # edges inside a slightly oversized polygon. (The primary plane is not
+    # subject to this; a genuinely steep array still gets its fit.)
+    segment_max_tilt_deg: float = 70.0
     ew_rack_azimuth_tol_deg: float = 25.0
     ew_rack_tilt_tol_deg: float = 5.0
 

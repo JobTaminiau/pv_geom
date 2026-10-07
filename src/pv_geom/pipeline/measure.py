@@ -15,15 +15,16 @@ from typing import Any
 
 import geopandas as gpd
 import numpy as np
+import shapely
 from shapely import contains_xy
 
-from pv_geom.config import PanelPlaneConfig, PVGeomConfig
+from pv_geom.config import MultiPlaneConfig, PanelPlaneConfig, PVGeomConfig
 from pv_geom.geometry.heights import (
     height_above_ground,
     height_above_roof,
     panel_roof_angle_deg,
 )
-from pv_geom.geometry.multi_plane import detect_multi_plane, polygon_aspect_ratio
+from pv_geom.geometry.multi_plane import polygon_aspect_ratio
 from pv_geom.geometry.plane_fit import (
     PlaneFit,
     bootstrap_uncertainty,
@@ -31,6 +32,7 @@ from pv_geom.geometry.plane_fit import (
     fit_plane_ransac,
 )
 from pv_geom.geometry.roof_plane import RoofPlaneResult, extract_roof_plane
+from pv_geom.geometry.segments import further_facets, is_east_west_pair, split_into_facets
 from pv_geom.schema import MEASURED, NO_FIT
 from pv_geom.vintage import geometry_basis, vintage_gap_days
 
@@ -94,21 +96,45 @@ class PanelFit:
     fit: PlaneFit
     tolerance_m: float
     widened: bool = False
+    # Every facet found in the polygon, primary (largest) first. One entry for
+    # an ordinary single-plane array; empty without a fit.
+    facets: tuple[PlaneFit, ...] = ()
 
     @property
     def ok(self) -> bool:
         return not np.isnan(self.fit.tilt_deg)
 
+    @property
+    def multi_facet(self) -> bool:
+        return len(self.facets) > 1
 
-def fit_panel(points: np.ndarray, cfg: PanelPlaneConfig, seed: int) -> PanelFit:
-    """Fit the plane inside the polygon, widening the tolerance if the returns
-    are too noisy for the base one.
 
-    No consensus at the base tolerance may only mean the returns scatter more
-    than it assumes (Delaware: ~7.5 cm about a roof plane, against ~2 cm in
-    Phoenix). In that case their scatter about the best plane in the widest
-    allowed band is measured and the fit repeated at twice that.
+def fit_panel(points: np.ndarray, cfg: PanelPlaneConfig, seed: int,
+              multi: MultiPlaneConfig | None = None) -> PanelFit:
+    """Fit the plane — or planes — inside the polygon.
+
+    Three attempts, in order:
+
+    1. **One plane at the base tolerance.** The ordinary array.
+    2. **Several facets at the base tolerance**, when no single plane holds
+       enough of the returns: a polygon over a ridge, a cluster merging the
+       arrays on two faces of a roof. Accepted when distinct planes together
+       hold the share one plane would need; the largest becomes the primary.
+    3. **One plane at a wider tolerance.** No consensus may only mean the
+       returns scatter more than the base tolerance assumes (Delaware: ~7.5 cm
+       about a roof plane, against ~2 cm in Phoenix). Their scatter about the
+       best plane in the widest allowed band is measured and the fit repeated
+       at twice that.
+
+    Whichever succeeds, the returns it leaves unexplained are then searched for
+    further facets (``PanelFit.facets``).
     """
+    multi = multi or MultiPlaneConfig(enabled=False)
+
+    def _with_facets(fit: PlaneFit, tol: float, widened: bool = False) -> PanelFit:
+        facets = further_facets(points, fit, cfg, multi, tolerance_m=tol, seed=seed)
+        return PanelFit(fit, tol, widened, tuple(facets))
+
     def _fit_at(tol: float) -> PlaneFit:
         return fit_plane_ransac(
             points, ransac_threshold=tol, min_inlier_frac=cfg.min_inlier_frac,
@@ -118,9 +144,17 @@ def fit_panel(points: np.ndarray, cfg: PanelPlaneConfig, seed: int) -> PanelFit:
     base = cfg.ransac_threshold_m
     fit = _fit_at(base) if len(points) >= 3 else failed_fit(len(points))
     cap = cfg.ransac_threshold_max_m
-    if not np.isnan(fit.tilt_deg) or cap <= base or len(points) < cfg.min_points:
+    if not np.isnan(fit.tilt_deg):
+        return _with_facets(fit, base)
+    if len(points) < cfg.min_points:
         return PanelFit(fit, base)
 
+    facets = split_into_facets(points, cfg, multi, tolerance_m=base, seed=seed)
+    if facets is not None:
+        return PanelFit(facets[0], base, facets=tuple(facets))
+
+    if cap <= base:
+        return PanelFit(fit, base)
     wide = _fit_at(cap)
     if np.isnan(wide.tilt_deg):
         return PanelFit(fit, base)
@@ -129,8 +163,62 @@ def fit_panel(points: np.ndarray, cfg: PanelPlaneConfig, seed: int) -> PanelFit:
     tol = float(np.clip(2.0 * sigma, base, cap))
     refit = _fit_at(tol) if tol < cap else wide
     if np.isnan(refit.tilt_deg):
-        return PanelFit(wide, cap, widened=True)
-    return PanelFit(refit, tol, widened=True)
+        return _with_facets(wide, cap, widened=True)
+    return _with_facets(refit, tol, widened=True)
+
+
+@dataclass(frozen=True)
+class Segment:
+    """One facet of a polygon: a plane, the part of the polygon it covers, and
+    how precisely it is known."""
+
+    index: int                    # 0 = the primary (largest) facet
+    fit: PlaneFit
+    share: float                  # of the returns assigned to any facet
+    tilt_unc_deg: float
+    azimuth_unc_deg: float
+    height_above_ground_m: float
+    footprint: Any                # shapely geometry: where in the polygon it lies
+
+
+def _segment_footprint(polygon: Any, xy: np.ndarray, single: bool) -> Any:
+    """The part of the polygon a facet's returns occupy: the polygon itself for
+    a single-facet array, otherwise the hull of the facet's returns (grown by
+    half a typical return spacing) clipped to the polygon."""
+    if single or len(xy) < 3:
+        return polygon
+    part = shapely.MultiPoint(xy).convex_hull.buffer(0.25).intersection(polygon)
+    return polygon if part.is_empty else part
+
+
+def build_segments(task: PolygonTask, pts: LocalPoints, panel: PanelFit,
+                   cfg: PVGeomConfig, seed: int) -> list[Segment]:
+    """Describe every facet of a fitted polygon."""
+    if not panel.ok:
+        return []
+    facets = panel.facets or (panel.fit,)
+    assigned = sum(f.n_inliers for f in facets)
+    centroid = task.polygon.centroid
+    segments = []
+    for i, f in enumerate(facets):
+        inliers = pts.panel[f.inlier_mask]
+        if cfg.panel_plane.uncertainty_method == "bootstrap" and f.n_inliers >= 3:
+            t_unc, a_unc = bootstrap_uncertainty(
+                pts.panel, f, n_samples=cfg.panel_plane.bootstrap_samples, seed=seed + i)
+        else:
+            t_unc, a_unc = NAN, NAN
+        hag = height_above_ground(
+            inliers[:, 2], pts.ground, (float(centroid.x), float(centroid.y)),
+            cfg.heights.ground_search_radius_m,
+            fallback_k=cfg.heights.ground_fallback_k,
+            fallback_max_radius_m=cfg.heights.ground_fallback_max_radius_m,
+        )
+        segments.append(Segment(
+            index=i, fit=f, share=f.n_inliers / assigned if assigned else NAN,
+            tilt_unc_deg=t_unc, azimuth_unc_deg=a_unc, height_above_ground_m=hag,
+            footprint=_segment_footprint(task.polygon, inliers[:, :2], len(facets) == 1),
+        ))
+    return segments
 
 
 def roof_reference(task: PolygonTask, pts: LocalPoints, cfg: PVGeomConfig, seed: int,
@@ -226,6 +314,7 @@ class Measurement:
     basis: str
     fit_failure: str | None = None            # why there is no fit, when there is none
     flags: list[str] = field(default_factory=list)
+    segments: list[Segment] = field(default_factory=list)   # every facet, primary first
     # Heights of the returns the panel plane was fitted to (kept for the
     # experimental mounting classifier, which looks at what lies beneath them).
     panel_z: np.ndarray = field(default_factory=lambda: np.zeros(0), repr=False)
@@ -267,26 +356,30 @@ def measure_polygon(
         flags.append("low_density")
 
     # Panel plane (attempted even at low density; the flag says so).
-    panel = fit_panel(pts.panel, cfg.panel_plane, seed)
+    panel = fit_panel(pts.panel, cfg.panel_plane, seed, cfg.multi_plane)
     fit = panel.fit
     if panel.widened:
         flags.append("wide_tolerance_fit")
+    if panel.multi_facet:
+        flags.append("multi_facet")
     if not panel.ok:
         flags.append("poor_fit")
     elif np.isnan(fit.azimuth_deg):
         flags.append("near_horizontal")
 
-    if cfg.panel_plane.uncertainty_method == "bootstrap" and fit.n_inliers >= 3:
+    segments = build_segments(task, pts, panel, cfg, seed)
+    if segments:
+        tilt_unc, az_unc = segments[0].tilt_unc_deg, segments[0].azimuth_unc_deg
+    elif cfg.panel_plane.uncertainty_method == "bootstrap" and fit.n_inliers >= 3:
+        # No accepted fit, but a best plane exists: its spread is still reported.
         tilt_unc, az_unc = bootstrap_uncertainty(
             pts.panel, fit, n_samples=cfg.panel_plane.bootstrap_samples, seed=seed)
     else:
         tilt_unc, az_unc = NAN, NAN
 
-    secondary = None
-    if cfg.multi_plane.enabled and fit.n_inliers >= 10 and panel.ok:
-        multi = detect_multi_plane(pts.panel, fit, cfg.multi_plane, seed=seed)
-        flags.extend(multi.flags)
-        secondary = multi.secondary
+    secondary = segments[1].fit if len(segments) > 1 else None
+    if secondary is not None and is_east_west_pair(fit, secondary, cfg.multi_plane):
+        flags.append("east_west_rack")
 
     # Roof reference. A flagged result still reports its fit for QC, but only
     # an unflagged one is precise enough to measure a panel against.
@@ -323,7 +416,7 @@ def measure_polygon(
     return Measurement(
         task=task, area_m2=area_m2, aspect_ratio=polygon_aspect_ratio(polygon),
         point_density=density, panel=panel, tilt_unc_deg=tilt_unc, azimuth_unc_deg=az_unc,
-        secondary=secondary, roof=roof, height_above_roof_m=har,
+        secondary=secondary, segments=segments, roof=roof, height_above_roof_m=har,
         panel_roof_angle_deg=angle, height_above_ground_m=hag, screen=screen,
         lidar_date=lidar_date, lidar_date_source=lidar_date_source, gap_days=gap_days,
         basis=basis, fit_failure=None if panel.ok else why_no_fit(task, pts, cfg.panel_plane),

@@ -16,6 +16,25 @@ import pyarrow as pa
 SCHEMA_VERSION = "0.5"
 
 
+# One facet of a polygon (an entry of the `segments` column).
+SEGMENT_FIELDS: list[tuple[str, pa.DataType, str, str]] = [
+    ("segment_index", pa.int8(), "", "0 for the primary (largest) facet, then by size."),
+    ("area_share", pa.float32(), "", "Share of the polygon's fitted returns on this facet."),
+    ("area_m2", pa.float32(), "m2", "Plan area apportioned to the facet: polygon area x share."),
+    ("surface_area_m2", pa.float32(), "m2", "Area along the facet's plane: area_m2 / cos(tilt)."),
+    ("tilt_deg", pa.float32(), "deg", "Tilt of the facet from horizontal."),
+    ("azimuth_deg", pa.float32(), "deg",
+     "Direction the facet faces, clockwise from true north; null below the tilt floor."),
+    ("rmse_m", pa.float32(), "m", "RMSE of the facet's returns about its plane."),
+    ("tilt_unc_deg", pa.float32(), "deg", "Bootstrap 1-sigma uncertainty of the tilt."),
+    ("azimuth_unc_deg", pa.float32(), "deg", "Bootstrap 1-sigma uncertainty of the azimuth."),
+    ("n_points", pa.int32(), "", "LiDAR returns on the facet."),
+    ("height_above_ground_m", pa.float32(), "m", "Median height of the facet above ground."),
+    ("geometry", pa.binary(), "", "Where in the polygon the facet lies (WKB, run CRS)."),
+]
+SEGMENT_TYPE = pa.list_(pa.struct([pa.field(n, t) for n, t, _, _ in SEGMENT_FIELDS]))
+
+
 def _f(name: str, typ: pa.DataType, *, nullable: bool = True, unit: str = "",
        desc: str = "") -> pa.Field:
     return pa.field(name, typ, nullable=nullable,
@@ -91,11 +110,17 @@ _CORE_FIELDS: list[pa.Field] = [
     _f("panel_azimuth_unc_deg", pa.float32(), unit="deg",
        desc="Bootstrap circular 1-sigma uncertainty of the azimuth."),
     _f("n_planes_detected", pa.int8(),
-       desc="0 = no fit, 1 = one plane, 2 = a second plane found in the outliers."),
+       desc="Number of distinct facets (planes) in the polygon; 0 without a fit. The "
+            "panel_* columns describe the primary (largest) facet; `segments` holds all."),
     _f("secondary_tilt_deg", pa.float32(), unit="deg",
        desc="Tilt of the second plane, when one was found."),
     _f("secondary_azimuth_deg", pa.float32(), unit="deg",
        desc="Azimuth of the second plane (true north), when one was found."),
+    _f("segments", SEGMENT_TYPE,
+       desc="Every facet of the polygon, primary first: one entry for an ordinary "
+            "array, several when the polygon covers more than one roof face. Each "
+            "has its own tilt, true-north azimuth, area share and uncertainty. Null "
+            "without a fit. Exported flat as pv_geom_segments in the release dataset."),
     # --- roof reference -----------------------------------------------------
     _f("roof_ref_source", pa.string(), nullable=False,
        desc="How the roof reference ring was built: footprint_ring (clipped to "
@@ -175,6 +200,7 @@ FLAG_DESCRIPTIONS: dict[str, str] = {
     "low_density": "Too few returns in the polygon for a robust fit.",
     "poor_fit": "No plane reached consensus; tilt and azimuth are null.",
     "near_horizontal": "Tilt below the floor; azimuth is undefined and null.",
+    "multi_facet": "The polygon holds more than one distinct plane; see `segments`.",
     "below_min_area": "Input polygon is smaller than polygons.min_area_m2.",
     "overlaps_polygon": "Input polygon substantially overlaps another input polygon.",
     "duplicate_geometry": "Input polygon has the same geometry as an earlier one.",

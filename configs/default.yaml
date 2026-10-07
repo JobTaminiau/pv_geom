@@ -25,9 +25,12 @@ panel_plane:
   uncertainty_method: bootstrap   # bootstrap | none
   bootstrap_samples: 50
 
-multi_plane:
+multi_plane:                    # polygons holding more than one plane -> segments (facets)
   enabled: true
-  secondary_min_frac: 0.20
+  secondary_min_frac: 0.20      # share of the polygon's returns a facet needs
+  segment_min_angle_deg: 10.0   # and how far its orientation must differ from the others
+  max_segments: 4
+  segment_max_tilt_deg: 70.0    # steeper further facets are walls and roof edges, not arrays
   ew_rack_azimuth_tol_deg: 25
   ew_rack_tilt_tol_deg: 5
 

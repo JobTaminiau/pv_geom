@@ -6,7 +6,9 @@ import hashlib
 import json
 from pathlib import Path
 
+import geopandas as gpd
 import pandas as pd
+import shapely
 
 from pv_geom.schema import (
     FLAG_DESCRIPTIONS,
@@ -33,7 +35,14 @@ def export_dataset(gdf, df: pd.DataFrame, manifest: dict, dataset_dir: Path) -> 
     for col in ("flags", "lidar_tile_ids"):
         if col in flat.columns:
             flat[col] = flat[col].map(lambda v: ";".join(v) if v is not None else "")
-    flat.to_csv(dataset_dir / "pv_geom.csv", index=False)
+    # Facets live in their own table; the polygon CSV keeps only their count.
+    flat.drop(columns="segments", errors="ignore").to_csv(dataset_dir / "pv_geom.csv",
+                                                          index=False)
+    segments = segments_table(out)
+    if len(segments):
+        segments.to_parquet(dataset_dir / "pv_geom_segments.parquet", index=False)
+        pd.DataFrame(segments.drop(columns="geometry")).to_csv(
+            dataset_dir / "pv_geom_segments.csv", index=False)
 
     schema = output_schema("mounting_type" in out.columns)
     known = {f.name for f in schema}
@@ -74,6 +83,37 @@ def export_dataset(gdf, df: pd.DataFrame, manifest: dict, dataset_dir: Path) -> 
                                            encoding="utf-8")
     write_checksums(dataset_dir)
     return dictionary
+
+
+# Polygon columns repeated on every facet row, so the table stands on its own.
+_SEGMENT_CONTEXT = ("polygon_id", "parent_polygon_id", "input_row", "status",
+                    "geometry_basis", "polygon_vintage", "lidar_date", "vintage_gap_days",
+                    "grid_convergence_deg", "n_planes_detected", "flags")
+
+
+def segments_table(out) -> gpd.GeoDataFrame:
+    """The facets of every measured polygon as a flat table: one row per facet,
+    with its own geometry and the polygon columns needed to select and join."""
+    if "segments" not in out.columns:
+        return gpd.GeoDataFrame(geometry=[], crs=out.crs)
+    context = [c for c in _SEGMENT_CONTEXT if c in out.columns]
+    rows = []
+    for rec in out[[*context, "segments"]].itertuples(index=False):
+        if rec.segments is None:
+            continue
+        base = {c: getattr(rec, c) for c in context}
+        if "flags" in base:
+            base["flags"] = ";".join(base["flags"]) if base["flags"] is not None else ""
+        for seg in rec.segments:
+            row = {**base, **{k: v for k, v in seg.items() if k != "geometry"}}
+            row["segment_id"] = f"{base['polygon_id']}__s{int(seg['segment_index'])}"
+            row["geometry"] = shapely.from_wkb(seg["geometry"])
+            rows.append(row)
+    if not rows:
+        return gpd.GeoDataFrame(geometry=[], crs=out.crs)
+    table = gpd.GeoDataFrame(rows, geometry="geometry", crs=out.crs)
+    lead = ["segment_id", "polygon_id", "segment_index"]
+    return table[lead + [c for c in table.columns if c not in lead]]
 
 
 CHECKSUM_FILE = "SHA256SUMS.txt"
@@ -145,6 +185,9 @@ def dataset_metadata(out, df: pd.DataFrame, manifest: dict) -> dict:
         "files": {
             "pv_geom.parquet": "The dataset as GeoParquet (geometry in the run CRS).",
             "pv_geom.csv": "The same rows without geometry, with centroid lon/lat (WGS 84).",
+            "pv_geom_segments.parquet": "One row per facet of each measured polygon "
+                                        "(GeoParquet): tilt, azimuth, area share, footprint.",
+            "pv_geom_segments.csv": "The facet table without geometry.",
             "data_dictionary.csv": "Every column: type, unit, nullability, description.",
             "status_definitions.csv": "What each `status` means.",
             "geometry_basis_definitions.csv": "What each `geometry_basis` means.",

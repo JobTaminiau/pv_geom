@@ -204,12 +204,33 @@ policy (`scripts/coiled_aws_probe.py` checks access from a real worker).
 - **Small polygons** (under ~3 m² at 10 pts/m²) rarely gather the 30 returns a robust fit needs and mostly end as `no_fit`.
 - **Removal is not detected**: a polygon older than the LiDAR is assumed still present when the LiDAR was flown.
 
-## Tests
+## Development
 
 ```bash
-uv run pytest tests/unit/                    # synthetic data, ~1 min
-RUN_INTEGRATION=1 uv run pytest tests/integration/ -v   # real Phoenix data; needs cached inputs
+uv sync --extra dev
+uv run python scripts/check.py     # every gate: lint, types, tests, regression benchmarks
 ```
+
+The gates, which CI runs on Linux and Windows:
+
+| Gate | Command | Standard |
+| --- | --- | --- |
+| Lint | `ruff check src tests scripts` | no findings |
+| Types | `mypy src` | no errors |
+| Tests | `pytest -m "not integration"` | pass, line coverage >= 88% |
+| Regression | `pytest tests/benchmark` | results match the golden output |
+
+**Regression benchmarks.** `tests/benchmark` runs the whole pipeline over a fixed
+study area and compares every measured value with a stored golden output, so a
+refactor cannot quietly move the numbers. A synthetic area with known geometry is
+committed and always runs. Two real slices (120 Phoenix and 80 Delaware polygons
+with their LiDAR) run when present under `data/benchmark/`; they are not in the
+repository because the polygon layers are unpublished. Build them with
+`scripts/build_benchmark.py`. When a change in results is intended, regenerate the
+golden files in the same commit and say why.
+
+`RUN_INTEGRATION=1 uv run pytest tests/integration/` runs against real Phoenix
+data on S3; point `PV_GEOM_IT_POLYGONS` at the polygon layer.
 
 ## Layout
 
@@ -219,15 +240,32 @@ src/pv_geom/
   config.py           Pydantic config models + hash
   schema.py           Output schema, flag definitions, data dictionary
   vintage.py          Vintage parsing and the geometry_basis rule
-  io/                 Polygons, footprints, tile index, LAZ, GeoParquet output
+  summary.py          At-a-glance statistics (manifest, describe-output)
+  testing.py          Regression helpers: golden frames and their comparison
+  io/
+    vector.py         One reader for polygons, footprints and the tile index
+    storage.py        Remote listing and local caching
+    lidar.py          LAZ reading, flight dates, tile inspection
+    output.py         GeoParquet partitions; reading a run back
   geometry/           Plane fit, multi-plane, roof reference, heights, point index
-  pipeline/           Partitioner, per-tile-group task, Dask runner
-  report/             Statistics, figures, report + dataset builder
-  classify/           Archived mounting classifier (experimental)
+  pipeline/
+    plan.py           Inputs -> tile groups -> work plan (no point data read)
+    pointpool.py      One tile group's LiDAR -> indexed ground and panel pools
+    measure.py        The measurement steps and the Measurement record
+    rows.py           Measurements -> schema rows
+    worker.py         One tile group -> one table
+    executor.py       Serial / local Dask / Coiled
+    sink.py           Local or S3 output
+    vintage_check.py  Run-level vintage probe
+    runner.py         Plan, execute, write, record
+  report/
+    data.py  stats.py  figures.py  text.py  tables.py  render.py  export.py  build.py
+  experimental/
+    mounting/         Archived mounting classifier (off unless enabled)
 configs/              default.yaml, phoenix.yaml, delaware.yaml, coiled.yaml
-tests/                unit/, integration/
-scripts/              spikes, benchmarks, validation tooling
-docs/                 PRD, working paper
+tests/                unit/, benchmark/, integration/
+scripts/              check.py, build_benchmark.py, coiled_aws_probe.py, archive/
+docs/                 1.0 specification, PRD (historical), working paper, history/
 ```
 
 ## License

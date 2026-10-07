@@ -1,5 +1,48 @@
 # Changelog
 
+## Unreleased — 0.3.0 (refactoring pass)
+
+Internal restructuring under a no-change-in-results rule, checked against
+regression benchmarks (a synthetic study area in CI; 200 real Phoenix and
+Delaware polygons locally). Measured values are identical to 0.2.0.
+
+### Changed
+
+- **Pipeline split.** `run_pipeline` (449 lines) is now `plan` / `executor` /
+  `sink` / `vintage_check` behind a ~100-line orchestrator. `_build_row` (224
+  lines, 17 parameters, untyped dict) is now `measure_polygon` over typed
+  `PolygonTask` / `LocalPoints` / `Measurement` records, with `fit_panel`,
+  `roof_reference` and `screen_standoff` as separate steps and one module that
+  converts to schema rows. `extract_roof_plane` is split into footprint
+  selection, ring gathering and classification.
+- **Module moves**: `pipeline.tile_task` -> `pipeline.worker`
+  (`_build_row` -> `build_row`); `io._localize` -> `io.storage`; `classify` ->
+  `experimental.mounting`; the report builder is split into `data`, `text`,
+  `tables`, `render`, `export`.
+- **One vector reader** (`io.vector.read_vector`) for polygons, footprints and
+  the tile index; **one summary** (`summary.summarise_table`) for the manifest
+  and `describe-output`.
+- **Logging instead of `print`.** Readable console progress, `--quiet`,
+  `--verbose`, and a JSON-lines `logs/run.jsonl` beside local outputs.
+- **Config**: Coiled `region` and `package_source` are settings, not constants;
+  `uncertainty_method` is `bootstrap | none`; mounting thresholds no longer
+  affect the config hash while the classifier is off. **The config hash
+  changes.**
+- `version` and `inspect-tile --json` print plain text.
+
+### Removed
+
+- Unused `io.s3` config block; unused `scikit-learn` dependency and
+  `[whitebox]` extra; dead `quality.py`.
+- One-off spikes and benchmarks moved to `scripts/archive/`; `HANDOFF.md` to
+  `docs/history/`.
+
+### Quality
+
+- Type errors 88 -> 0; lint findings 26 -> 0; tests 254 -> 277; line coverage
+  83% -> 91%. CI now runs lint, types and tests with a coverage gate on Linux
+  and Windows (it previously failed its own lint step).
+
 ## 0.2.0 — 2026-10-07
 
 The package's job is restated: take a polygon set and a LiDAR point cloud, each

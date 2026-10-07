@@ -2,6 +2,14 @@
 
 PRD: `docs/pv_geom_PRD.md` (v0.1, 2026-05-01). Changes by version: `CHANGELOG.md`. **Road to 1.0: `docs/pv_geom_v1_spec.md`** (user stories, refactoring pass, milestones, open decisions).
 
+**2026-10-07 — 0.3 REFACTORING PASS DONE (branch `v0.3-refactor`, stacked on `v0.2-geometry-report`).** Spec §5 stories R1–R13, under a no-change-in-results rule. The two worst functions are gone: `run_pipeline` 449 → ~100 lines over `plan`/`executor`/`sink`; `_build_row` (224 lines, 17 params, dict) → `measure_polygon` over typed records with separately testable steps. Also: one vector reader, one storage module, one summary, logging instead of `print`, mounting moved to `experimental/`, report builder split by concern, config cleanup. **Quality: mypy 88 → 0, ruff 26 → 0, tests 254 → 277, coverage 83 → 91%; CI gates on Linux + Windows.** `uv run python scripts/check.py` runs every gate.
+
+*Safety net:* `tests/benchmark` compares the whole pipeline's output against golden files. A synthetic 15-array area is committed and runs in CI. Real slices (120 Phoenix + 80 Delaware polygons, 35 MB) live in `data/benchmark/` in the main checkout, gitignored — **the GitHub repo is public and the polygon layers are unpublished, so they were deliberately not committed**; rebuild with `scripts/build_benchmark.py`, point `PV_GEOM_BENCHMARK_DIR` at them from a worktree. Every refactoring commit reproduced all three; the split report reproduces the Phoenix test report byte for byte.
+
+*Found along the way:* `version` and `inspect-tile --json` were emitting colour codes into machine-readable output (fixed); `.coverage` was tracked in git (untracked); CI had been failing its own lint step.
+
+*Not done, still in milestone 0.3:* B1–B3 (one row per input polygon, with a status), H1 (safe resume), H3 (progress line), I3 (cloud packages as extras), I4 (typed errors), G1 (schema version). These change behaviour, so they come after the pass rather than inside it. Config hash changed (R7); version is `0.3.0.dev0`.
+
 **2026-10-07 — v0.2.0: THE PACKAGE'S JOB IS RESTATED, AND IT NOW RUNS ON A SECOND JURISDICTION.** Goal as set by the user: ingest a polygon set (with a vintage) and a LiDAR dataset (with a capture date) and produce datasets, visualizations and a report characterising the geometry of the polygons, fit for reporting or journal publication. **Mounting classification is archived** (off by default, columns out of the schema; code + tests kept in `classify/`) — it needs better heuristics with tested examples, and it no longer blocks anything. The parking-lot-first redesign (old pick-up item #1) is parked with it.
 
 What 0.2.0 does (branch `v0.2-geometry-report`; 254 unit tests, was 194):

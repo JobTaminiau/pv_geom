@@ -118,6 +118,67 @@ def _enforce_collar_agreement(
     )
 
 
+def _overlapped_footprint(
+    pv_polygon: Polygon,
+    building_footprints: gpd.GeoDataFrame | None,
+    min_overlap_frac: float,
+    building_id_col: str,
+) -> tuple[Polygon | None, str | None]:
+    """The footprint the polygon sits on and its id, or ``(None, None)``.
+
+    Among footprints the polygon intersects, the one with the largest overlap
+    is taken — and only if it covers enough of the polygon. A sliver touch is
+    not "on the building": an edge-clipping ground mount or a carport beside a
+    wall must not be treated as rooftop.
+    """
+    if building_footprints is None or not len(building_footprints):
+        return None, None
+    idx = list(building_footprints.sindex.query(pv_polygon, predicate="intersects"))
+    candidates = building_footprints.iloc[idx]
+    if not len(candidates):
+        return None, None
+    if len(candidates) == 1:
+        chosen = candidates.iloc[0]
+    else:
+        chosen = candidates.loc[candidates.geometry.intersection(pv_polygon).area.idxmax()]
+    poly_area = pv_polygon.area
+    overlap = chosen.geometry.intersection(pv_polygon).area / poly_area if poly_area > 0 else 0.0
+    if overlap < min_overlap_frac:
+        return None, None
+    has_id = building_id_col in candidates.columns and chosen[building_id_col] is not None
+    return chosen.geometry, str(chosen[building_id_col]) if has_id else None
+
+
+def _ring_points(
+    pv_polygon: Polygon,
+    footprint: Polygon | None,
+    other_pv_polygons: gpd.GeoDataFrame,
+    pts: np.ndarray,
+    cfg: RoofPlaneConfig,
+) -> tuple[np.ndarray, float]:
+    """Returns in the ring around the polygon, and the buffer that gathered them.
+
+    The ring starts at ``buffer_m`` and widens in ``buffer_step_m`` steps up to
+    ``buffer_max_m`` until it holds ``min_points``; the caller checks whether it
+    ever did.
+    """
+    other_union = (
+        unary_union(other_pv_polygons.geometry.tolist()) if len(other_pv_polygons) else None
+    )
+    buf = float(cfg.buffer_m)
+    in_ring = pts[:0]
+    while True:
+        ring = _build_ring(pv_polygon, footprint, other_union, buf)
+        if not ring.is_empty:
+            in_ring = pts[contains_xy(ring, pts[:, 0], pts[:, 1])]
+            if len(in_ring) >= cfg.min_points:
+                break
+        if buf >= cfg.buffer_max_m - 1e-9:
+            break
+        buf = min(buf + cfg.buffer_step_m, cfg.buffer_max_m)
+    return in_ring, buf
+
+
 def extract_roof_plane(
     pv_polygon: Polygon,
     building_footprints: gpd.GeoDataFrame | None,
@@ -128,7 +189,7 @@ def extract_roof_plane(
     building_id_col: str = "building_id",
     seed: int | None = None,
 ) -> RoofPlaneResult:
-    """Fit the roof plane in a ring buffer around the PV polygon (PRD §7.3).
+    """Fit the roof plane in a ring around the PV polygon.
 
     Parameters
     ----------
@@ -143,133 +204,52 @@ def extract_roof_plane(
         Other PV polygons that may sit on the same building; their geometry is
         subtracted from the ring so adjacent panel arrays don't pollute the fit.
     panel_class_points
-        ``(N, 3)`` panel-class returns (pre-filtered by the caller — typically
-        class 6, or class 1 above ground when class 6 is absent).
+        ``(N, 3)`` panel-candidate returns around the polygon.
     cfg
         Roof-plane settings (buffer, min_points, RANSAC threshold, RMSE max).
-
-    Returns
-    -------
-    RoofPlaneResult
     """
     pts = np.asarray(panel_class_points, dtype=np.float64)
     if pts.ndim != 2 or pts.shape[1] != 3:
         raise ValueError(f"panel_class_points must be (N, 3); got {pts.shape}")
 
-    # 1) Find building footprint(s) intersecting the polygon.
-    has_layer = building_footprints is not None
-    footprint = None
-    bid = None
-    if building_footprints is not None and len(building_footprints):
-        idx = list(building_footprints.sindex.query(pv_polygon, predicate="intersects"))
-        candidates = building_footprints.iloc[idx]
-        if len(candidates):
-            # If multiple footprints overlap, pick the one with maximum intersection area.
-            if len(candidates) == 1:
-                chosen = candidates.iloc[0]
-            else:
-                inter_areas = candidates.geometry.intersection(pv_polygon).area
-                chosen = candidates.loc[inter_areas.idxmax()]
-            # A sliver touch is not "on the building": an edge-clipping ground
-            # mount or a carport beside a wall must not be treated as rooftop.
-            # Require a real overlap fraction of the PV polygon.
-            poly_area = pv_polygon.area
-            overlap_frac = (
-                chosen.geometry.intersection(pv_polygon).area / poly_area
-                if poly_area > 0 else 0.0
-            )
-            if overlap_frac >= cfg.min_overlap_frac:
-                footprint = chosen.geometry
-                bid = (
-                    str(chosen[building_id_col])
-                    if building_id_col in candidates.columns
-                    and chosen[building_id_col] is not None
-                    else None
-                )
-
-    on_building: bool | None = (footprint is not None) if has_layer else None
+    footprint, bid = _overlapped_footprint(
+        pv_polygon, building_footprints, cfg.min_overlap_frac, building_id_col)
+    on_building: bool | None = None if building_footprints is None else footprint is not None
     open_ring = footprint is None
+    source = "open_ring" if open_ring else "footprint_ring"
     no_reference = RoofPlaneResult(
-        fit=None, on_building=on_building, building_id=None,
-        flag=None, used_buffer_m=None,
-    )
+        fit=None, on_building=on_building, building_id=None, flag=None, used_buffer_m=None)
     if open_ring and not cfg.open_ring:
         return no_reference
 
-    # 2-3) Iteratively expand the buffer until we have enough ring points.
-    other_union = (
-        unary_union(other_pv_polygons.geometry.tolist())
-        if len(other_pv_polygons)
-        else None
-    )
-
-    buf = float(cfg.buffer_m)
-    ring = None
-    points_in_ring: np.ndarray | None = None
-    while True:
-        ring = _build_ring(pv_polygon, footprint, other_union, buf)
-        if not ring.is_empty:
-            mask = contains_xy(ring, pts[:, 0], pts[:, 1])
-            points_in_ring = pts[mask]
-            if len(points_in_ring) >= cfg.min_points:
-                break
-        if buf >= cfg.buffer_max_m - 1e-9:
-            break
-        buf = min(buf + cfg.buffer_step_m, cfg.buffer_max_m)
-
-    source = "open_ring" if open_ring else "footprint_ring"
-
-    if (
-        ring is None
-        or ring.is_empty
-        or points_in_ring is None
-        or len(points_in_ring) < cfg.min_points
-    ):
-        # An open ring with nothing in it is the normal case for a ground
-        # mount, not a roof problem — report no reference rather than a flag.
+    def _rejected(flag: str, fit: PlaneFit | None, buf: float) -> RoofPlaneResult:
+        # An open ring that yields nothing usable is the normal case for a
+        # ground mount, not a roof problem: no reference, rather than a flag.
         if open_ring:
             return no_reference
-        return RoofPlaneResult(
-            fit=None, on_building=True, building_id=bid,
-            flag="roof_insufficient", used_buffer_m=buf, source=source,
-        )
+        return RoofPlaneResult(fit=fit, on_building=True, building_id=bid, flag=flag,
+                               used_buffer_m=buf, source=source)
 
-    # 4) RANSAC + LSQ fit. The consensus floor is the ring-specific
-    # `min_inlier_frac`, not fit_plane_ransac's panel-tuned 0.6 default —
-    # see RoofPlaneConfig.min_inlier_frac for why the ring needs its own.
+    in_ring, buf = _ring_points(pv_polygon, footprint, other_pv_polygons, pts, cfg)
+    if len(in_ring) < cfg.min_points:
+        return _rejected("roof_insufficient", None, buf)
+
+    # The consensus floor is the ring-specific `min_inlier_frac`, not the
+    # panel-tuned default — see RoofPlaneConfig.min_inlier_frac. The collar
+    # guard then makes sure the facet fitted is the one the array is on.
     fit = fit_plane_ransac(
-        points_in_ring,
-        ransac_threshold=cfg.ransac_threshold_m,
-        min_inlier_frac=cfg.min_inlier_frac,
-        max_iter=200,
-        seed=seed,
+        in_ring, ransac_threshold=cfg.ransac_threshold_m,
+        min_inlier_frac=cfg.min_inlier_frac, max_iter=200, seed=seed,
     )
+    fit = _enforce_collar_agreement(fit, pv_polygon, in_ring, cfg, seed=seed)
 
-    # 4b) Collar guard — make sure we fitted the facet the array is actually on
-    # (see RoofPlaneConfig.collar_m).
-    fit = _enforce_collar_agreement(fit, pv_polygon, points_in_ring, cfg, seed=seed)
-
-    # 5a) No plane held enough of the ring: there is no single roof surface
-    # here to measure a panel against. Distinct from 5b — the fit was never
-    # agreed on, so its RMSE describes only the minority that did agree.
+    # No plane held enough of the ring: there is no single roof surface to
+    # measure against (and the RMSE describes only the minority that agreed).
     if np.isnan(fit.tilt_deg):
-        if open_ring:
-            return no_reference
-        return RoofPlaneResult(
-            fit=fit, on_building=True, building_id=bid,
-            flag="roof_no_consensus", used_buffer_m=buf, source=source,
-        )
-
-    # 5b) Reject if the post-fit inlier RMSE is too noisy (rough roof, clutter).
+        return _rejected("roof_no_consensus", fit, buf)
+    # A plane was agreed on but is too rough (uneven roof, clutter).
     if fit.rmse > cfg.rmse_max_m:
-        if open_ring:
-            return no_reference
-        return RoofPlaneResult(
-            fit=fit, on_building=True, building_id=bid,
-            flag="roof_complex", used_buffer_m=buf, source=source,
-        )
+        return _rejected("roof_complex", fit, buf)
 
-    return RoofPlaneResult(
-        fit=fit, on_building=on_building, building_id=bid,
-        flag=None, used_buffer_m=buf, source=source,
-    )
+    return RoofPlaneResult(fit=fit, on_building=on_building, building_id=bid, flag=None,
+                           used_buffer_m=buf, source=source)

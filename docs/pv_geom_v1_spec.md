@@ -222,6 +222,18 @@ pv_geom/
 
 ### 5.3 Refactoring stories
 
+**Progress (2026-10-07, branch `v0.3-refactor`).** Done: R1–R13, with these notes.
+R1: the real-data benchmarks are kept out of the repository (it is public and the
+polygon layers are unpublished), so CI runs a synthetic golden benchmark and the
+Phoenix/Delaware ones run locally. R4: one implementation of manifest statistics,
+sharing definitions with the report; the report's weighted per-stratum tables remain
+their own module. R7: `default.yaml` is pinned equal to the code defaults by a test
+rather than generated. R9: `mypy` passes in standard mode with `check_untyped_defs`;
+full `--strict` is not yet enforced. The package was not renamed `geometry/` ->
+`measure/` as sketched in §5.2 — the churn bought nothing. Open: R14 (column naming,
+an owner decision). Not part of the pass and still to do for milestone 0.3: B1–B3,
+H1, H3 (progress line), I3 (cloud packages as extras), I4, G1.
+
 | ID | Story | Acceptance criteria | Size |
 | --- | --- | --- | --- |
 | R1 | Build the safety net first. | A4 benchmark and golden output exist; a `make check` (or `just check`) runs lint, types, tests and the benchmark. | M |

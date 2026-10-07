@@ -51,6 +51,10 @@ class VintageFormatError(InputError):
     """A vintage or date could not be parsed."""
 
 
+class LidarClassError(InputError):
+    """The LiDAR does not carry a point class the run depends on."""
+
+
 class ResumeMismatchError(PVGeomError, RuntimeError):
     """``--resume`` was asked to continue an output made from different inputs,
     configuration or schema."""

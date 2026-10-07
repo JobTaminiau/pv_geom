@@ -247,6 +247,9 @@ class CoiledConfig(BaseModel):
     # environment specs, so it is installed at cluster start). Must be the
     # version the client runs.
     package_source: str = "git+https://github.com/JobTaminiau/pv_geom.git@main"
+    # Optional: what one worker costs per hour, so `--dry-run` can estimate the
+    # bill. Leave unset to get a time estimate only.
+    usd_per_worker_hour: float | None = None
 
 
 class LocalConfig(BaseModel):

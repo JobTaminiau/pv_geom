@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import geopandas as gpd
 import laspy
@@ -303,3 +304,100 @@ def test_report_on_an_older_output_says_grid_north(tmp_path: Path) -> None:
     assert report.summary["azimuth_reference"] == "grid_north"
     assert "GRID north" in report.methods.read_text(encoding="utf-8")
     assert "not true north" in report.markdown.read_text(encoding="utf-8")
+
+
+# --------------------------------------------------------------------------- #
+# D4: the LiDAR's classes are checked before any work is done
+# --------------------------------------------------------------------------- #
+
+
+def _classes_tile(path: Path, classes: list[int]) -> str:
+    header = laspy.LasHeader(point_format=6, version="1.4")
+    header.scales = np.array([0.01, 0.01, 0.01])
+    las = laspy.LasData(header)
+    n = 60
+    las.x, las.y, las.z = np.linspace(0, 10, n), np.linspace(0, 10, n), np.zeros(n)
+    las.classification = np.array([classes[i % len(classes)] for i in range(n)], dtype=np.uint8)
+    las.write(str(path))
+    return str(path)
+
+
+def test_class_check_names_the_candidate_class(tmp_path: Path, caplog) -> None:
+    import logging
+
+    from pv_geom.pipeline.vintage_check import probe_lidar_vintage
+
+    with caplog.at_level(logging.INFO, logger="pv_geom"):
+        with_buildings = probe_lidar_vintage(
+            PVGeomConfig(), [_classes_tile(tmp_path / "a.laz", [1, 2, 6])])
+        without = probe_lidar_vintage(
+            PVGeomConfig(), [_classes_tile(tmp_path / "b.laz", [1, 2, 7])])
+    assert with_buildings["panel_candidate_class"] == 6
+    assert without["panel_candidate_class"] == 1 and without["lidar_classes_sampled"] == [1, 2, 7]
+    assert any("above local ground" in r.getMessage() for r in caplog.records)
+
+
+def test_no_ground_class_stops_the_run_with_a_remedy(tmp_path: Path) -> None:
+    from pv_geom.errors import LidarClassError
+    from pv_geom.pipeline.vintage_check import probe_lidar_vintage
+
+    with pytest.raises(LidarClassError, match="no ground returns") as err:
+        probe_lidar_vintage(PVGeomConfig(), [_classes_tile(tmp_path / "a.laz", [1, 5])])
+    assert "io.classification.ground_class" in err.value.remedy
+    assert "[1, 5]" in err.value.message
+
+    # ...and the remedy works: tell it which class is ground.
+    cfg = PVGeomConfig()
+    cfg.io.classification.ground_class = 5
+    assert probe_lidar_vintage(cfg, [_classes_tile(tmp_path / "b.laz", [1, 5])])
+
+
+def test_no_candidate_class_stops_the_run(tmp_path: Path) -> None:
+    from pv_geom.errors import LidarClassError
+    from pv_geom.pipeline.vintage_check import probe_lidar_vintage
+
+    with pytest.raises(LidarClassError, match="neither class 6 nor class 1"):
+        probe_lidar_vintage(PVGeomConfig(), [_classes_tile(tmp_path / "a.laz", [2, 9])])
+
+
+# --------------------------------------------------------------------------- #
+# H2: an estimate before the run
+# --------------------------------------------------------------------------- #
+
+
+def test_dry_run_estimates_size_and_time(study_config: Path) -> None:
+    result = pv_geom.run(study_config, dry_run=True)
+    est = result.manifest["estimate"]
+    assert est["tile_groups"] == 1 and est["polygons"] == 1 and est["tiles"] == 1
+    assert est["tiles_sized"] == 1 and est["gigabytes"] >= 0
+    assert est["wall_seconds"] >= 0 and "factor of two" in est["accuracy"]
+    assert "usd" not in est                              # no price configured, local backend
+
+
+def test_estimate_scales_with_data_and_prices_coiled_runs() -> None:
+    from pv_geom.pipeline import estimate as est_mod
+    from pv_geom.pipeline.partition import TileGroup
+
+    plan = SimpleNamespace(tile_uri_map={"t1": "a.laz", "t2": "b.laz"})
+    groups = [(0, TileGroup("t1", tuple(f"p{i}" for i in range(1000)), ("t1",))),
+              (1, TileGroup("t2", tuple(f"q{i}" for i in range(1000)), ("t2",)))]
+    sizes = {"a.laz": 2_000_000_000, "b.laz": 2_000_000_000}
+    original = est_mod.object_sizes
+    est_mod.object_sizes = lambda uris: {u: sizes[u] for u in uris}
+    try:
+        cfg = PVGeomConfig()
+        cfg.compute.local.n_workers = 2
+        local = est_mod.estimate_run(plan, groups, cfg)
+        serial = est_mod.estimate_run(plan, groups, cfg, use_dask=False)
+        cfg.compute.backend = "coiled"
+        cfg.compute.coiled.n_workers = 2
+        cfg.compute.coiled.usd_per_worker_hour = 0.10
+        coiled = est_mod.estimate_run(plan, groups, cfg)
+    finally:
+        est_mod.object_sizes = original
+    assert local["gigabytes"] == 4.0 and local["polygons"] == 2000
+    work = 4 * est_mod.WORKER_SECONDS_PER_GB + 2000 * est_mod.WORKER_SECONDS_PER_POLYGON
+    assert local["wall_seconds"] == pytest.approx(work / 2, abs=1)
+    assert serial["wall_seconds"] == pytest.approx(work, abs=1)       # one worker
+    assert coiled["wall_seconds"] > local["wall_seconds"]             # cluster start-up
+    assert coiled["usd"] == pytest.approx(2 * coiled["wall_seconds"] / 3600 * 0.10, abs=0.01)

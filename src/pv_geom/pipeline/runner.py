@@ -20,6 +20,7 @@ import pyarrow as pa
 from pv_geom.config import PVGeomConfig
 from pv_geom.errors import ResumeMismatchError
 from pv_geom.io.output import META_PLAN_FINGERPRINT, META_RESULT_HASH, META_SCHEMA_VERSION
+from pv_geom.pipeline.estimate import estimate_run, log_estimate
 from pv_geom.pipeline.executor import execute
 from pv_geom.pipeline.partition import TileGroup
 from pv_geom.pipeline.plan import (
@@ -232,6 +233,8 @@ def run_pipeline(
     # worth knowing before a multi-hour run — and it is what --dry-run is for.
     vintage = probe_lidar_vintage(cfg, plan.primary_tile_uris)
 
+    estimate: dict[str, Any] = {}
+
     def _manifest(cluster_spec: dict, counts: dict, stats: dict) -> None:
         write_manifest(
             sink.manifest_target,
@@ -247,10 +250,14 @@ def run_pipeline(
             vintage=vintage,
             plan_fingerprint=plan.fingerprint,
             result_hash=cfg.result_hash(),
+            estimate=estimate,
         )
 
     base_counts = {"polygons": plan.n_polygons, "tile_groups": len(plan.groups)}
     if dry_run:
+        estimate.update(estimate_run(plan, list(enumerate(plan.groups)), cfg,
+                                     use_dask=use_dask))
+        log_estimate(estimate)
         _manifest({"backend": "dry_run"},
                   {**base_counts, "attempted": 0, "succeeded": 0, "failed": 0},
                   {"dry_run": True})
@@ -261,6 +268,10 @@ def run_pipeline(
     # bucket — so tiles are listed rather than downloaded here.
     prewarm = bool(pending) and use_dask and cfg.compute.backend != "coiled"
     pending = drop_missing_tiles(pending, plan, find_missing_tiles(pending, plan, prewarm=prewarm))
+
+    if pending:
+        estimate.update(estimate_run(plan, pending, cfg, use_dask=use_dask))
+        log_estimate(estimate)
 
     metadata = {META_RESULT_HASH: cfg.result_hash(), META_PLAN_FINGERPRINT: plan.fingerprint}
     collector = _Collector(sink, plan.crs, metadata, total=len(pending))

@@ -140,7 +140,8 @@ def laz_flown_on(path, flight, n: int = 200) -> None:
     las.x = rng.uniform(0, 10, size=n)
     las.y = rng.uniform(0, 10, size=n)
     las.z = rng.uniform(0, 5, size=n)
-    las.classification = np.full(n, 6, dtype=np.uint8)
+    # Half ground, half building: a tile with no ground class is refused.
+    las.classification = np.where(np.arange(n) % 2 == 0, 2, 6).astype(np.uint8)
     secs = (
         (datetime.combine(flight, datetime.min.time()) - _GPS_EPOCH).total_seconds()
         + _GPS_UTC_LEAP_SECONDS - _LAS_GPS_TIME_OFFSET

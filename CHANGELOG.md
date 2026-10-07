@@ -1,5 +1,46 @@
 # Changelog
 
+## Unreleased — 0.4.0
+
+Usable from a config, by someone who is not us. Schema version 0.4.
+
+### Changed — results
+
+- **Azimuth is now measured from true north.** `panel_azimuth_deg`,
+  `secondary_azimuth_deg` and `roof_azimuth_deg` were relative to the grid north
+  of the LiDAR's projected CRS; they now have the meridian convergence at each
+  polygon added (from PROJ), and a new `grid_convergence_deg` column records it.
+  The shift is about −0.8° in the Phoenix test block (−0.3° to −1.0° across the
+  atlas) and −0.1° to −0.4° in Delaware. The manifest states
+  `azimuth_reference`; outputs from before this change are labelled grid north
+  when reported. Tilt and every non-azimuth value are unchanged.
+
+### Added
+
+- **Config-driven runs.** `study:` and `inputs:` blocks name the output, the
+  polygon layer, the LiDAR and optional footprints, with paths relative to the
+  config file; `pv-geom run --config area.yaml` is a complete run and
+  command-line options override the config. The Phoenix and Delaware configs
+  carry their inputs.
+- **Python API**: `pv_geom.run()`, `load()`, `report()`, `describe()`.
+- **`pv-geom demo`** and `pv_geom.sample`: a generated study area with known
+  geometry, measured and reported offline.
+- **The tile index is optional**: built from the tiles' headers when absent.
+- **Run-start class check**: reports which point class supplies array
+  candidates; stops when the LiDAR has no ground class or no candidate class.
+- **Estimate before a run**: tiles, gigabytes, rough time, and cost on Coiled
+  when `compute.coiled.usd_per_worker_hour` is set; shown by `--dry-run` and
+  stored in the manifest.
+- **Report**: `--headline` and `--weight`; 95% bootstrap intervals on the median
+  tilt and the facing shares; the study name comes from the config.
+- **Self-describing release dataset**: `README.md`, `metadata.json`
+  (repository-deposit fields; authors, licence and funding left empty) and
+  `SHA256SUMS.txt`.
+
+### Fixed
+
+- `SHA256SUMS.txt` is written with LF line endings on every platform.
+
 ## Unreleased — 0.3.0
 
 Two parts. A refactoring pass under a no-change-in-results rule, checked

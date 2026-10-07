@@ -2,6 +2,18 @@
 
 PRD: `docs/pv_geom_PRD.md` (v0.1, 2026-05-01). Changes by version: `CHANGELOG.md`. **Road to 1.0: `docs/pv_geom_v1_spec.md`** (user stories, refactoring pass, milestones, open decisions).
 
+**2026-10-07 — MILESTONE 0.4 "USABLE BY CONFIG" DONE (branch `v0.4-usability`, stacked on `v0.3-accounting`).** Owner decisions the same day: no truth data is available yet (accuracy stories A1/A2/A5 deferred); no full-scale runs until the package is final (H6 deferred); runs are to be driven from a config that names the inputs; azimuth must be defined as true north. The spec (`docs/pv_geom_v1_spec.md` §7–8) is re-sequenced accordingly.
+
+- **A run is `pv-geom run --config area.yaml`.** `study:` (name, output) and `inputs:` (polygons, LiDAR prefix, optional tile index and footprints) live in the config, paths relative to it; CLI options override. `configs/phoenix.yaml` and `configs/delaware.yaml` carry the development inputs — **point them at the final layers before the release runs**.
+- **Azimuth is true north** (spec E6). It was relative to the projection's grid north. Now grid azimuth + meridian convergence (PROJ) per polygon, with `grid_convergence_deg` recorded and `azimuth_reference` in the manifest. Verified: one physical plane measures the same true azimuth in UTM 12N, UTM 11N and Arizona Central State Plane to 0.05°. On the Phoenix test block every azimuth moved by −0.79° to −0.81° and nothing else changed. **Any azimuth in an earlier output or report is grid north.**
+- **Python API** (`pv_geom.run / load / report / describe`); **`pv-geom demo`** (generated sample area, offline).
+- **Tile index optional** (read from LAZ headers). **Run-start class check** (stops without a ground class). **Estimate before a run** (`--dry-run`: tiles, GB, rough time; cost on Coiled if a price is configured — predicted 68 s vs 88 s actual on the Phoenix block).
+- **Report**: `--headline`, `--weight`, 95% bootstrap intervals on median tilt and facing shares. **Release dataset** carries a README, deposit metadata and checksums.
+
+Test output: `out_v0.4.0_phoenix_test` (main checkout), run straight from `configs/phoenix.yaml` with only the bbox, backend and local paths overridden.
+
+*Next (spec milestone 0.5, measurement depth):* C1 (cut `unscreened` below 20%), E1 (multi-facet polygons as segments), D3 (LiDAR in feet), H4/H5, F1/F2 (compare runs, regional breakdown), G4. None needs truth data or a full run. Still open for the owner: which Phoenix layer to measure (raw vs dissolved), R14 (column names), segment table layout (§8.2), licence.
+
 **2026-10-07 — MILESTONE 0.3 COMPLETE (branch `v0.3-accounting`, stacked on `v0.3-refactor`).** Stories B1–B3, G1, H1, H3, I3, I4 on top of the refactoring pass below. Only R14 (renaming the `panel_*` columns) is left, and that is an owner decision.
 
 - **One row per input polygon** with a `status` (`measured` / `no_fit` / `no_lidar_tile` / `outside_tile_index` / `tile_unreadable` / `invalid_geometry`) and, for no-fits, a `fit_failure` reason. Unmeasured polygons are in `part-unmeasured.parquet`, rewritten each run so `--resume` can still retry a failed group.

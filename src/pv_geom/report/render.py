@@ -27,7 +27,8 @@ SECTIONS = [
      ["geometry_basis"], None),
     ("Array geometry", ["geometry_overview"], ["summary_statistics"],
      "Statistics are for {unit}; every stratum under both weightings is in "
-     "tables/summary_statistics.csv."),
+     "tables/summary_statistics.csv. Brackets give 95% bootstrap intervals over "
+     "polygons: sampling variability only, not measurement error."),
     ("Tilt profile", ["tilt_distribution"], ["tilt_profile"],
      "Share of {unit} in each tilt class."),
     ("Orientation profile", ["azimuth_rose", "tilt_azimuth_joint"], ["azimuth_profile"],

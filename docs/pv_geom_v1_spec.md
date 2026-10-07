@@ -243,6 +243,16 @@ still measured, not given a status of their own. I4: the "no ground class" check
 belongs to D4 (run-start class inspection) and is not done. H3: progress is one log
 line per finished group, not a live bar. Milestone 0.3 is complete apart from R14.
 
+**Milestone 0.4 stories (2026-10-07, branch `v0.4-usability`).** Done: I7, E6, I2, I1,
+D2, D4, H2, F5, F7, G2. Notes. I1: the sample is *generated* (a synthetic area with
+known geometry), not a clip of real data, which sidesteps the redistribution question
+in §8.8; a real sample can still be added. D4: the check samples the leading points of
+up to `vintage.sample_tiles` tiles, the same read that measures the flight dates. H2:
+two fitted rates from four local runs; stated as good to a factor of two, and the cost
+needs a price in the config. F7: intervals are a Poisson bootstrap over polygons and
+cover the median tilt and the four facing shares only. E6: implemented as specified;
+the cross-CRS test uses UTM 12N, UTM 11N and Arizona Central State Plane (metres).
+
 | ID | Story | Acceptance criteria | Size |
 | --- | --- | --- | --- |
 | R1 | Build the safety net first. | A4 benchmark and golden output exist; a `make check` (or `just check`) runs lint, types, tests and the benchmark. | M |

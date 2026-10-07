@@ -50,31 +50,68 @@ uv sync                      # core: local files, local compute
 # uv sync --extra cloud      # + reading from / writing to S3
 # uv sync --extra coiled     # + running on a Coiled cluster
 
-# 1. Vet the LiDAR: classes present, density, CRS, units, true flight dates
-uv run pv-geom inspect-tile path/or/s3/to/one_tile.laz
-
-# 2. Measure
-uv run pv-geom run \
-  --polygons   polygons.parquet \
-  --polygon-vintage 2024-04 \
-  --lidar-prefix s3://bucket/lidar/tiles \
-  --tile-index   s3://bucket/lidar/tile_index.zip \
-  --output ./out \
-  --local
-
-# 3. Report (run does this automatically for local outputs)
-uv run pv-geom report ./out --area-name "Metropolitan Phoenix"
+uv run pv-geom demo          # a synthetic study area, measured and reported, offline
 ```
 
-`--local` runs on a `LocalCluster`; add `--no-dask` to run serially in-process.
-`--dry-run` plans the run and performs the vintage check without computing
-anything — worth doing before a long run. `--resume` keeps the partitions
-already written and runs the rest; it refuses to continue an output made from
-different polygons, measurement settings or schema (`--force-resume` overrides).
+`demo` writes a small sample area with known geometry, a config that runs it,
+the dataset and the report — the quickest way to see every output.
+
+A real study area is described by **one config file** and run from it:
+
+```yaml
+# configs/my_area.yaml          (paths are relative to this file, or s3://)
+study:
+  name: My study area
+  output: ../out/my_area
+
+inputs:
+  polygons: ../data/pv_polygons.gpkg       # any vector format; ids optional
+  lidar_prefix: s3://bucket/lidar/tiles    # folder or prefix of LAZ tiles
+  # tile_index: ...                        # optional: read from tile headers if absent
+  # footprints: ...                        # optional building footprints
+
+vintage:
+  polygon_vintage: 2024-10                 # when the polygons' imagery was captured
+  # lidar_date: ...                        # optional: measured from the tiles otherwise
+```
+
+```bash
+uv run pv-geom inspect-tile s3://bucket/lidar/tiles/one.laz   # vet the LiDAR first
+uv run pv-geom validate-config configs/my_area.yaml           # what would this run use?
+uv run pv-geom run --config configs/my_area.yaml --dry-run    # plan, checks, time estimate
+uv run pv-geom run --config configs/my_area.yaml              # measure, then report
+```
+
+Every input can also be given on the command line (`--polygons`,
+`--lidar-prefix`, `--tile-index`, `--output`, `--polygon-vintage`, …), and an
+option given there overrides the config. `configs/phoenix.yaml` and
+`configs/delaware.yaml` are complete examples.
+
+From Python:
+
+```python
+import pv_geom
+
+result = pv_geom.run("configs/my_area.yaml")      # or keyword arguments, or both
+gdf = result.load()                               # GeoDataFrame, one row per polygon
+result.report(headline="panel", weight="area")    # tables, figures, HTML
+```
+
+Before any work is done, a run checks the things that would silently spoil it:
+
+- **Dates.** It measures the LiDAR's flight dates and warns if the polygons are newer.
+- **Point classes.** It says which class will supply array candidates, and stops
+  if the LiDAR has no ground class.
+- **Size.** `--dry-run` reports tiles, gigabytes and a rough time estimate (and
+  cost, on Coiled, if `compute.coiled.usd_per_worker_hour` is set).
+
+`--local` runs on a `LocalCluster`; `--no-dask` runs serially. `--resume` keeps
+the partitions already written and runs the rest; it refuses to continue an
+output made from different polygons, measurement settings or schema
+(`--force-resume` overrides). `--bbox` and `--max-polygons` bound a trial run.
 Problems you can fix — a layer without a CRS, LiDAR in feet, a missing optional
 package, expired credentials — are reported as one line saying what is wrong and
-one saying what to do. `--bbox` and `--max-polygons` bound a
-test run.
+one saying what to do.
 
 ## Inputs
 
@@ -83,7 +120,7 @@ test run.
 | PV polygons | yes | GeoParquet, GeoPackage, GeoJSON, Shapefile or FlatGeobuf, in any CRS. An id column is optional: `polygon_id`, `detection_id`, `id`, `fid` or `objectid` is used if present (or name one with `--polygon-id-col`), otherwise ids are synthesized. MultiPolygons are exploded into one row per part. |
 | Polygon vintage | recommended | `--polygon-vintage 2024`, `2024-04` or `2024-04-01`. A year or month counts as its last day, so the gap to the LiDAR is never understated. For mosaics or permit-dated layers use `--polygon-vintage-col` to read a per-polygon date. |
 | LiDAR tiles | yes | Classified LAZ, one file per tile, local or on S3, in a **projected, metric CRS** (points are not reprojected; foot-based CRSs are refused). Needs ground (ASPRS class 2). Building (class 6) is used when present; otherwise unclassified returns above local ground are used, which is the common case for public collections. |
-| LiDAR tile index | yes | GeoParquet / GPKG / SHP / zipped SHP with one polygon per tile. The id column is auto-detected (`Name`, `NAME`, `tile_id`, …); `--name-template` turns it into a filename (default `{name}.laz`). |
+| LiDAR tile index | no | Without one, the index is read from the tiles' own headers (they must declare a CRS). Otherwise: GeoParquet / GPKG / SHP / zipped SHP with one polygon per tile. The id column is auto-detected (`Name`, `NAME`, `tile_id`, …); `--name-template` turns it into a filename (default `{name}.laz`). |
 | LiDAR date | measured | Left out, it is **measured per tile from per-point GPS time**, which is the flight date. Declare it with `--lidar-date` only if the tiles carry no usable GPS time. The LAS header date is the *delivery* date: Phoenix's tiles were flown 2020-11-26/28 and stamped 2021-06-30; Delaware's were flown 2023-03 and stamped 2024-10. |
 | Building footprints | no | `--footprints`. With them, `on_building`/`building_id` are filled and the roof reference is clipped to the building. Without them `on_building` is null and the roof reference comes from an open ring around each polygon. |
 
@@ -121,7 +158,7 @@ data dictionary CSV is written with every report):
 
 - **Identity** — `polygon_id`, `parent_polygon_id` (the input feature), `input_row` (its row position in the input file — a join key even when the input has no ids), `status`, `geometry`, `area_m2`, `surface_area_m2` (area along the plane), `aspect_ratio`
 - **Vintage** — `polygon_vintage`, `lidar_date`, `lidar_date_source` (`gps_time` / `declared` / `header_date`), `vintage_gap_days` (positive = polygon newer than LiDAR), `geometry_basis`
-- **Plane fit** — `panel_tilt_deg`, `panel_azimuth_deg` (0 = N, 180 = S; null below 1° tilt), `panel_rmse_m`, `panel_tilt_unc_deg`, `panel_azimuth_unc_deg`, `panel_fit_tolerance_m`, `fit_failure`, `n_points_panel`, `n_inliers_panel`, `point_density`, `n_planes_detected`, `secondary_tilt_deg`, `secondary_azimuth_deg`
+- **Plane fit** — `panel_tilt_deg`, `panel_azimuth_deg` (clockwise from **true north**: 0 = N, 180 = S; null below 1° tilt), `grid_convergence_deg`, `panel_rmse_m`, `panel_tilt_unc_deg`, `panel_azimuth_unc_deg`, `panel_fit_tolerance_m`, `fit_failure`, `n_points_panel`, `n_inliers_panel`, `point_density`, `n_planes_detected`, `secondary_tilt_deg`, `secondary_azimuth_deg`
 - **Roof reference** — `roof_ref_source` (`footprint_ring` / `open_ring` / `none`), `roof_tilt_deg`, `roof_azimuth_deg`, `roof_rmse_m`, `panel_roof_angle_deg`, `height_above_roof_m`, `height_above_ground_m`, `on_building`, `building_id`
 - **Quality and provenance** — `flags`, `lidar_tile_ids`, `pkg_version`, `config_hash`, `run_id`, `partition_id`
 
@@ -133,8 +170,19 @@ read: `below_min_area`, `overlaps_polygon` (shares at least 20% of its area
 with another input polygon), `duplicate_geometry`, `geometry_repaired`. Flagged
 polygons are still measured.
 
+**Azimuth is true north.** Planes are fitted in the LiDAR's projected
+coordinates, where "north" is the grid's y axis. Grid north differs from true
+north by the meridian convergence, which changes with position: about −0.8° in
+west Phoenix, −0.1° in southern Delaware, up to ±1.7° at a UTM zone edge at this
+latitude, and more in some State Plane zones. pv-geom adds the convergence at
+each polygon (from PROJ) so that every azimuth column is measured from true
+north and means the same thing in every study area; `grid_convergence_deg`
+holds the value added, and the manifest says `azimuth_reference: true_north`.
+Outputs written before schema 0.4 are relative to grid north, and reports on
+them say so. Tilt needs no such correction.
+
 **Schema version.** Every partition and the manifest carry `schema_version`
-(currently `0.3`). Within a major version columns are only added, and added
+(currently `0.4`). Within a major version columns are only added, and added
 columns are nullable; outputs from older versions are upgraded when read.
 
 ### Report — `pv-geom report <output>`
@@ -149,12 +197,15 @@ Written to `<output>/report/` (or `--out`):
 | `summary.json` | The headline numbers, machine-readable |
 | `tables/*.csv` | Coverage funnel, geometry-basis composition, summary statistics, tilt profile (5° bins), azimuth profile (8 and 16 sectors), joint tilt × azimuth, roof relation, fit quality, flags |
 | `figures/*.png\|pdf\|svg` | Overview (tilt + orientation rose + joint heatmap), each of those separately, geometry basis, vintage timeline, array-vs-roof, measurement quality, spatial distribution |
-| `dataset/` | Consolidated `pv_geom.parquet` (GeoParquet), `pv_geom.csv` (no geometry; centroid lon/lat), `data_dictionary.csv`, flag and basis definitions, manifest |
+| `dataset/` | The release dataset, self-describing: `pv_geom.parquet` (GeoParquet), `pv_geom.csv` (no geometry; centroid lon/lat), `README.md`, `data_dictionary.csv`, status / basis / flag definitions, `metadata.json` (repository-deposit fields), `manifest.json`, `SHA256SUMS.txt` |
 
 Conventions:
 
 - Every statistic is given **per polygon and weighted by array surface**, for
-  **all fitted polygons and per geometry basis**.
+  **all fitted polygons and per geometry basis**. `--headline` and `--weight`
+  choose which of those the report leads with.
+- The median tilt and the facing shares carry **95% bootstrap intervals** over
+  polygons. They express sampling variability, not measurement error.
 - Azimuth is summarised with circular statistics (mean direction, resultant
   length R, circular SD).
 - Figures are sized to journal column widths (89 mm / 183 mm) in 7 pt type;
@@ -188,11 +239,12 @@ not a way to date an individual array.
 
 `configs/default.yaml` documents every key with its default; a study-area
 config only lists what it changes (`configs/phoenix.yaml`,
-`configs/delaware.yaml`). `--config` is optional. The resolved configuration is
-hashed into every row and the manifest.
+`configs/delaware.yaml`). The resolved configuration is hashed into every row
+and the manifest.
 
 Keys you are most likely to touch:
 
+- `study.{name, output}` and `inputs.{polygons, lidar_prefix, tile_index, footprints, polygon_id_col, name_template}` — what to measure and where to write it.
 - `vintage.{polygon_vintage, polygon_vintage_column, lidar_date}` — also settable from the CLI.
 - `crs.target` — `auto` (from the tile index) or an explicit EPSG code.
 - `io.classification` — ASPRS classes for panel candidates and ground, and the height-above-local-ground cutoff used when there is no building class.
@@ -269,7 +321,10 @@ data on S3; point `PV_GEOM_IT_POLYGONS` at the polygon layer.
 
 ```
 src/pv_geom/
-  cli.py              run · report · inspect-tile · describe-output · validate-config
+  api.py              run() · load() · report() · describe(): the Python API
+  cli.py              run · demo · report · inspect-tile · describe-output · validate-config
+  sample.py           The synthetic study area behind `pv-geom demo` and the benchmark
+  errors.py           Typed errors, each with a remedy
   config.py           Pydantic config models + hash
   schema.py           Output schema, flag definitions, data dictionary
   vintage.py          Vintage parsing and the geometry_basis rule
@@ -279,6 +334,7 @@ src/pv_geom/
     vector.py         One reader for polygons, footprints and the tile index
     storage.py        Remote listing and local caching
     lidar.py          LAZ reading, flight dates, tile inspection
+    tile_scan.py      Tile index built from LAZ headers
     output.py         GeoParquet partitions; reading a run back
   geometry/           Plane fit, multi-plane, roof reference, heights, point index
   pipeline/
@@ -289,7 +345,8 @@ src/pv_geom/
     worker.py         One tile group -> one table
     executor.py       Serial / local Dask / Coiled
     sink.py           Local or S3 output
-    vintage_check.py  Run-level vintage probe
+    vintage_check.py  Run-start checks: input dates, LiDAR point classes
+    estimate.py       Rough time / cost estimate before a run
     runner.py         Plan, execute, write, record
   report/
     data.py  stats.py  figures.py  text.py  tables.py  render.py  export.py  build.py

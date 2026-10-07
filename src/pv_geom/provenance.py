@@ -27,6 +27,7 @@ def write_manifest(
     crs: str | None = None,
     plan_fingerprint: str | None = None,
     result_hash: str | None = None,
+    estimate: dict[str, Any] | None = None,
 ) -> None:
     """Write the run manifest JSON sidecar at the output prefix root.
 
@@ -55,6 +56,7 @@ def write_manifest(
         "aggregate_stats": aggregate_stats,
         "tiles_touched": tiles_touched,
         "run_id": run_id,
+        "estimate": estimate or {},
     }
     payload = json.dumps(manifest, indent=2, default=str)
     if str(output_path).startswith("s3://"):

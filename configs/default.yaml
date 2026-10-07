@@ -123,6 +123,7 @@ compute:
     software: pv-geom-2026-05
     region: us-east-2             # where the LiDAR bucket is
     package_source: "git+https://github.com/JobTaminiau/pv_geom.git@main"   # what workers install
+    usd_per_worker_hour: null     # set it to have --dry-run estimate the cost
   local:
     n_workers: 8
     threads_per_worker: 2

@@ -1,6 +1,6 @@
 # pv-geom — status
 
-PRD: `docs/pv_geom_PRD.md` (v0.1, 2026-05-01). Changes by version: `CHANGELOG.md`.
+PRD: `docs/pv_geom_PRD.md` (v0.1, 2026-05-01). Changes by version: `CHANGELOG.md`. **Road to 1.0: `docs/pv_geom_v1_spec.md`** (user stories, refactoring pass, milestones, open decisions).
 
 **2026-10-07 — v0.2.0: THE PACKAGE'S JOB IS RESTATED, AND IT NOW RUNS ON A SECOND JURISDICTION.** Goal as set by the user: ingest a polygon set (with a vintage) and a LiDAR dataset (with a capture date) and produce datasets, visualizations and a report characterising the geometry of the polygons, fit for reporting or journal publication. **Mounting classification is archived** (off by default, columns out of the schema; code + tests kept in `classify/`) — it needs better heuristics with tested examples, and it no longer blocks anything. The parking-lot-first redesign (old pick-up item #1) is parked with it.
 

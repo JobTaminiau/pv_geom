@@ -7,7 +7,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from pv_geom.schema import FLAG_DESCRIPTIONS, data_dictionary, output_schema
+from pv_geom.schema import (
+    FLAG_DESCRIPTIONS,
+    STATUS_DESCRIPTIONS,
+    data_dictionary,
+    output_schema,
+)
 from pv_geom.vintage import BASIS_DESCRIPTIONS
 
 
@@ -54,6 +59,9 @@ def export_dataset(gdf, df: pd.DataFrame, manifest: dict, dataset_dir: Path) -> 
         [{"flag": k, "description": v} for k, v in FLAG_DESCRIPTIONS.items()])
     basis_rows = pd.DataFrame(
         [{"geometry_basis": k, "description": v} for k, v in BASIS_DESCRIPTIONS.items()])
+    pd.DataFrame(
+        [{"status": k, "description": v} for k, v in STATUS_DESCRIPTIONS.items()]
+    ).to_csv(dataset_dir / "status_definitions.csv", index=False)
     flag_rows.to_csv(dataset_dir / "flag_definitions.csv", index=False)
     basis_rows.to_csv(dataset_dir / "geometry_basis_definitions.csv", index=False)
     (dataset_dir / "manifest.json").write_text(

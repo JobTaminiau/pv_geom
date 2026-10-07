@@ -231,8 +231,16 @@ their own module. R7: `default.yaml` is pinned equal to the code defaults by a t
 rather than generated. R9: `mypy` passes in standard mode with `check_untyped_defs`;
 full `--strict` is not yet enforced. The package was not renamed `geometry/` ->
 `measure/` as sketched in §5.2 — the churn bought nothing. Open: R14 (column naming,
-an owner decision). Not part of the pass and still to do for milestone 0.3: B1–B3,
-H1, H3 (progress line), I3 (cloud packages as extras), I4, G1.
+an owner decision).
+
+**Milestone 0.3 stories (2026-10-07, branch `v0.3-accounting`).** Done: B1, B2, B3, G1,
+H1, H3, I3, I4. Notes. B1: polygons that reach no tile-group task are written to a
+separate `part-unmeasured.parquet`, rewritten on every run, so that a failed group
+can still be retried by `--resume`; `--bbox` / `--max-polygons` define the scope, and
+polygons outside it have no row. B2: tiny and overlapping polygons are flagged and
+still measured, not given a status of their own. I4: the "no ground class" check
+belongs to D4 (run-start class inspection) and is not done. H3: progress is one log
+line per finished group, not a live bar. Milestone 0.3 is complete apart from R14.
 
 | ID | Story | Acceptance criteria | Size |
 | --- | --- | --- | --- |

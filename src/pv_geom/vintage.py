@@ -15,6 +15,8 @@ import calendar
 import re
 from datetime import date, datetime
 
+from pv_geom.errors import VintageFormatError
+
 # The values ``geometry_basis`` can take, most to least trustworthy as a
 # measurement of the *panel* surface.
 PANEL_CONFIRMED = "panel_confirmed"
@@ -22,6 +24,7 @@ PANEL_BY_VINTAGE = "panel_by_vintage"
 SURFACE_UNRESOLVED = "surface_unresolved"
 UNSCREENED = "unscreened"
 NO_FIT = "no_fit"
+NOT_MEASURED = "not_measured"
 
 GEOMETRY_BASIS: tuple[str, ...] = (
     PANEL_CONFIRMED,
@@ -29,6 +32,7 @@ GEOMETRY_BASIS: tuple[str, ...] = (
     SURFACE_UNRESOLVED,
     UNSCREENED,
     NO_FIT,
+    NOT_MEASURED,
 )
 
 # Bases under which the fitted plane is known to be the panel itself.
@@ -55,6 +59,10 @@ BASIS_DESCRIPTIONS: dict[str, str] = {
         "usable roof reference to test against, so panel presence is unverified."
     ),
     NO_FIT: "No plane could be fitted (too few points or no consensus).",
+    NOT_MEASURED: (
+        "The polygon never reached measurement: outside the LiDAR, on a tile that "
+        "is missing or unreadable, or without a usable geometry. See status."
+    ),
 }
 
 _YEAR = re.compile(r"^\d{4}$")
@@ -86,8 +94,8 @@ def parse_vintage(value: str | int | date | datetime | None) -> date | None:
     try:
         return date.fromisoformat(s[:10])
     except ValueError as exc:
-        raise ValueError(
-            f"cannot parse vintage {value!r}; use YYYY, YYYY-MM or YYYY-MM-DD"
+        raise VintageFormatError(
+            f"cannot parse vintage {value!r}", "use YYYY, YYYY-MM or YYYY-MM-DD"
         ) from exc
 
 

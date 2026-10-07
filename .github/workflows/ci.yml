@@ -27,3 +27,25 @@ jobs:
       # benchmarks need unpublished inputs and skip themselves here.
       - name: Tests
         run: uv run pytest -m "not integration" --cov=pv_geom --cov-fail-under=88
+
+  # A core-only install (no extras) must measure and report: no cloud packages,
+  # no test tooling. Runs the synthetic study area end to end.
+  core-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          python-version: "3.12"
+      - run: uv sync
+      - run: uv run pv-geom version
+      - name: Measure and report without extras
+        run: |
+          uv run python -c "
+          from pathlib import Path
+          from tests.benchmark.synthetic import write_scene
+          from pv_geom.testing import run_benchmark
+          from pv_geom.report import build_report
+          out = run_benchmark(write_scene(Path('core_demo/bench')), Path('core_demo/out'))
+          print(build_report(out).html)
+          "

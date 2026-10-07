@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pyproj import CRS
 
+from pv_geom.errors import CRSResolutionError, NonMetricCRSError
+
 _METRE_NAMES = {"metre", "meter", "m"}
 
 
@@ -29,15 +31,16 @@ def assert_metric_projected(crs, *, what: str = "run CRS") -> None:
     """
     c = horizontal(crs)
     if not c.is_projected:
-        raise ValueError(
-            f"{what} {crs_label(c)} is not projected; pv-geom needs the LiDAR's "
-            f"projected, metric CRS (set crs.target explicitly if detection failed)"
+        raise CRSResolutionError(
+            f"{what} {crs_label(c)} is not projected",
+            "pv-geom needs the LiDAR's projected, metric CRS; set crs.target (or --crs) "
+            "explicitly if detection failed",
         )
     unit = (c.axis_info[0].unit_name or "").lower() if c.axis_info else ""
     if unit not in _METRE_NAMES:
-        raise NotImplementedError(
-            f"{what} {crs_label(c)} uses '{unit}' units; pv-geom supports metric "
-            f"LiDAR only. Reproject the tiles to a metric CRS first."
+        raise NonMetricCRSError(
+            f"{what} {crs_label(c)} uses '{unit}' units; pv-geom supports metric LiDAR only",
+            "reproject the tiles to a metric CRS first",
         )
 
 
@@ -54,7 +57,8 @@ def resolve_target_crs(configured: str, tile_index_crs=None, sample_tile_crs=Non
         if c.is_projected:
             assert_metric_projected(c)
             return crs_label(c)
-    raise ValueError(
-        "crs.target is 'auto' but neither the tile index nor a LAZ header "
-        "declares a projected CRS; set crs.target explicitly"
+    raise CRSResolutionError(
+        "crs.target is 'auto' but neither the tile index nor a LAZ header declares a "
+        "projected CRS",
+        "set crs.target explicitly (or pass --crs EPSG:xxxx)",
     )

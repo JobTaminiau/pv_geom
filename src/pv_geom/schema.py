@@ -9,6 +9,12 @@ from __future__ import annotations
 
 import pyarrow as pa
 
+# Version of the output schema, stamped into every partition and the manifest.
+# Compatibility rule: within a major version, columns are only ever ADDED and
+# added columns are nullable, so a reader written for x.0 reads every x.y.
+# Before 1.0 the major version is 0 and minor versions may still change types.
+SCHEMA_VERSION = "0.3"
+
 
 def _f(name: str, typ: pa.DataType, *, nullable: bool = True, unit: str = "",
        desc: str = "") -> pa.Field:
@@ -26,13 +32,18 @@ _CORE_FIELDS: list[pa.Field] = [
     _f("input_row", pa.int32(), nullable=False,
        desc="0-based row position of the parent feature in the input polygon "
             "file. A join key that works even when the input has no id column."),
-    _f("geometry", pa.binary(), nullable=False,
-       desc="Polygon footprint (WKB) in the run CRS."),
-    _f("area_m2", pa.float32(), nullable=False, unit="m2",
+    _f("status", pa.string(), nullable=False,
+       desc="What happened to this polygon: measured, no_fit, no_lidar_tile, "
+            "outside_tile_index, tile_unreadable or invalid_geometry. Every input "
+            "polygon has exactly one row."),
+    _f("geometry", pa.binary(),
+       desc="Polygon footprint (WKB) in the run CRS. Null only when the input "
+            "feature had no geometry."),
+    _f("area_m2", pa.float32(), unit="m2",
        desc="Plan-view (horizontal) area of the polygon."),
     _f("surface_area_m2", pa.float32(), unit="m2",
        desc="Area along the fitted plane: area_m2 / cos(tilt). Null without a fit."),
-    _f("aspect_ratio", pa.float32(), nullable=False,
+    _f("aspect_ratio", pa.float32(),
        desc="Long/short side of the minimum rotated rectangle."),
     # --- vintage ------------------------------------------------------------
     _f("polygon_vintage", pa.date32(), unit="date",
@@ -49,13 +60,17 @@ _CORE_FIELDS: list[pa.Field] = [
             "newer than the LiDAR, so the installation may be absent from it."),
     _f("geometry_basis", pa.string(), nullable=False,
        desc="What the fitted plane represents: panel_confirmed, "
-            "panel_by_vintage, surface_unresolved, unscreened or no_fit."),
+            "panel_by_vintage, surface_unresolved, unscreened, no_fit, or "
+            "not_measured when the polygon never reached the LiDAR."),
     # --- panel plane --------------------------------------------------------
-    _f("n_points_panel", pa.int32(), nullable=False,
-       desc="LiDAR returns inside the (eroded) polygon."),
-    _f("n_inliers_panel", pa.int32(), nullable=False,
+    _f("n_points_panel", pa.int32(),
+       desc="LiDAR returns inside the (eroded) polygon. Null when not measured."),
+    _f("n_inliers_panel", pa.int32(),
        desc="Returns within the RANSAC threshold of the fitted plane."),
-    _f("point_density", pa.float32(), nullable=False, unit="pts/m2",
+    _f("fit_failure", pa.string(),
+       desc="Why there is no fit, when status is no_fit: too_few_points, "
+            "ground_level_only or no_consensus."),
+    _f("point_density", pa.float32(), unit="pts/m2",
        desc="n_points_panel / area_m2."),
     _f("panel_tilt_deg", pa.float32(), unit="deg",
        desc="Tilt of the fitted plane from horizontal (0 = flat)."),
@@ -71,7 +86,7 @@ _CORE_FIELDS: list[pa.Field] = [
        desc="Bootstrap 1-sigma uncertainty of the tilt."),
     _f("panel_azimuth_unc_deg", pa.float32(), unit="deg",
        desc="Bootstrap circular 1-sigma uncertainty of the azimuth."),
-    _f("n_planes_detected", pa.int8(), nullable=False,
+    _f("n_planes_detected", pa.int8(),
        desc="0 = no fit, 1 = one plane, 2 = a second plane found in the outliers."),
     _f("secondary_tilt_deg", pa.float32(), unit="deg",
        desc="Tilt of the second plane, when one was found."),
@@ -114,11 +129,11 @@ _CORE_FIELDS: list[pa.Field] = [
 
 # Experimental, archived in 0.2.0: only present when mounting_rules.enabled.
 MOUNTING_FIELDS: list[pa.Field] = [
-    _f("mounting_type", pa.string(), nullable=False,
+    _f("mounting_type", pa.string(),
        desc="EXPERIMENTAL rule-based mounting label; see MOUNTING_LABELS."),
-    _f("mounting_confidence", pa.float32(), nullable=False,
+    _f("mounting_confidence", pa.float32(),
        desc="EXPERIMENTAL confidence of mounting_type, 0-1."),
-    _f("mounting_rule", pa.string(), nullable=False,
+    _f("mounting_rule", pa.string(),
        desc="EXPERIMENTAL id of the rule that fired."),
 ]
 
@@ -150,6 +165,10 @@ FLAG_DESCRIPTIONS: dict[str, str] = {
     "low_density": "Too few returns in the polygon for a robust fit.",
     "poor_fit": "No plane reached consensus; tilt and azimuth are null.",
     "near_horizontal": "Tilt below the floor; azimuth is undefined and null.",
+    "below_min_area": "Input polygon is smaller than polygons.min_area_m2.",
+    "overlaps_polygon": "Input polygon substantially overlaps another input polygon.",
+    "duplicate_geometry": "Input polygon has the same geometry as an earlier one.",
+    "geometry_repaired": "Input geometry was invalid and was repaired before measuring.",
     "wide_tolerance_fit": "Fit accepted only at a wider inlier tolerance than the base "
                           "(noisy returns); see panel_fit_tolerance_m.",
     "east_west_rack": "Two planes facing ~180 deg apart at similar tilt.",
@@ -164,6 +183,31 @@ FLAG_DESCRIPTIONS: dict[str, str] = {
 }
 
 QUALITY_FLAGS: frozenset[str] = frozenset(FLAG_DESCRIPTIONS)
+
+# --- status ------------------------------------------------------------------
+MEASURED = "measured"
+NO_FIT = "no_fit"
+NO_LIDAR_TILE = "no_lidar_tile"
+OUTSIDE_TILE_INDEX = "outside_tile_index"
+TILE_UNREADABLE = "tile_unreadable"
+INVALID_GEOMETRY = "invalid_geometry"
+
+STATUS_DESCRIPTIONS: dict[str, str] = {
+    MEASURED: "A plane was fitted to the LiDAR returns inside the polygon.",
+    NO_FIT: "LiDAR covered the polygon but no plane could be fitted; see fit_failure.",
+    NO_LIDAR_TILE: "The tile that holds the polygon is in the index but not in storage.",
+    OUTSIDE_TILE_INDEX: "The polygon lies outside every tile of the LiDAR index.",
+    TILE_UNREADABLE: "The polygon's tile group failed to process; a resumed run retries it.",
+    INVALID_GEOMETRY: "The input feature has no usable polygon geometry.",
+}
+STATUSES: tuple[str, ...] = tuple(STATUS_DESCRIPTIONS)
+
+FIT_FAILURE_DESCRIPTIONS: dict[str, str] = {
+    "too_few_points": "Fewer returns inside the polygon than panel_plane.min_points.",
+    "ground_level_only": "Only ground-level returns inside the polygon: nothing stands "
+                         "above the ground there.",
+    "no_consensus": "Enough returns, but no single plane holds enough of them.",
+}
 
 
 def data_dictionary(schema: pa.Schema | None = None) -> list[dict[str, str]]:

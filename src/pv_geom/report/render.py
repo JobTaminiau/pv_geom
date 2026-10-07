@@ -20,8 +20,9 @@ from pv_geom.report.text import key_findings, vintage_statement
 
 SECTIONS = [
     # (heading, figure names, display-table keys, intro)
-    ("Coverage", [], ["coverage"],
-     "How many input polygons reached each stage."),
+    ("Coverage", [], ["coverage", "status", "fit_failure"],
+     "How many input polygons reached each stage, what happened to each, and why "
+     "covered polygons have no fit."),
     ("Input vintages and geometry basis", ["vintage_timeline", "geometry_basis"],
      ["geometry_basis"], None),
     ("Array geometry", ["geometry_overview"], ["summary_statistics"],
@@ -67,7 +68,7 @@ ul{padding-left:20px;margin:0 0 12px}li{margin-bottom:6px}
 """
 
 
-_TEXT_COLS = {"Step", "Basis", "Meaning", "Stratum", "Measure", "Unit", "Flag", "Facing",
+_TEXT_COLS = {"Status", "No fit because", "Step", "Basis", "Meaning", "Stratum", "Measure", "Unit", "Flag", "Facing",
               "Tilt (°)", "column", "type", "unit", "nullable", "description", "File",
               "Contents"}
 

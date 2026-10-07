@@ -46,7 +46,9 @@ visible rather than buried.
 ## Quickstart
 
 ```bash
-uv sync --extra dev
+uv sync                      # core: local files, local compute
+# uv sync --extra cloud      # + reading from / writing to S3
+# uv sync --extra coiled     # + running on a Coiled cluster
 
 # 1. Vet the LiDAR: classes present, density, CRS, units, true flight dates
 uv run pv-geom inspect-tile path/or/s3/to/one_tile.laz
@@ -66,7 +68,12 @@ uv run pv-geom report ./out --area-name "Metropolitan Phoenix"
 
 `--local` runs on a `LocalCluster`; add `--no-dask` to run serially in-process.
 `--dry-run` plans the run and performs the vintage check without computing
-anything — worth doing before a long run. `--bbox` and `--max-polygons` bound a
+anything — worth doing before a long run. `--resume` keeps the partitions
+already written and runs the rest; it refuses to continue an output made from
+different polygons, measurement settings or schema (`--force-resume` overrides).
+Problems you can fix — a layer without a CRS, LiDAR in feet, a missing optional
+package, expired credentials — are reported as one line saying what is wrong and
+one saying what to do. `--bbox` and `--max-polygons` bound a
 test run.
 
 ## Inputs
@@ -87,22 +94,48 @@ present-by-date: `geometry_basis` then rests on the height screen alone.
 
 ### Dataset — `pv-geom run`
 
-One GeoParquet partition per LiDAR tile group plus `manifest.json`. The
-manifest records inputs, resolved CRS, both vintages and the gap, the
-configuration and its hash, counts, and summary statistics.
+One GeoParquet partition per LiDAR tile group, `part-unmeasured.parquet`, and
+`manifest.json`. The manifest records inputs, resolved CRS, both vintages and
+the gap, the configuration and its hash, the schema version, counts, and summary
+statistics.
+
+**Every input polygon has exactly one row**, so the output joins one-to-one to
+the inventory. `status` says what happened to it:
+
+| `status` | Meaning |
+| --- | --- |
+| `measured` | A plane was fitted to the LiDAR returns inside the polygon |
+| `no_fit` | LiDAR covered it but no plane could be fitted; `fit_failure` says why (`too_few_points`, `ground_level_only`, `no_consensus`) |
+| `no_lidar_tile` | Its tile is in the index but not in storage |
+| `outside_tile_index` | It lies outside every tile of the LiDAR index |
+| `tile_unreadable` | Its tile group failed; a resumed run retries it |
+| `invalid_geometry` | The input feature has no usable polygon geometry |
+
+Rows other than `measured` and `no_fit` carry the input's identity, geometry,
+area and vintage, with every measured column null. (`--bbox` and
+`--max-polygons` narrow the scope: polygons they exclude are not part of the
+run and have no row.)
 
 Per-row columns (source of truth and descriptions: `src/pv_geom/schema.py`; a
 data dictionary CSV is written with every report):
 
-- **Identity** — `polygon_id`, `parent_polygon_id` (the input feature), `input_row` (its row position in the input file — a join key even when the input has no ids), `geometry`, `area_m2`, `surface_area_m2` (area along the plane), `aspect_ratio`
+- **Identity** — `polygon_id`, `parent_polygon_id` (the input feature), `input_row` (its row position in the input file — a join key even when the input has no ids), `status`, `geometry`, `area_m2`, `surface_area_m2` (area along the plane), `aspect_ratio`
 - **Vintage** — `polygon_vintage`, `lidar_date`, `lidar_date_source` (`gps_time` / `declared` / `header_date`), `vintage_gap_days` (positive = polygon newer than LiDAR), `geometry_basis`
-- **Plane fit** — `panel_tilt_deg`, `panel_azimuth_deg` (0 = N, 180 = S; null below 1° tilt), `panel_rmse_m`, `panel_tilt_unc_deg`, `panel_azimuth_unc_deg`, `n_points_panel`, `n_inliers_panel`, `point_density`, `n_planes_detected`, `secondary_tilt_deg`, `secondary_azimuth_deg`
+- **Plane fit** — `panel_tilt_deg`, `panel_azimuth_deg` (0 = N, 180 = S; null below 1° tilt), `panel_rmse_m`, `panel_tilt_unc_deg`, `panel_azimuth_unc_deg`, `panel_fit_tolerance_m`, `fit_failure`, `n_points_panel`, `n_inliers_panel`, `point_density`, `n_planes_detected`, `secondary_tilt_deg`, `secondary_azimuth_deg`
 - **Roof reference** — `roof_ref_source` (`footprint_ring` / `open_ring` / `none`), `roof_tilt_deg`, `roof_azimuth_deg`, `roof_rmse_m`, `panel_roof_angle_deg`, `height_above_roof_m`, `height_above_ground_m`, `on_building`, `building_id`
 - **Quality and provenance** — `flags`, `lidar_tile_ids`, `pkg_version`, `config_hash`, `run_id`, `partition_id`
 
-`flags` is a list drawn from `low_density`, `poor_fit`, `near_horizontal`,
-`east_west_rack`, `roof_insufficient`, `roof_no_consensus`, `roof_complex`,
-`no_panel_standoff`, `standoff_unscreenable`.
+`flags` is a list. Measurement flags: `low_density`, `poor_fit`,
+`near_horizontal`, `wide_tolerance_fit`, `east_west_rack`, `roof_insufficient`,
+`roof_no_consensus`, `roof_complex`, `no_panel_standoff`,
+`standoff_unscreenable`. Input-quality flags, set when the polygon layer is
+read: `below_min_area`, `overlaps_polygon` (shares at least 20% of its area
+with another input polygon), `duplicate_geometry`, `geometry_repaired`. Flagged
+polygons are still measured.
+
+**Schema version.** Every partition and the manifest carry `schema_version`
+(currently `0.3`). Within a major version columns are only added, and added
+columns are nullable; outputs from older versions are upgraded when read.
 
 ### Report — `pv-geom report <output>`
 

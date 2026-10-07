@@ -18,7 +18,6 @@ import numpy as np
 from pv_geom.config import PVGeomConfig
 from pv_geom.geometry.point_index import GroundModel, PointGrid
 from pv_geom.io.lidar import TileVintage, read_tile
-from pv_geom.io.storage import RemoteFileMissing
 
 log = logging.getLogger(__name__)
 
@@ -153,7 +152,7 @@ def load_group_points(
             continue
         try:
             data = read_tile(uri, reader=cfg.io.lidar_reader)
-        except RemoteFileMissing:
+        except FileNotFoundError:           # includes RemoteFileMissing
             log.warning("%s missing; skipping", uri)
             continue
         pts = data.points

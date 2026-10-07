@@ -20,9 +20,12 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from pv_geom.schema import FIT_FAILURE_DESCRIPTIONS, MEASURED, STATUS_DESCRIPTIONS
+from pv_geom.schema import NO_FIT as NO_FIT_STATUS
 from pv_geom.vintage import (
     GEOMETRY_BASIS,
     NO_FIT,
+    NOT_MEASURED,
     PANEL_BASES,
     PANEL_BY_VINTAGE,
     PANEL_CONFIRMED,
@@ -46,6 +49,7 @@ BASIS_LABELS: dict[str, str] = {
     SURFACE_UNRESOLVED: "Surface unresolved",
     UNSCREENED: "Unscreened",
     NO_FIT: "No fit",
+    NOT_MEASURED: "Not measured",
 }
 
 WEIGHTS = ("count", "area")
@@ -78,6 +82,8 @@ def prepare(df: pd.DataFrame, manifest: dict | None = None, *,
     """
     df = df.copy()
     df["fitted"] = df["panel_tilt_deg"].notna()
+    if "status" not in df.columns:
+        df["status"] = np.where(df["fitted"], MEASURED, NO_FIT_STATUS)
 
     if "surface_area_m2" not in df.columns:
         with np.errstate(invalid="ignore"):
@@ -398,16 +404,14 @@ def flag_counts(df: pd.DataFrame) -> pd.DataFrame:
 def coverage(df: pd.DataFrame, manifest: dict | None = None) -> pd.DataFrame:
     """The funnel from input polygons to rows whose geometry describes panels."""
     counts = (manifest or {}).get("counts", {})
-    n_rows = len(df)
-    n_fit = int(df["fitted"].sum())
-    n_panel = int(stratum_mask(df, "panel").sum())
-    steps = []
-    if counts.get("polygons"):
-        steps.append(("Input polygon parts", int(counts["polygons"])))
-    steps += [
-        ("Covered by LiDAR (rows written)", n_rows),
-        ("Plane fitted", n_fit),
-        ("Panel basis (confirmed or by vintage)", n_panel),
+    # Outputs before schema 0.3 held rows only for covered polygons; the input
+    # count then comes from the manifest.
+    n_input = max(len(df), int(counts.get("polygons") or 0))
+    steps = [
+        ("Input polygons", n_input),
+        ("Covered by LiDAR", int(df["status"].isin([MEASURED, NO_FIT_STATUS]).sum())),
+        ("Plane fitted", int(df["fitted"].sum())),
+        ("Panel basis (confirmed or by vintage)", int(stratum_mask(df, "panel").sum())),
     ]
     first = steps[0][1] if steps else 0
     return pd.DataFrame([
@@ -416,10 +420,35 @@ def coverage(df: pd.DataFrame, manifest: dict | None = None) -> pd.DataFrame:
     ])
 
 
+def status_table(df: pd.DataFrame) -> pd.DataFrame:
+    """Every input polygon by what happened to it."""
+    n = len(df)
+    counts = df["status"].value_counts()
+    return pd.DataFrame([
+        {"status": s, "n": int(counts.get(s, 0)),
+         "share": counts.get(s, 0) / n if n else np.nan, "description": desc}
+        for s, desc in STATUS_DESCRIPTIONS.items()
+    ])
+
+
+def fit_failure_table(df: pd.DataFrame) -> pd.DataFrame:
+    """Why covered polygons have no fit."""
+    failed = df[df["status"] == NO_FIT_STATUS]
+    counts = failed["fit_failure"].value_counts() if "fit_failure" in df.columns else {}
+    n = len(failed)
+    return pd.DataFrame([
+        {"fit_failure": f, "n": int(counts.get(f, 0)),
+         "share_of_no_fit": counts.get(f, 0) / n if n else np.nan, "description": desc}
+        for f, desc in FIT_FAILURE_DESCRIPTIONS.items()
+    ])
+
+
 def all_tables(df: pd.DataFrame, manifest: dict | None = None) -> dict[str, pd.DataFrame]:
     """Every report table, keyed by the file stem it is written under."""
     return {
         "coverage": coverage(df, manifest),
+        "status": status_table(df),
+        "fit_failure": fit_failure_table(df),
         "geometry_basis": basis_composition(df),
         "summary_statistics": summary_statistics(df),
         "tilt_profile": tilt_profile(df),

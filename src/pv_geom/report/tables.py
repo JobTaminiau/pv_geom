@@ -20,6 +20,17 @@ def display_tables(tables: dict[str, pd.DataFrame], headline: str) -> dict[str, 
         "Step": cov["step"], "Polygons": cov["n"].map(_i),
         "Share": cov["share_of_first"].map(_p)})
 
+    st = tables["status"]
+    st = st[st["n"] > 0]
+    out["status"] = pd.DataFrame({
+        "Status": st["status"], "Polygons": st["n"].map(_i), "Share": st["share"].map(_p),
+        "Meaning": st["description"]})
+    ff = tables["fit_failure"]
+    ff = ff[ff["n"] > 0]
+    out["fit_failure"] = pd.DataFrame({
+        "No fit because": ff["fit_failure"], "Polygons": ff["n"].map(_i),
+        "Share of no-fit": ff["share_of_no_fit"].map(_p), "Meaning": ff["description"]})
+
     gb = tables["geometry_basis"]
     out["geometry_basis"] = pd.DataFrame({
         "Basis": gb["label"], "Polygons": gb["n"].map(_i),

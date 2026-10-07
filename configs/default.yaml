@@ -5,6 +5,11 @@ crs:
                               # from the tile index; or assert one, e.g. EPSG:6341.
                               # Points are not reprojected and all thresholds are metres.
 
+polygons:
+  min_area_m2: 1.0            # smaller input polygons are flagged below_min_area
+  overlap_flag_frac: 0.2      # share of own area overlapping another polygon that
+                              # earns overlaps_polygon (0 = skip the check)
+
 panel_plane:
   erosion_m: 0.15
   ransac_threshold_m: 0.05

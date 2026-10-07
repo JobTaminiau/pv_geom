@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from pv_geom import __version__
+from pv_geom.schema import SCHEMA_VERSION
 
 
 def write_manifest(
@@ -23,6 +24,8 @@ def write_manifest(
     run_id: str,
     vintage: dict[str, Any] | None = None,
     crs: str | None = None,
+    plan_fingerprint: str | None = None,
+    result_hash: str | None = None,
 ) -> None:
     """Write the run manifest JSON sidecar at the output prefix root.
 
@@ -33,7 +36,10 @@ def write_manifest(
     """
     manifest = {
         "pkg_version": __version__,
+        "schema_version": SCHEMA_VERSION,
         "config_hash": config_hash,
+        "result_hash": result_hash,
+        "plan_fingerprint": plan_fingerprint,
         "config": config_dict,
         "inputs": inputs,
         "crs": crs,

@@ -13,6 +13,7 @@ from pathlib import Path
 
 import geopandas as gpd
 
+from pv_geom.errors import TileIndexError
 from pv_geom.io.vector import read_vector, reproject
 
 
@@ -38,14 +39,16 @@ def resolve_tile_id_col(tindex: gpd.GeoDataFrame, requested: str | None = None) 
             return requested
         if requested.lower() in lower:
             return lower[requested.lower()]
-        raise ValueError(
-            f"tile index has no '{requested}' column; columns are {list(tindex.columns)}"
+        raise TileIndexError(
+            f"tile index has no '{requested}' column",
+            f"columns are {list(tindex.columns)}; pass one with --tile-id-col",
         )
     for alias in _TILE_ID_ALIASES:
         if alias in lower:
             return lower[alias]
-    raise ValueError(
-        f"cannot find a tile-id column in {list(tindex.columns)}; pass tile_id_col"
+    raise TileIndexError(
+        f"cannot find a tile-id column among {list(tindex.columns)}",
+        "name it with --tile-id-col",
     )
 
 

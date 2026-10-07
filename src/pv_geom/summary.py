@@ -11,6 +11,7 @@ from __future__ import annotations
 import pyarrow as pa
 
 from pv_geom.report.stats import QUADRANTS, sector_index
+from pv_geom.schema import STATUSES
 from pv_geom.vintage import GEOMETRY_BASIS, PANEL_BASES
 
 
@@ -24,6 +25,14 @@ def summarise_table(table: pa.Table) -> dict:
     df = table.to_pandas()
     n = len(df)
     out: dict = {"rows": int(n)}
+
+    if "status" in df.columns:
+        counts = df["status"].value_counts()
+        out["status_counts"] = {s: int(counts.get(s, 0)) for s in STATUSES}
+    if "fit_failure" in df.columns:
+        out["fit_failure_counts"] = {
+            str(k): int(v) for k, v in df["fit_failure"].dropna().value_counts().items()
+        }
 
     fitted = df["panel_tilt_deg"].notna()
     out["fitted"] = int(fitted.sum())

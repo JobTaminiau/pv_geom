@@ -11,6 +11,7 @@ from pathlib import Path
 
 import geopandas as gpd
 
+from pv_geom.errors import require
 from pv_geom.io.storage import is_remote, localize
 
 _PARQUET_SUFFIXES = (".parquet", ".geoparquet")
@@ -20,6 +21,8 @@ def read_vector(uri: str | Path) -> gpd.GeoDataFrame:
     """Read a vector layer from a local path or remote URI, in its own CRS."""
     s = str(uri)
     suffix = s.lower().split("?", 1)[0]
+    if s.startswith("s3://"):
+        require("s3fs", "cloud", "reading from S3")
     if suffix.endswith(_PARQUET_SUFFIXES):
         return gpd.read_parquet(s)              # remote URIs go through fsspec
     local = localize(s) if is_remote(s) else Path(s)

@@ -121,6 +121,7 @@ def process_tile_group(
     has_parent = "parent_polygon_id" in polygons.columns
     has_row = "input_row" in polygons.columns
     has_vintage = "polygon_vintage" in polygons.columns
+    has_flags = "input_flags" in polygons.columns
 
     rows: list[dict[str, Any]] = []
     for i, (_, rec) in enumerate(polygons.iterrows()):
@@ -134,6 +135,7 @@ def process_tile_group(
             parent_polygon_id=str(rec["parent_polygon_id"]) if has_parent else None,
             input_row=int(rec["input_row"]) if has_row else i,
             polygon_vintage=vintage,
+            input_flags=tuple(rec["input_flags"]) if has_flags else (),
         )
         # Other PV polygons close enough to intrude on this one's roof ring.
         near = neighbours.query(poly.buffer(pool.roof_pad_m))

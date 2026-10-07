@@ -20,6 +20,18 @@ class CRSConfig(BaseModel):
     target: str = "auto"
 
 
+class PolygonsConfig(BaseModel):
+    """Checks on the polygon layer. None of these drop a polygon: each input
+    polygon keeps its row, and the checks decide its flags."""
+
+    # Polygons smaller than this are flagged `below_min_area` (a single module
+    # is ~1.7-2 m2; below ~3 m2 there are rarely enough returns for a fit).
+    min_area_m2: float = 1.0
+    # A polygon sharing at least this fraction of its own area with another
+    # input polygon is flagged `overlaps_polygon`. Set to 0 to skip the check.
+    overlap_flag_frac: float = 0.2
+
+
 class PanelPlaneConfig(BaseModel):
     erosion_m: float = 0.15
     ransac_threshold_m: float = 0.05
@@ -287,6 +299,7 @@ class PVGeomConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     crs: CRSConfig = Field(default_factory=CRSConfig)
+    polygons: PolygonsConfig = Field(default_factory=PolygonsConfig)
     panel_plane: PanelPlaneConfig = Field(default_factory=PanelPlaneConfig)
     multi_plane: MultiPlaneConfig = Field(default_factory=MultiPlaneConfig)
     roof_plane: RoofPlaneConfig = Field(default_factory=RoofPlaneConfig)
@@ -301,6 +314,19 @@ class PVGeomConfig(BaseModel):
         with open(path, encoding="utf-8") as f:
             raw = yaml.safe_load(f) or {}
         return cls(**raw)
+
+    def result_hash(self) -> str:
+        """Like :meth:`hash`, but ignoring how the run is executed.
+
+        Worker counts and backends do not change a result, so an interrupted
+        run may be resumed on a different cluster shape — but not with
+        different measurement settings. ``--resume`` compares this.
+        """
+        dump = self.model_dump(mode="json")
+        dump.pop("compute", None)
+        if not self.mounting_rules.enabled:
+            dump["mounting_rules"] = {"enabled": False}
+        return hashlib.sha256(json.dumps(dump, sort_keys=True).encode("utf-8")).hexdigest()
 
     def hash(self) -> str:
         """sha256 of everything that can change a result or how it was run.

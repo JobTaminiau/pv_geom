@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 import numpy as np
@@ -11,6 +12,7 @@ from shapely import wkb
 
 from pv_geom import __version__
 from pv_geom.pipeline.measure import Measurement
+from pv_geom.vintage import NOT_MEASURED
 
 
 @dataclass(frozen=True)
@@ -38,6 +40,7 @@ def to_row(m: Measurement, prov: Provenance) -> dict[str, Any]:
         "polygon_id": str(m.task.polygon_id),
         "parent_polygon_id": str(m.task.parent_id),
         "input_row": np.int32(m.task.input_row),
+        "status": m.status,
         "geometry": wkb.dumps(m.task.polygon),
         "area_m2": np.float32(m.area_m2),
         "surface_area_m2": _f32(m.surface_area_m2),
@@ -49,6 +52,7 @@ def to_row(m: Measurement, prov: Provenance) -> dict[str, Any]:
         "geometry_basis": m.basis,
         "n_points_panel": int(fit.n_total),
         "n_inliers_panel": int(fit.n_inliers),
+        "fit_failure": m.fit_failure,
         "point_density": np.float32(m.point_density),
         "panel_tilt_deg": _f32(fit.tilt_deg),
         "panel_azimuth_deg": _f32(fit.azimuth_deg),
@@ -71,6 +75,41 @@ def to_row(m: Measurement, prov: Provenance) -> dict[str, Any]:
         "on_building": None if m.roof.on_building is None else bool(m.roof.on_building),
         "building_id": m.roof.building_id,
         "flags": m.flags,
+        "lidar_tile_ids": list(prov.lidar_tile_ids),
+        "pkg_version": __version__,
+        "config_hash": prov.config_hash,
+        "run_id": prov.run_id,
+        "partition_id": np.int32(prov.partition_id),
+    }
+
+
+def unmeasured_row(
+    *,
+    polygon_id: str,
+    parent_polygon_id: str,
+    input_row: int,
+    polygon: Any,
+    status: str,
+    polygon_vintage: date | None,
+    flags: tuple[str, ...],
+    prov: Provenance,
+) -> dict[str, Any]:
+    """The row for a polygon that never reached measurement. It carries what is
+    known from the input — identity, geometry, area, vintage — and its status;
+    every measured column is left null."""
+    has_geom = polygon is not None and not polygon.is_empty
+    polygonal = has_geom and polygon.geom_type in ("Polygon", "MultiPolygon")
+    return {
+        "polygon_id": str(polygon_id),
+        "parent_polygon_id": str(parent_polygon_id),
+        "input_row": np.int32(input_row),
+        "status": status,
+        "geometry": wkb.dumps(polygon) if has_geom else None,
+        "area_m2": np.float32(polygon.area) if polygonal else None,
+        "polygon_vintage": polygon_vintage,
+        "geometry_basis": NOT_MEASURED,
+        "roof_ref_source": "none",
+        "flags": list(flags),
         "lidar_tile_ids": list(prov.lidar_tile_ids),
         "pkg_version": __version__,
         "config_hash": prov.config_hash,

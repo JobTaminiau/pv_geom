@@ -76,6 +76,7 @@ def _synthetic_output(out: Path, n: int = 400, *, with_dates: bool = True) -> No
         "polygon_id": [f"p{i}" for i in range(n)],
         "parent_polygon_id": [f"p{i}" for i in range(n)],
         "input_row": list(range(n)),
+        "status": ["no_fit" if np.isnan(t) else "measured" for t in tilt],
         "geometry": [wkb.dumps(box(x, y, x + 5, y + 4)) for x, y in zip(xs, ys, strict=True)],
         "area_m2": [20.0] * n,
         "surface_area_m2": [None if np.isnan(t) else 20.0 / np.cos(np.radians(t)) for t in tilt],

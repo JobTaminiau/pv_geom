@@ -350,8 +350,11 @@ def test_failed_tile_group_does_not_abort_run(tmp_path: Path) -> None:
     )
     run_pipeline(**kwargs)
 
-    parts = sorted((tmp_path / "out").glob("part-*.parquet"))
+    parts = sorted((tmp_path / "out").glob("part-[0-9]*.parquet"))
     assert len(parts) == 1, "the good group's partition must survive the bad group's failure"
+    # The failed group's polygon still has a row, saying why it has no measurement.
+    unmeasured = pq.read_table(tmp_path / "out" / "part-unmeasured.parquet").to_pylist()
+    assert [r["status"] for r in unmeasured] == ["tile_unreadable"]
     manifest = json.loads((tmp_path / "out" / "manifest.json").read_text())
     assert manifest["counts"]["succeeded"] == 1
     assert manifest["counts"]["failed"] == 1
@@ -366,7 +369,7 @@ def test_failed_tile_group_does_not_abort_run(tmp_path: Path) -> None:
     )
     run_pipeline(**kwargs, resume=True)
     parts = sorted((tmp_path / "out").glob("part-*.parquet"))
-    assert len(parts) == 2
+    assert len(parts) == 2, "both groups measured; the unmeasured partition is gone"
     manifest = json.loads((tmp_path / "out" / "manifest.json").read_text())
     assert manifest["counts"]["succeeded"] == 2
     assert manifest["counts"]["failed"] == 0

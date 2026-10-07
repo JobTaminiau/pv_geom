@@ -1,12 +1,61 @@
 # Changelog
 
-## Unreleased — 0.3.0 (refactoring pass)
+## Unreleased — 0.3.0
 
-Internal restructuring under a no-change-in-results rule, checked against
-regression benchmarks (a synthetic study area in CI; 200 real Phoenix and
-Delaware polygons locally). Measured values are identical to 0.2.0.
+Two parts. A refactoring pass under a no-change-in-results rule, checked
+against regression benchmarks (a synthetic study area in CI; 200 real Phoenix
+and Delaware polygons locally). Then the accounting, safety and usability
+stories of milestone 0.3. Measured values are identical to 0.2.0 throughout:
+on the Phoenix test block all 3,390 rows match in every measured column.
+
+### Added
+
+- **Every input polygon has exactly one row.** New `status` column: `measured`,
+  `no_fit`, `no_lidar_tile`, `outside_tile_index`, `tile_unreadable`,
+  `invalid_geometry`. Polygons that reach no tile-group task are written to
+  `part-unmeasured.parquet` with their identity, geometry, area and vintage.
+  `geometry_basis` gains `not_measured`.
+- **`fit_failure`** says why a covered polygon has no fit: `too_few_points`,
+  `ground_level_only` or `no_consensus`.
+- **Input screening.** Unusable features (null, empty, non-polygonal, zero
+  area) are kept as `invalid_geometry` rows instead of being dropped. Invalid
+  polygons are repaired and flagged `geometry_repaired`. New flags
+  `below_min_area`, `overlaps_polygon`, `duplicate_geometry`
+  (`polygons.min_area_m2`, `polygons.overlap_flag_frac`).
+- **Schema version** (`0.3`) in every partition and the manifest, with a
+  compatibility rule; older outputs are upgraded when read.
+- **Safe resume.** Each partition records the schema version, the measurement
+  configuration and a fingerprint of the plan; `--resume` refuses to continue
+  an output made from something else (`--force-resume` overrides). Changing
+  only the cluster shape is allowed.
+- **Progress** per finished tile group: groups done, rows, failures, elapsed,
+  estimated time left.
+- **Typed errors with remedies** (`pv_geom.errors`): missing CRS, non-metric
+  CRS, id column problems, unparseable vintages, tile-index mismatches, missing
+  optional packages, storage credentials. The CLI prints the problem and the
+  fix, not a traceback.
+- **Optional extras.** `pip install pv-geom` no longer pulls cloud packages;
+  `[cloud]` adds S3 access and `[coiled]` the Coiled backend.
+- Report: status and fit-failure tables in the coverage section;
+  `status_definitions.csv` in the release dataset.
+
+### Fixed
+
+- `configs/phoenix.yaml` declared the polygon vintage as 2024-04-01. The
+  detections come from imagery acquired September-October 2024; the config now
+  says `2024-10`, which puts the gap to the LiDAR at about 3.9 years, not 3.3.
+- An interrupted S3 download could leave a truncated file that looked like a
+  cached tile; downloads now land under a temporary name first.
+- A tile missing from a *local* LiDAR folder is treated as missing
+  (`no_lidar_tile`) instead of failing its group.
 
 ### Changed
+
+- **Columns that were non-null are now nullable** (`geometry`, `area_m2`,
+  `aspect_ratio`, `n_points_panel`, `n_inliers_panel`, `point_density`,
+  `n_planes_detected`), because unmeasured rows have no value for them.
+- The coverage funnel counts from `status`; a MultiPolygon is exploded before
+  validity is judged, so parts sharing an edge stay separate arrays.
 
 - **Pipeline split.** `run_pipeline` (449 lines) is now `plan` / `executor` /
   `sink` / `vintage_check` behind a ~100-line orchestrator. `_build_row` (224

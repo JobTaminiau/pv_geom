@@ -15,6 +15,7 @@ from typing import Any
 
 import geopandas as gpd
 import numpy as np
+from shapely import contains_xy
 
 from pv_geom.config import PanelPlaneConfig, PVGeomConfig
 from pv_geom.geometry.heights import (
@@ -30,6 +31,7 @@ from pv_geom.geometry.plane_fit import (
     fit_plane_ransac,
 )
 from pv_geom.geometry.roof_plane import RoofPlaneResult, extract_roof_plane
+from pv_geom.schema import MEASURED, NO_FIT
 from pv_geom.vintage import geometry_basis, vintage_gap_days
 
 NAN = float("nan")
@@ -48,6 +50,7 @@ class PolygonTask:
     parent_polygon_id: str | None = None      # defaults to polygon_id
     input_row: int = 0
     polygon_vintage: date | None = None       # imagery capture date
+    input_flags: tuple[str, ...] = ()         # quality flags settled when the layer was read
 
     @property
     def parent_id(self) -> str:
@@ -169,6 +172,30 @@ def screen_standoff(height_above_roof_m: float, roof_usable: bool,
     return StandoffScreen(screened, screened and height_above_roof_m >= min_standoff_m)
 
 
+# Ground returns inside a polygon that mark it as lying at ground level.
+_GROUND_LEVEL_MIN_RETURNS = 5
+
+
+def why_no_fit(task: PolygonTask, pts: LocalPoints, cfg: PanelPlaneConfig) -> str:
+    """Name the reason a polygon has no fit.
+
+    ``ground_level_only``: nothing stands above the ground there — the polygon
+    holds ground returns but (almost) no candidates, the signature of a
+    ground-level false detection or a misplaced polygon. ``too_few_points``:
+    something is there, but too little of it. ``no_consensus``: plenty of
+    returns, no single plane.
+    """
+    n = len(pts.panel)
+    if n < 3 and len(pts.ground):
+        poly = task.polygon
+        minx, miny, maxx, maxy = poly.bounds
+        g = pts.ground
+        near = g[(g[:, 0] >= minx) & (g[:, 0] <= maxx) & (g[:, 1] >= miny) & (g[:, 1] <= maxy)]
+        if len(near) and int(contains_xy(poly, near[:, 0], near[:, 1]).sum()) >= _GROUND_LEVEL_MIN_RETURNS:
+            return "ground_level_only"
+    return "too_few_points" if n < cfg.min_points else "no_consensus"
+
+
 # --------------------------------------------------------------------------- #
 # The record
 # --------------------------------------------------------------------------- #
@@ -194,6 +221,7 @@ class Measurement:
     lidar_date_source: str | None
     gap_days: int | None
     basis: str
+    fit_failure: str | None = None            # why there is no fit, when there is none
     flags: list[str] = field(default_factory=list)
     # Heights of the returns the panel plane was fitted to (kept for the
     # experimental mounting classifier, which looks at what lies beneath them).
@@ -202,6 +230,10 @@ class Measurement:
     @property
     def fit_ok(self) -> bool:
         return self.panel.ok
+
+    @property
+    def status(self) -> str:
+        return MEASURED if self.panel.ok else NO_FIT
 
     @property
     def surface_area_m2(self) -> float | None:
@@ -221,7 +253,7 @@ def measure_polygon(
     lidar_date_source: str | None = None,
 ) -> Measurement:
     """Run every measurement step for one polygon."""
-    flags: list[str] = []
+    flags: list[str] = list(task.input_flags)
     polygon = task.polygon
     area_m2 = float(polygon.area)
     centroid = polygon.centroid
@@ -291,5 +323,6 @@ def measure_polygon(
         secondary=secondary, roof=roof, height_above_roof_m=har,
         panel_roof_angle_deg=angle, height_above_ground_m=hag, screen=screen,
         lidar_date=lidar_date, lidar_date_source=lidar_date_source, gap_days=gap_days,
-        basis=basis, flags=flags, panel_z=panel_z,
+        basis=basis, fit_failure=None if panel.ok else why_no_fit(task, pts, cfg.panel_plane),
+        flags=flags, panel_z=panel_z,
     )

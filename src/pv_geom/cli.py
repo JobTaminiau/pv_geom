@@ -12,6 +12,7 @@ from rich.table import Table
 
 from pv_geom import __version__
 from pv_geom.config import PVGeomConfig
+from pv_geom.errors import PVGeomError
 from pv_geom.utils.logging import add_file_log, configure_logging
 
 app = typer.Typer(
@@ -90,7 +91,12 @@ def run(
     dry_run: bool = typer.Option(False, help="Plan + vintage check only; no compute"),
     resume: bool = typer.Option(
         False,
-        help="Skip groups whose partition file already exists. Crash-recovery only — same inputs/config.",
+        help="Keep partitions already at the output and run the rest. Refused if they "
+             "were made from different inputs, settings or schema.",
+    ),
+    force_resume: bool = typer.Option(
+        False, help="Resume even if the existing partitions were made from different "
+                    "inputs, settings or schema"
     ),
     name_template: str = typer.Option(
         "{name}.laz",
@@ -137,6 +143,7 @@ def run(
         bbox=(bbox[0], bbox[1], bbox[2], bbox[3]) if bbox else None,
         dry_run=dry_run,
         resume=resume,
+        force_resume=force_resume,
         use_dask=not no_dask,
     )
     if log_handler is not None:
@@ -249,5 +256,17 @@ def describe_output(output_uri: str = typer.Argument(...)) -> None:
                       f"{stats['panel_rmse_p90'] * 100:.1f} cm")
 
 
+def main() -> None:
+    """Entry point: run the app, turning anticipated errors into a message and a
+    remedy instead of a traceback."""
+    try:
+        app()
+    except PVGeomError as exc:
+        console.print(f"[red]error:[/red] {exc.message}")
+        if exc.remedy:
+            console.print(f"  [bold]fix:[/bold] {exc.remedy}")
+        raise SystemExit(1) from None
+
+
 if __name__ == "__main__":
-    app()
+    main()

@@ -48,7 +48,7 @@ def test_distributed_run_writes_partitions_and_survives_a_bad_tile(tmp_path: Pat
         lidar_prefix=str(tmp_path), output_uri=str(out),
         cfg=_local_cfg(), use_dask=True,
     )
-    parts = sorted(out.glob("part-*.parquet"))
+    parts = sorted(out.glob("part-[0-9]*.parquet"))
     assert len(parts) == 1
     assert pq.read_table(parts[0]).column("polygon_id").to_pylist() == ["ok"]
     manifest = json.loads(Path(manifest_path).read_text())

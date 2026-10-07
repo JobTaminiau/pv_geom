@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import typer
@@ -11,7 +12,7 @@ from rich.table import Table
 
 from pv_geom import __version__
 from pv_geom.config import PVGeomConfig
-from pv_geom.utils.logging import configure_logging
+from pv_geom.utils.logging import add_file_log, configure_logging
 
 app = typer.Typer(
     name="pv-geom",
@@ -22,8 +23,11 @@ console = Console()
 
 
 @app.callback()
-def _root(verbose: bool = typer.Option(False, "--verbose", "-v")) -> None:
-    configure_logging(verbose=verbose)
+def _root(
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Debug detail"),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Warnings and errors only"),
+) -> None:
+    configure_logging(verbose=verbose, quiet=quiet)
 
 
 @app.command()
@@ -115,6 +119,10 @@ def run(
     if crs is not None:
         cfg.crs.target = crs
 
+    # A local run keeps its own log beside the output, as JSON lines.
+    log_handler = None
+    if not dry_run and not str(output).startswith("s3://"):
+        log_handler = add_file_log(Path(output) / "logs" / "run.jsonl")
     manifest = run_pipeline(
         polygons_uri=polygons,
         tile_index_uri=tile_index,
@@ -131,6 +139,9 @@ def run(
         resume=resume,
         use_dask=not no_dask,
     )
+    if log_handler is not None:
+        logging.getLogger("pv_geom").removeHandler(log_handler)
+        log_handler.close()
     console.print(f"[green]wrote manifest:[/green] {manifest}")
 
     if report and not dry_run and not str(output).startswith("s3://"):
@@ -213,10 +224,10 @@ def inspect_tile(
 def describe_output(output_uri: str = typer.Argument(...)) -> None:
     """Summarise a finished run: counts, vintage, geometry basis, fit quality."""
     from pv_geom.io.output import read_manifest, read_output_table
-    from pv_geom.pipeline.runner import _aggregate
+    from pv_geom.summary import summarise_table
 
     manifest = read_manifest(output_uri)
-    stats = _aggregate(read_output_table(output_uri))
+    stats = summarise_table(read_output_table(output_uri))
     console.print(f"[bold]{output_uri}[/bold]  (pv-geom {manifest.get('pkg_version', '?')}, "
                   f"run {str(manifest.get('run_id', '?'))[:8]})")
     v = manifest.get("vintage", {})

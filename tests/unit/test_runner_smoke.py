@@ -639,7 +639,7 @@ def _laz_flown_on(path, flight, n: int = 200) -> None:
 def test_probe_lidar_vintage_reports_gap_when_input_postdates_lidar(tmp_path) -> None:
     """The Phoenix pairing: 2024 imagery against a 2020 flight. The run must
     measure the LiDAR side itself and record the gap in the manifest."""
-    from pv_geom.pipeline.runner import _probe_lidar_vintage
+    from pv_geom.pipeline.vintage_check import probe_lidar_vintage as _probe_lidar_vintage
 
     p = tmp_path / "t.laz"
     _laz_flown_on(p, date(2020, 11, 26))
@@ -655,7 +655,7 @@ def test_probe_lidar_vintage_reports_gap_when_input_postdates_lidar(tmp_path) ->
 
 
 def test_probe_lidar_vintage_no_warning_when_cotemporal(tmp_path) -> None:
-    from pv_geom.pipeline.runner import _probe_lidar_vintage
+    from pv_geom.pipeline.vintage_check import probe_lidar_vintage as _probe_lidar_vintage
 
     p = tmp_path / "t.laz"
     _laz_flown_on(p, date(2024, 6, 1))
@@ -669,7 +669,7 @@ def test_probe_lidar_vintage_no_warning_when_cotemporal(tmp_path) -> None:
 
 def test_probe_lidar_vintage_survives_unreadable_tiles(tmp_path) -> None:
     """A bad tile costs a sample, never the run."""
-    from pv_geom.pipeline.runner import _probe_lidar_vintage
+    from pv_geom.pipeline.vintage_check import probe_lidar_vintage as _probe_lidar_vintage
 
     good = tmp_path / "good.laz"
     _laz_flown_on(good, date(2020, 11, 26))
@@ -688,7 +688,7 @@ def test_aggregate_reports_the_standoff_screen() -> None:
     panel geometry."""
     import pyarrow as pa
 
-    from pv_geom.pipeline.runner import _aggregate
+    from pv_geom.summary import summarise_table as _aggregate
 
     tbl = pa.table({
         "mounting_type": ["flush_mount_flat_roof", "flush_mount_flat_roof",

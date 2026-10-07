@@ -194,7 +194,7 @@ pushed. Outputs can go straight to `s3://`; partitions are written as each tile
 group finishes, and `--resume` retries only what is missing. Workers need read
 access to the LiDAR bucket; for a bucket in another account grant the Coiled
 role `s3:GetObject`, `s3:ListBucket` and `s3:GetBucketLocation` in the bucket
-policy (`scripts/_coiled_aws_probe.py` checks access from a real worker).
+policy (`scripts/coiled_aws_probe.py` checks access from a real worker).
 
 ## Limitations
 

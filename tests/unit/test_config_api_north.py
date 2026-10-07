@@ -501,3 +501,16 @@ def test_metric_equivalent_and_point_conversion() -> None:
     ft, what = to_run_crs(np.array([[x, y, 1000.0, 6.0]]), "EPSG:2223", "EPSG:6341")
     assert ft[0, :2] == pytest.approx(_xy("EPSG:6341"), abs=1e-3)
     assert ft[0, 2] == pytest.approx(304.8) and ft[0, 3] == 6.0
+
+
+def test_web_mercator_is_never_the_working_crs() -> None:
+    """Public point-cloud services deliver Web Mercator. It reads as metric but
+    stretches distance by 1/cos(latitude), which would flatten every tilt."""
+    from pv_geom.errors import CRSResolutionError
+    from pv_geom.utils.crs import is_web_mercator, resolve_target_crs
+
+    assert is_web_mercator("EPSG:3857") and not is_web_mercator("EPSG:6341")
+    with pytest.raises(CRSResolutionError, match="Web Mercator"):
+        resolve_target_crs("EPSG:3857")
+    with pytest.raises(CRSResolutionError):          # world-wide: no zone to choose
+        resolve_target_crs("auto", "EPSG:3857")

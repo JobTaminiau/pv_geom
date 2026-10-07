@@ -22,6 +22,7 @@ from pv_geom.pipeline.measure import LocalPoints, Measurement, PolygonTask, meas
 from pv_geom.pipeline.pointpool import lidar_date_for, load_group_points
 from pv_geom.pipeline.rows import Provenance, rows_to_table, to_row
 from pv_geom.schema import output_schema
+from pv_geom.utils.north import meridian_convergence_deg
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +57,7 @@ def build_row(
     polygon_vintage: date | None = None,
     lidar_date: date | None = None,
     lidar_date_source: str | None = None,
+    grid_convergence_deg: float = 0.0,
 ) -> dict[str, Any]:
     """Measure one polygon from point arrays and return its output row.
 
@@ -64,7 +66,8 @@ def build_row(
     polygon, ``roof_input_pts`` those around it, ``ground_xyz`` the ground
     returns nearby.
     """
-    task = PolygonTask(polygon, str(polygon_id), parent_polygon_id, input_row, polygon_vintage)
+    task = PolygonTask(polygon, str(polygon_id), parent_polygon_id, input_row, polygon_vintage,
+                       grid_convergence_deg=grid_convergence_deg)
     pts = LocalPoints(panel_pts, ground_xyz, roof_input_pts, footprints, other_pv_polygons)
     m = measure_polygon(task, pts, cfg, lidar_date=lidar_date,
                         lidar_date_source=lidar_date_source)
@@ -118,6 +121,10 @@ def process_tile_group(
 
     geoms = polygons.geometry.to_numpy()
     neighbours = shapely.STRtree(geoms)
+    # Fits are made in grid coordinates; azimuths are reported from true north.
+    centroids = shapely.centroid(geoms)
+    convergence = meridian_convergence_deg(
+        polygons.crs, shapely.get_x(centroids), shapely.get_y(centroids))
     has_parent = "parent_polygon_id" in polygons.columns
     has_row = "input_row" in polygons.columns
     has_vintage = "polygon_vintage" in polygons.columns
@@ -136,6 +143,7 @@ def process_tile_group(
             input_row=int(rec["input_row"]) if has_row else i,
             polygon_vintage=vintage,
             input_flags=tuple(rec["input_flags"]) if has_flags else (),
+            grid_convergence_deg=float(convergence[i]),
         )
         # Other PV polygons close enough to intrude on this one's roof ring.
         near = neighbours.query(poly.buffer(pool.roof_pad_m))

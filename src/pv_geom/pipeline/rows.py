@@ -12,6 +12,7 @@ from shapely import wkb
 
 from pv_geom import __version__
 from pv_geom.pipeline.measure import Measurement
+from pv_geom.utils.north import to_true_azimuth
 from pv_geom.vintage import NOT_MEASURED
 
 
@@ -36,6 +37,12 @@ def to_row(m: Measurement, prov: Provenance) -> dict[str, Any]:
     """One measurement as a dict keyed on the core output schema's names."""
     fit = m.panel.fit
     roof_fit = m.roof.fit
+    conv = m.task.grid_convergence_deg
+
+    def _true(grid_azimuth: float) -> Any:
+        """A fitted plane's azimuth, from grid north to true north."""
+        return _f32(to_true_azimuth(grid_azimuth, conv))
+
     return {
         "polygon_id": str(m.task.polygon_id),
         "parent_polygon_id": str(m.task.parent_id),
@@ -55,7 +62,8 @@ def to_row(m: Measurement, prov: Provenance) -> dict[str, Any]:
         "fit_failure": m.fit_failure,
         "point_density": np.float32(m.point_density),
         "panel_tilt_deg": _f32(fit.tilt_deg),
-        "panel_azimuth_deg": _f32(fit.azimuth_deg),
+        "panel_azimuth_deg": _true(fit.azimuth_deg),
+        "grid_convergence_deg": np.float32(conv),
         "panel_rmse_m": _f32(fit.rmse),
         "panel_fit_tolerance_m": np.float32(m.panel.tolerance_m) if m.fit_ok else None,
         "panel_tilt_unc_deg": _f32(m.tilt_unc_deg),
@@ -63,11 +71,11 @@ def to_row(m: Measurement, prov: Provenance) -> dict[str, Any]:
         "n_planes_detected": np.int8(2 if m.secondary is not None else int(m.fit_ok)),
         "secondary_tilt_deg": _f32(m.secondary.tilt_deg) if m.secondary is not None else None,
         "secondary_azimuth_deg": (
-            _f32(m.secondary.azimuth_deg) if m.secondary is not None else None
+            _true(m.secondary.azimuth_deg) if m.secondary is not None else None
         ),
         "roof_ref_source": m.roof.source,
         "roof_tilt_deg": _f32(roof_fit.tilt_deg) if roof_fit is not None else None,
-        "roof_azimuth_deg": _f32(roof_fit.azimuth_deg) if roof_fit is not None else None,
+        "roof_azimuth_deg": _true(roof_fit.azimuth_deg) if roof_fit is not None else None,
         "roof_rmse_m": _f32(roof_fit.rmse) if roof_fit is not None else None,
         "panel_roof_angle_deg": _f32(m.panel_roof_angle_deg),
         "height_above_roof_m": _f32(m.height_above_roof_m),

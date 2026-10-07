@@ -13,7 +13,7 @@ import pyarrow as pa
 # Compatibility rule: within a major version, columns are only ever ADDED and
 # added columns are nullable, so a reader written for x.0 reads every x.y.
 # Before 1.0 the major version is 0 and minor versions may still change types.
-SCHEMA_VERSION = "0.3"
+SCHEMA_VERSION = "0.4"
 
 
 def _f(name: str, typ: pa.DataType, *, nullable: bool = True, unit: str = "",
@@ -75,8 +75,12 @@ _CORE_FIELDS: list[pa.Field] = [
     _f("panel_tilt_deg", pa.float32(), unit="deg",
        desc="Tilt of the fitted plane from horizontal (0 = flat)."),
     _f("panel_azimuth_deg", pa.float32(), unit="deg",
-       desc="Compass direction the plane faces (0 = N, 90 = E, 180 = S). Null "
-            "below the tilt floor, where it is undefined."),
+       desc="Direction the plane faces, clockwise from TRUE north (0 = N, 90 = E, "
+            "180 = S). Null below the tilt floor, where it is undefined."),
+    _f("grid_convergence_deg", pa.float32(), unit="deg",
+       desc="Meridian convergence at the polygon: the true-north bearing of the "
+            "run CRS's grid north. Already added to every azimuth column; "
+            "subtract it to get the azimuth relative to grid north."),
     _f("panel_rmse_m", pa.float32(), unit="m",
        desc="Perpendicular RMSE of the inliers about the fitted plane."),
     _f("panel_fit_tolerance_m", pa.float32(), unit="m",
@@ -91,7 +95,7 @@ _CORE_FIELDS: list[pa.Field] = [
     _f("secondary_tilt_deg", pa.float32(), unit="deg",
        desc="Tilt of the second plane, when one was found."),
     _f("secondary_azimuth_deg", pa.float32(), unit="deg",
-       desc="Azimuth of the second plane, when one was found."),
+       desc="Azimuth of the second plane (true north), when one was found."),
     # --- roof reference -----------------------------------------------------
     _f("roof_ref_source", pa.string(), nullable=False,
        desc="How the roof reference ring was built: footprint_ring (clipped to "
@@ -99,7 +103,7 @@ _CORE_FIELDS: list[pa.Field] = [
     _f("roof_tilt_deg", pa.float32(), unit="deg",
        desc="Tilt of the plane fitted to the ring around the polygon."),
     _f("roof_azimuth_deg", pa.float32(), unit="deg",
-       desc="Azimuth of the plane fitted to the ring around the polygon."),
+       desc="Azimuth of the plane fitted to the ring around the polygon (true north)."),
     _f("roof_rmse_m", pa.float32(), unit="m",
        desc="RMSE of the roof-ring fit."),
     _f("panel_roof_angle_deg", pa.float32(), unit="deg",

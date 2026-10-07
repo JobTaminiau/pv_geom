@@ -9,6 +9,7 @@ from typing import Any
 
 from pv_geom import __version__
 from pv_geom.schema import SCHEMA_VERSION
+from pv_geom.utils.north import TRUE_NORTH
 
 
 def write_manifest(
@@ -37,6 +38,10 @@ def write_manifest(
     manifest = {
         "pkg_version": __version__,
         "schema_version": SCHEMA_VERSION,
+        # Azimuth columns are measured from true north (grid azimuth plus the
+        # meridian convergence in grid_convergence_deg). Outputs written before
+        # schema 0.4 have no such key: theirs are relative to grid north.
+        "azimuth_reference": TRUE_NORTH,
         "config_hash": config_hash,
         "result_hash": result_hash,
         "plan_fingerprint": plan_fingerprint,

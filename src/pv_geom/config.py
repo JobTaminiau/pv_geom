@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, PrivateAttr
 
 
 class CRSConfig(BaseModel):
@@ -293,10 +293,42 @@ class VintageConfig(BaseModel):
     sample_tiles: int = 25
 
 
+class InputsConfig(BaseModel):
+    """Where the run's inputs are. With these set, a run is just
+    ``pv-geom run --config area.yaml``; command-line options override them.
+    Relative paths are resolved against the config file's folder."""
+
+    polygons: str | None = None          # PV polygon layer (any vector format; path or s3://)
+    polygon_id_col: str | None = None    # id column; None = auto-detect, else synthesize
+    lidar_prefix: str | None = None      # folder or s3:// prefix holding the LAZ tiles
+    tile_index: str | None = None        # tile index layer; None = build it from tile headers
+    tile_id_col: str | None = None       # id column in the tile index; None = auto-detect
+    name_template: str = "{name}.laz"    # tile filename from the tile id
+    footprints: str | None = None        # optional building footprints
+    # Optional scope limits, for trial runs. Polygons outside them are not part
+    # of the run and get no row.
+    bbox: tuple[float, float, float, float] | None = None    # xmin ymin xmax ymax, run CRS
+    max_polygons: int | None = None
+
+
+class StudyConfig(BaseModel):
+    """What this run is of, and where its output goes."""
+
+    name: str | None = None              # used in report titles and the methods text
+    output: str | None = None            # output folder or s3:// prefix
+
+
 class PVGeomConfig(BaseModel):
     # Unknown keys are ignored so configs written for older versions (which
     # carried a never-implemented `output:` block) still load.
     model_config = ConfigDict(extra="ignore")
+
+    # Folder relative paths in the config are resolved against (the config
+    # file's own folder; None for a config built in code).
+    _base_dir: Path | None = PrivateAttr(default=None)
+
+    study: StudyConfig = Field(default_factory=StudyConfig)
+    inputs: InputsConfig = Field(default_factory=InputsConfig)
 
     crs: CRSConfig = Field(default_factory=CRSConfig)
     polygons: PolygonsConfig = Field(default_factory=PolygonsConfig)
@@ -313,7 +345,25 @@ class PVGeomConfig(BaseModel):
     def from_yaml(cls, path: Path | str) -> PVGeomConfig:
         with open(path, encoding="utf-8") as f:
             raw = yaml.safe_load(f) or {}
-        return cls(**raw)
+        cfg = cls(**raw)
+        cfg._base_dir = Path(path).resolve().parent
+        return cfg
+
+    def resolve(self, location: str | None) -> str | None:
+        """A path from the config as an absolute location: remote URIs and
+        absolute paths pass through, a relative path is taken against the
+        config file's folder."""
+        if location is None:
+            return None
+        s = str(location)
+        if "://" in s or Path(s).is_absolute() or self._base_dir is None:
+            return s
+        return str((self._base_dir / s).resolve())
+
+    def model_copy(self, *, update=None, deep: bool = False):
+        copy = super().model_copy(update=update, deep=deep)
+        copy._base_dir = self._base_dir
+        return copy
 
     def result_hash(self) -> str:
         """Like :meth:`hash`, but ignoring how the run is executed.
@@ -323,7 +373,10 @@ class PVGeomConfig(BaseModel):
         different measurement settings. ``--resume`` compares this.
         """
         dump = self.model_dump(mode="json")
-        dump.pop("compute", None)
+        # Not what is computed, but how, on what, and where to: the inputs'
+        # identity is checked separately, by the plan fingerprint.
+        for key in ("compute", "inputs", "study"):
+            dump.pop(key, None)
         if not self.mounting_rules.enabled:
             dump["mounting_rules"] = {"enabled": False}
         return hashlib.sha256(json.dumps(dump, sort_keys=True).encode("utf-8")).hexdigest()
@@ -336,6 +389,7 @@ class PVGeomConfig(BaseModel):
         make two otherwise identical runs look different.
         """
         dump = self.model_dump(mode="json")
+        dump.pop("study", None)            # a label and a destination change nothing
         if not self.mounting_rules.enabled:
             dump["mounting_rules"] = {"enabled": False}
         canonical = json.dumps(dump, sort_keys=True)

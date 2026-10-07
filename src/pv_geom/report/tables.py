@@ -12,7 +12,8 @@ from pv_geom.report.fmt import pct as _p
 from pv_geom.vintage import BASIS_DESCRIPTIONS
 
 
-def display_tables(tables: dict[str, pd.DataFrame], headline: str) -> dict[str, pd.DataFrame]:
+def display_tables(tables: dict[str, pd.DataFrame], headline: str,
+                   weight: str = "area") -> dict[str, pd.DataFrame]:
     out: dict[str, pd.DataFrame] = {}
 
     cov = tables["coverage"]
@@ -39,7 +40,7 @@ def display_tables(tables: dict[str, pd.DataFrame], headline: str) -> dict[str, 
         "Meaning": gb["geometry_basis"].map(BASIS_DESCRIPTIONS)})
 
     s = tables["summary_statistics"]
-    s = s[s["weight"] == "area"]
+    s = s[s["weight"] == weight]
     out["summary_statistics"] = pd.DataFrame({
         "Stratum": s["stratum_label"], "Polygons": s["n"].map(_i),
         "Tilt median (°)": s["tilt_p50_deg"].map(_n),
@@ -52,7 +53,7 @@ def display_tables(tables: dict[str, pd.DataFrame], headline: str) -> dict[str, 
         "Facing W": s["share_facing_W"].map(_p), "Facing N": s["share_facing_N"].map(_p)})
 
     def _two(table: pd.DataFrame, key_cols: list[str]) -> pd.DataFrame:
-        t = table[table["weight"] == "area"]
+        t = table[table["weight"] == weight]
         a = t[t["stratum"] == headline].set_index(key_cols)["share"]
         b = t[t["stratum"] == "all_fitted"].set_index(key_cols)["share"]
         return pd.DataFrame({stats.STRATA[headline][0]: a, "All fitted polygons": b}).reset_index()

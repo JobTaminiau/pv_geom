@@ -68,7 +68,7 @@ The single most important gap. Everything else assumes it.
 
 | ID | Story | Acceptance criteria | P | Size |
 | --- | --- | --- | --- | --- |
-| A1 | As Ravi, I want measured tilt and azimuth scored against independent truth, so that I can cite an accuracy, not just a residual. | A validation set of ≥ 150 arrays with independently known tilt/azimuth (candidates: permit or interconnection records with design tilt; surveyed sites; arrays measured in high-resolution oblique imagery). Report bias, MAE and 90th-percentile error for tilt and azimuth, by `geometry_basis` and by tolerance class. Numbers appear in README and report. | M | L |
+| A1 | As Ravi, I want measured tilt and azimuth scored against independent truth, so that I can cite an accuracy, not just a residual. | A validation set of ≥ 150 arrays with independently known tilt/azimuth (candidates: permit or interconnection records with design tilt; surveyed sites; arrays measured in high-resolution oblique imagery). Report bias, MAE and 90th-percentile error for tilt and azimuth, by `geometry_basis` and by tolerance class. **Azimuth is compared in true north** (E6): truth sources state true or magnetic bearings, never grid bearings, and a grid-north comparison would show the meridian convergence as a spurious bias (−0.3° to −1.0° across the Phoenix atlas). The truth source's own reference (true / magnetic, and the declination applied) is recorded. Numbers appear in README and report. | M | L |
 | A2 | As Ravi, I want the stated uncertainty to mean something, so that I can propagate it. | Reliability check on the A1 set: the share of arrays whose true value falls within ±1σ and ±2σ of the estimate. If coverage is below nominal, uncertainties are rescaled or relabelled as precision. | M | M |
 | A3 | As Ana, I want `geometry_basis` validated in its 0.2 form, so that "panel basis" can be trusted as a filter. | Using the Phoenix permit join (`../pv-cooling`): for each basis, the share of arrays installed before vs after the LiDAR. Separately for `footprint_ring` and `open_ring` references. Publish the confusion table; revise the 5 cm threshold if warranted. | M | M |
 | A4 | As Mia, I want a regression benchmark, so that a refactor cannot silently move the numbers. | A frozen set of ~200 real polygons with their points (a few MB, in the repo or a release asset) and a golden output; CI fails if tilt changes by more than 0.05° on any row without an explicit golden update. | M | M |
@@ -101,7 +101,7 @@ The single most important gap. Everything else assumes it.
 | --- | --- | --- | --- | --- |
 | D1 | As Omar, I want to run a third study area with no code change. | A new US state with public 3DEP LiDAR and any available PV polygon layer runs from a config file and CLI flags alone. Whatever breaks is fixed in the engine, as Delaware's findings were. | M | L |
 | D2 | As Omar, I want to point at a folder of tiles without a tile index. | `--tile-index` optional: built from LAZ headers (local or S3, parallel, cached to a GeoParquet beside the output). | M | M |
-| D3 | As Omar, I want LiDAR in feet or another CRS handled. | Tiles in a foot-based or non-matching CRS are reprojected and unit-converted on read (horizontal and vertical), with the transformation recorded in the manifest. Today these are refused. | M | M |
+| D3 | As Omar, I want LiDAR in feet or another CRS handled. | Tiles in a foot-based or non-matching CRS are reprojected and unit-converted on read (horizontal and vertical), with the transformation recorded in the manifest. Today these are refused. **Azimuth must not depend on which CRS the work is done in** (E6): convergence is taken from the CRS the plane is actually fitted in, and the cross-CRS test in E6 covers every CRS family this story admits (UTM, State Plane Transverse Mercator and Lambert, in metres and feet). | M | M |
 | D4 | As Omar, I want the class scheme checked up front. | Run start inspects sampled tiles and prints which classes will serve as ground and panel candidates; fails with a clear message if there is no ground class. Noise classes (7, 18) are excluded explicitly. | M | S |
 | D5 | As Omar, I want COPC / EPT sources. | Read Cloud-Optimized Point Cloud and Entwine sources by spatial query, so only returns near polygons are fetched. Large cost reduction for sparse inventories (Delaware fetches 475 MB per tile for ~15 polygons). | S | L |
 | D6 | As Omar, I want other object stores. | Any `fsspec` URL (S3, GCS, Azure, HTTPS) for every input and the output; requester-pays honoured. The `io.s3` config block is currently unused. | S | M |
@@ -115,6 +115,7 @@ The single most important gap. Everything else assumes it.
 | E2 | As Ana, I want results per installation, not per detection fragment. | A post-processing step groups polygons into installations (same building, or spatial clustering with tilt/azimuth coherence) and writes an installation-level table: total area, area-weighted tilt, dominant azimuth, facet count. Report offers both levels. | S | L |
 | E3 | As Ana, I want an indicative capacity. | Optional `capacity_kw_est` from surface area and a configurable power density, clearly labelled as an estimate, used as an alternative weight in the report. | S | S |
 | E4 | As Ravi, I want small arrays measured where possible. | Erosion scales with polygon size; the minimum-points floor is re-derived from A6. Fit rate for polygons under 5 m² reported before and after. | S | M |
+| E6 | As Ravi, I want azimuth referenced to **true north**, explicitly, so that it means the same thing in every study area and can be compared with other sources. | Today azimuth is the direction of the plane normal in projected x/y, i.e. relative to **grid north**. Grid north differs from true north by the meridian convergence, which varies with position: −0.8° in the Phoenix test block, −0.3° to −1.0° across the Phoenix atlas, −0.1° to −0.4° in Delaware, up to ±1.7° at a UTM zone edge at 33° N, and several degrees in some State Plane zones. Required: (1) `panel_azimuth_deg`, `secondary_azimuth_deg` and `roof_azimuth_deg` are **true-north** azimuths: grid azimuth plus the meridian convergence at the polygon centroid, from PROJ (`Proj.get_factors(lon, lat).meridian_convergence`); (2) a `grid_convergence_deg` column carries the value applied, so the grid azimuth is recoverable; (3) the manifest, data dictionary, report captions and methods text state `azimuth_reference: true_north`; an output written before this change is labelled `grid_north` when read, and reports on it say so; (4) tilt is unaffected (it does not depend on the horizontal axes) and angles between two planes are unaffected; (5) **test**: one physical plane of known true azimuth, expressed in at least three supported CRSs with different convergence (two adjacent UTM zones and a State Plane zone), yields the same true azimuth within 0.05° and the convergence PROJ reports matches an independent geodesic computation; (6) the regression goldens are regenerated once, deliberately, for this change. | M | S |
 | E5 | As Ravi, I want orientation relative to the sun, not just compass. | Derived columns: annual plane-of-array irradiance factor relative to optimal for the site latitude (simple transposition model), enabling an "orientation loss" profile in the report. | C | M |
 
 ### Epic F — Report and figures
@@ -277,15 +278,36 @@ line per finished group, not a live bar. Milestone 0.3 is complete apart from R1
 | Milestone | Theme | Contents | Exit |
 | --- | --- | --- | --- |
 | **0.3** | Solid ground | R1–R13; B1–B3; H1, H3; I3, I4; G1 | Same numbers as 0.2.0 on the benchmark; gates green; one row per input polygon |
-| **0.4** | Evidence | A1–A5; C1; E1 (segments); H6 full reruns | Accuracy and basis validity published; `unscreened` < 20% |
-| **0.5** | Anyone, anywhere | D1–D4; H2, H4, H5; I1, I2; F1, F2, F5, F7; G2, G4 | Third study area runs unmodified; sample + tutorial work |
-| **1.0-rc** | Product | I5 docs; G5; remaining Musts; schema freeze; paper rebuilt from report output | Definition of done in §1 |
+| **0.4** | Usable by config | I7 (inputs in config), E6 (true-north azimuth), I2 (Python API), I1 (sample + demo), D2, D4, H2, F5, F7, G2 | A run is `pv-geom run --config area.yaml`; demo works offline |
+| **0.5** | Measurement depth | C1 (`unscreened` < 20%), E1 (segments), D3 (feet), H4, H5, F1, F2, G4 | Multi-facet polygons measured as segments |
+| **0.6** | Anyone, anywhere | D1 (third study area), I5 docs, G5 | Third study area runs unmodified; tutorial works |
+| **1.0-rc** | Evidence and release runs | A1–A5 (needs truth data), H6 full Phoenix + Delaware runs from the final configs, schema freeze, paper rebuilt from report output | Definition of done in §1 |
 | 1.x | Depth | Should/Could stories: D5–D7, E2–E5, C2–C6, F3, F4, F6, F8, F9, G3, H7, I6, I7 | — |
 
 Rough total for the Must set: 14–18 working weeks for one person (my estimate; the two
 largest uncertainties are sourcing truth data for A1 and how hard C1 turns out to be).
 
 ## 8. Decisions needed from the project owner
+
+**Decided 2026-10-07 (owner):**
+
+- *Truth data (1):* none is available at present; to be thought through. Stories A1, A2
+  and A5 are therefore **deferred**, and the accuracy claims in §1's definition of done
+  stay open until a source exists. A3 (basis validity against the permit join) needs a
+  full Phoenix output, so it waits with H6.
+- *Full reruns (4):* **not now** — to be done once the package is finalised. H6 moves to
+  the end of the sequence.
+- *Inputs:* runs are to be driven **from a config** that names the polygon and LiDAR
+  inputs; the final Phoenix and Delaware configs will point at the layers chosen for the
+  final analysis. Story I7 is promoted from Should to **Must** and done first.
+- *Direction:* continue improving the package.
+- *Azimuth reference (added 2026-10-07, owner):* azimuth must be defined explicitly as
+  true north, distinguishing grid north, with a cross-CRS test. New story **E6** (Must);
+  A1 and D3 amended to depend on it.
+
+Revised sequence in §7: the "evidence" work that needs neither truth data nor full
+runs (C1, E1) stays; A1/A2/A5/A3/H6 move to a final "evidence and release runs" step
+before 1.0.
 
 1. **Truth data for A1.** Which source of independently known tilt/azimuth is obtainable?
    This gates the whole "evidence" milestone.

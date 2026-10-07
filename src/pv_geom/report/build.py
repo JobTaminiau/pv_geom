@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from pv_geom.errors import InputError
 from pv_geom.report import figures as figs
 from pv_geom.report import stats
 from pv_geom.report.data import load_run, summarise
@@ -52,11 +53,25 @@ def build_report(
     title: str | None = None,
     area_name: str | None = None,
     export_dataset: bool = True,
+    headline: str | None = None,
     weight: str = "area",
     polygon_vintage=None,
     lidar_date=None,
 ) -> ReportResult:
-    """Build tables, figures, reports and the release dataset for a run."""
+    """Build tables, figures, reports and the release dataset for a run.
+
+    ``headline`` names the stratum the report leads with (``panel``,
+    ``all_fitted``, ``surface_unresolved``, ``unscreened``); by default the
+    panel basis when it has enough rows to describe. ``weight`` is ``area``
+    (array surface) or ``count`` (per polygon). Every table file carries all
+    strata and both weightings whatever is chosen here. ``area_name`` defaults
+    to ``study.name`` from the run's config.
+    """
+    if weight not in stats.WEIGHTS:
+        raise InputError(f"unknown weight {weight!r}", f"use one of {list(stats.WEIGHTS)}")
+    if headline is not None and headline not in stats.STRATA:
+        raise InputError(f"unknown headline stratum {headline!r}",
+                         f"use one of {list(stats.STRATA)}")
     if out_dir is None:
         if str(output_uri).startswith("s3://"):
             raise ValueError("pass out_dir when reporting on an s3:// output")
@@ -67,12 +82,13 @@ def build_report(
 
     gdf, df, manifest = load_run(output_uri, polygon_vintage=polygon_vintage,
                                  lidar_date=lidar_date)
-    headline = stats.headline_stratum(df)
+    headline = headline or stats.headline_stratum(df)
+    area_name = area_name or (manifest.get("config", {}).get("study") or {}).get("name")
     tables = stats.all_tables(df, manifest)
     for name, table in tables.items():
         table.to_csv(tables_dir / f"{name}.csv", index=False)
 
-    s = summarise(df, tables, manifest, headline)
+    s = summarise(df, tables, manifest, headline, weight)
     specs = {spec.name: spec for spec in figs.all_figures(df, headline, manifest, weight)}
     fig_paths = {name: figs.save(spec, figures_dir) for name, spec in specs.items()}
 
@@ -90,7 +106,7 @@ def build_report(
                 f"{s.get('polygon_vintage_declared_as') or s['polygon_vintage'] or 'not declared'}"
                 f" · LiDAR {s['lidar_date_max'] or 'date unknown'} · pv-geom v{s['pkg_version']}")
     methods = methods_text(s, manifest, area_name)
-    disp = display_tables(tables, headline)
+    disp = display_tables(tables, headline, weight)
 
     file_rows = [("report.html", "This report, self-contained"),
                  ("report.md", "The report as Markdown with linked figures"),

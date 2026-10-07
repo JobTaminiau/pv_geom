@@ -176,10 +176,10 @@ def _unmeasured_table(plan: Plan, measured_ids: set[str], failed: dict[int, str]
 def run_pipeline(
     *,
     polygons_uri: str,
-    tile_index_uri: str,
     lidar_prefix: str,
     output_uri: str,
     cfg: PVGeomConfig,
+    tile_index_uri: str | None = None,
     footprints_uri: str | None = None,
     name_template: str = "{name}.laz",
     tile_id_col: str | None = None,
@@ -194,7 +194,8 @@ def run_pipeline(
     """End-to-end pipeline. Returns the manifest path (str when output is s3://).
 
     Two inputs are required — the polygon layer and the LiDAR (tiles plus their
-    index) — each with a capture date under ``cfg.vintage``. Building
+    index, or just the tiles: without ``tile_index_uri`` the index is read
+    from their headers) — each with a capture date under ``cfg.vintage``. Building
     footprints are optional: without them ``on_building`` is null and the roof
     reference comes from an open ring around each polygon.
 

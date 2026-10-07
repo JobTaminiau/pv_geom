@@ -1,4 +1,26 @@
-# Metro Phoenix overrides; unset keys take the defaults in default.yaml.
+# Metropolitan Phoenix. Run with:  pv-geom run --config configs/phoenix.yaml
+# Unset keys take the defaults in default.yaml.
+#
+# >>> The `inputs` below are the layers used during development. Point them at
+# >>> the layers chosen for the final analysis before the release run (in
+# >>> particular: the raw detection layer double-counts arrays seen in two
+# >>> overlapping image composites; the dissolved layer does not).
+study:
+  name: Metropolitan Phoenix
+  output: ../out/phoenix            # relative to this file; or an s3:// prefix
+
+inputs:
+  # Raw Mask R-CNN detections, 456,997 polygons (pv_prediction_pipeline, S8).
+  polygons: s3://mc-aerials/segmentation/output/run_20260728T061559Z/pv_attributes.parquet
+  polygon_id_col: detection_id
+  # USGS 3DEP LPC AZ MaricopaPinal 2020.
+  lidar_prefix: s3://free-research-data-raw/US/arizona/top-level/lidar/lidar_data
+  tile_index: s3://free-research-data-raw/US/arizona/top-level/lidar/lidar_data/USGS_AZ_MaricopaPinal_1_2020_TileIndex.zip
+  name_template: "USGS_LPC_AZ_MaricopaPinal_2020_B20_{name}.laz"
+  # FEMA USA Structures, Arizona. Optional. The local copy; restage it or
+  # remove this line to run on polygons and LiDAR alone.
+  footprints: ../data/fema/az.geoparquet
+
 crs:
   target: EPSG:6341           # USGS LPC AZ MaricopaPinal 2020 — verified via spike
 

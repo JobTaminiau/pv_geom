@@ -51,6 +51,9 @@ class PolygonTask:
     input_row: int = 0
     polygon_vintage: date | None = None       # imagery capture date
     input_flags: tuple[str, ...] = ()         # quality flags settled when the layer was read
+    # True-north bearing of grid north at the polygon (see pv_geom.utils.north).
+    # Fits are made in grid coordinates; this turns their azimuths into true ones.
+    grid_convergence_deg: float = 0.0
 
     @property
     def parent_id(self) -> str:

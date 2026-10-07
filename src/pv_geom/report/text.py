@@ -47,8 +47,27 @@ def vintage_statement(s: dict) -> str:
             f"was present when it was flown.")
 
 
+def weight_phrases(s: dict) -> dict[str, str]:
+    """How the chosen weighting is worded: the unit shares are of, and how a
+    statistic under it and under the other weighting are introduced."""
+    if s.get("weight", "area") == "area":
+        return {"unit": "array surface", "this": "weighted by array surface",
+                "other": "per polygon", "of_that": "of that surface faces"}
+    return {"unit": "polygons", "this": "per polygon",
+            "other": "weighted by array surface", "of_that": "of those polygons face"}
+
+
+def north_note(s: dict) -> str:
+    if s.get("azimuth_reference") == "true_north":
+        return "Azimuths are measured clockwise from true north."
+    return ("Azimuths in this output are relative to the grid north of its projected "
+            "coordinate system, not true north; it was written before pv-geom converted them.")
+
+
 def key_findings(s: dict) -> list[str]:
-    h, hc = s["headline"]["area"], s["headline"]["count"]
+    w = s.get("weight", "area")
+    wp = weight_phrases(s)
+    h, hc = s["headline"][w], s["headline"]["count" if w == "area" else "area"]
     label = ("panel-basis polygons" if s["headline_stratum"] == "panel"
              else "fitted polygons")
     gb = s["geometry_basis"]
@@ -65,16 +84,16 @@ def key_findings(s: dict) -> list[str]:
         f"({h['n']:,} polygons)." if s["headline_stratum"] == "panel" else
         f"Too few polygons ({_p(panel_share)}) are on a panel basis to describe separately, "
         f"so the statistics below cover every fitted polygon.",
-        f"Median tilt of {label} is {h['tilt_median_deg']:.1f}° weighted by array surface "
-        f"(interquartile range {h['tilt_p25_deg']:.1f}–{h['tilt_p75_deg']:.1f}°); per polygon "
+        f"Median tilt of {label} is {h['tilt_median_deg']:.1f}° {wp['this']} "
+        f"(interquartile range {h['tilt_p25_deg']:.1f}–{h['tilt_p75_deg']:.1f}°); {wp['other']} "
         f"it is {hc['tilt_median_deg']:.1f}°.",
-        f"{_p(quad[ranked[0]])} of that surface faces {names[ranked[0]]} and "
-        f"{_p(quad[ranked[1]])} faces {names[ranked[1]]}; the mean direction is "
+        f"{_p(quad[ranked[0]])} {wp['of_that']} {names[ranked[0]]} and "
+        f"{_p(quad[ranked[1]])} {names[ranked[1]]}; the mean direction is "
         f"{h['azimuth_circular_mean_deg']:.0f}° ({h['azimuth_circular_mean_compass']}) with "
         f"concentration R = {h['azimuth_resultant_length']:.2f}.",
     ]
     if s["headline_stratum"] == "panel":
-        a = s["all_fitted"]["area"]
+        a = s["all_fitted"][w]
         out.append(
             f"Across all fitted polygons the median tilt is {a['tilt_median_deg']:.1f}° and "
             f"{_p(a['share_facing_S'])} face south; the difference from the panel-basis "
@@ -92,6 +111,12 @@ def methods_text(s: dict, manifest: dict, area_name: str | None) -> str:
     ring = ("clipped to the building footprint the polygon overlaps where one exists and "
             "left unclipped otherwise" if footprints else
             "not clipped to building footprints, as none were supplied")
+    if s.get("azimuth_reference") == "true_north":
+        north = ("measured clockwise from true north (the grid azimuth corrected by the "
+                 "meridian convergence at each polygon)")
+    else:
+        north = ("measured clockwise from GRID north of the projected coordinate system, "
+                 "which differs from true north by the meridian convergence")
     share = s.get("wide_tolerance_share_of_fitted")
     cap = pp.get("ransac_threshold_max_m")
     wide = ""
@@ -116,7 +141,7 @@ def methods_text(s: dict, manifest: dict, area_name: str | None) -> str:
         f"{pp.get('max_iter', 200)} iterations) and refined by least squares on the inliers; "
         f"a fit was accepted when at least {100 * pp.get('min_inlier_frac', 0.6):.0f}% of "
         f"returns were inliers.{wide} Tilt is the angle of the plane from horizontal and azimuth "
-        f"the compass direction of its downslope normal; azimuth is not reported below "
+        f"the direction of its downslope normal, {north}; azimuth is not reported below "
         f"{pp.get('tilt_floor_deg', 1.0):g}° of tilt. Uncertainties are the standard "
         f"deviation over {pp.get('bootstrap_samples', 50)} bootstrap resamples of the "
         f"inliers. The median point density was {s['point_density_p50']:.1f} returns per m² "

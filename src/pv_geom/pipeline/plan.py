@@ -22,6 +22,7 @@ from pv_geom.io.footprints import read_footprints
 from pv_geom.io.polygons import read_polygons
 from pv_geom.io.storage import RemoteFileMissing, is_remote, list_s3_uris, localize
 from pv_geom.io.tile_index import build_tile_uris, load_tile_index, resolve_tile_id_col
+from pv_geom.io.tile_scan import scan_tile_index
 from pv_geom.pipeline.partition import TileGroup, assign_polygons_to_tiles, build_tile_groups
 from pv_geom.utils.crs import resolve_target_crs
 from pv_geom.vintage import parse_vintage
@@ -41,7 +42,7 @@ class RunInputs:
     """Where a run's inputs are and how to read them."""
 
     polygons_uri: str
-    tile_index_uri: str
+    tile_index_uri: str | None               # None = build the index from tile headers
     lidar_prefix: str
     footprints_uri: str | None = None
     name_template: str = "{name}.laz"
@@ -53,7 +54,7 @@ class RunInputs:
     def as_manifest(self) -> dict[str, str | None]:
         return {
             "polygons": str(self.polygons_uri),
-            "tile_index": str(self.tile_index_uri),
+            "tile_index": str(self.tile_index_uri) if self.tile_index_uri else None,
             "lidar_prefix": str(self.lidar_prefix),
             "footprints": str(self.footprints_uri) if self.footprints_uri else None,
         }
@@ -138,7 +139,10 @@ def build_plan(inputs: RunInputs, cfg: PVGeomConfig) -> Plan:
     """Read the inputs and decide the work."""
     # The tile index is read first: with ``crs.target: auto`` it is what says
     # which CRS the LiDAR — and therefore the whole run — lives in.
-    tindex = load_tile_index(inputs.tile_index_uri)
+    if inputs.tile_index_uri:
+        tindex = load_tile_index(inputs.tile_index_uri)
+    else:
+        tindex = scan_tile_index(inputs.lidar_prefix)
     cfg = cfg.model_copy(deep=True)
     cfg.crs.target = resolve_target_crs(cfg.crs.target, tindex.crs)
     crs = cfg.crs.target

@@ -25,9 +25,9 @@ from pv_geom.config import (
     PVGeomConfig,
 )
 from pv_geom.geometry.heights import (
+    angle_to_roof_deg,
     height_above_ground,
     height_above_roof,
-    panel_roof_angle_deg,
 )
 from pv_geom.geometry.multi_plane import polygon_aspect_ratio
 from pv_geom.geometry.plane_fit import (
@@ -259,7 +259,7 @@ class StandoffScreen:
     def flag(self) -> str | None:
         if not self.screened:
             return "standoff_unscreenable"
-        return None if self.passed else "no_panel_standoff"
+        return None if self.passed else "no_standoff"
 
 
 def open_ground_share(polygon: Any, pts: LocalPoints, cfg: FreeStandingConfig) -> float:
@@ -338,7 +338,7 @@ class Measurement:
     secondary: PlaneFit | None
     roof: RoofPlaneResult
     height_above_roof_m: float
-    panel_roof_angle_deg: float
+    angle_to_roof_deg: float
     height_above_ground_m: float
     screen: StandoffScreen
     lidar_date: date | None
@@ -435,7 +435,7 @@ def measure_polygon(
     )
     if roof.usable and roof.fit is not None:
         har = height_above_roof(inliers, roof.fit) if len(inliers) else NAN
-        angle = panel_roof_angle_deg(fit, roof.fit)
+        angle = angle_to_roof_deg(fit, roof.fit)
     else:
         har, angle = NAN, NAN
 
@@ -462,7 +462,7 @@ def measure_polygon(
         task=task, area_m2=area_m2, aspect_ratio=polygon_aspect_ratio(polygon),
         point_density=density, panel=panel, tilt_unc_deg=tilt_unc, azimuth_unc_deg=az_unc,
         secondary=secondary, segments=segments, roof=roof, height_above_roof_m=har,
-        panel_roof_angle_deg=angle, height_above_ground_m=hag, screen=screen,
+        angle_to_roof_deg=angle, height_above_ground_m=hag, screen=screen,
         open_ground_share=open_share,
         lidar_date=lidar_date, lidar_date_source=lidar_date_source, gap_days=gap_days,
         basis=basis, fit_failure=None if panel.ok else why_no_fit(task, pts, cfg.panel_plane),

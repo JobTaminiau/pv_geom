@@ -344,6 +344,9 @@ before 1.0.
    polygon table (one file, awkward beyond two planes)? Recommendation: second table.
 3. **Column naming (R14).** Rename `panel_*` to something neutral (`surface_*` / `fit_*`)
    before the schema freezes? Recommendation: yes, with aliases for one minor version.
+   *Done 2026-10-08 (owner: "do the column naming pass"):* renamed as recommended; mapping in
+   `pv_geom.schema.RENAMED_COLUMNS` and the CHANGELOG. Old outputs are renamed on read;
+   `load(legacy_names=True)` keeps old code working until 1.0. Schema version 0.6.
 4. **Full reruns (H6).** Go-ahead and budget for Phoenix and Delaware on Coiled, writing to
    `v0.2.0/`-style versioned prefixes.
 5. **License and DOI.** MIT was drafted; Zenodo metadata needs authors, ORCID, funding.

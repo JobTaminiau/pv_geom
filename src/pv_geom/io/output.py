@@ -16,7 +16,15 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from pv_geom.errors import require
-from pv_geom.schema import MEASURED, NO_FIT, SCHEMA_VERSION, is_recommended
+from pv_geom.schema import (
+    MEASURED,
+    NO_FIT,
+    RENAMED_COLUMNS,
+    RENAMED_FLAGS,
+    SCHEMA_VERSION,
+    SEGMENT_TYPE,
+    is_recommended,
+)
 
 
 def geo_metadata(table: pa.Table, crs: str | None) -> bytes:
@@ -109,6 +117,17 @@ def read_output_table(output_uri: str | Path) -> pa.Table:
     ))
 
 
+def relabel_struct_list(column: pa.ChunkedArray, new_type: pa.DataType) -> pa.Array:
+    """A list-of-struct column with its struct fields renamed, by position.
+    (Arrow's own cast matches struct fields by name and would null them.)"""
+    lists = column.combine_chunks()
+    if isinstance(lists, pa.ChunkedArray):                 # zero chunks
+        return pa.array([], new_type)
+    fields = list(new_type.value_type)
+    structs = pa.StructArray.from_arrays(lists.values.flatten(), fields=fields)
+    return pa.ListArray.from_arrays(lists.offsets, structs, mask=lists.is_null())
+
+
 def upgrade_table(table: pa.Table) -> pa.Table:
     """Bring a table written by an older schema version up to the current one.
 
@@ -116,8 +135,21 @@ def upgrade_table(table: pa.Table) -> pa.Table:
     polygons the LiDAR covered, so each is ``measured`` or ``no_fit`` according
     to whether it has a tilt.
     """
-    if "status" not in table.column_names and "panel_tilt_deg" in table.column_names:
-        fitted = table.column("panel_tilt_deg").is_valid()
+    # Schema 0.6 renamed the measured columns (schema.RENAMED_COLUMNS), one
+    # flag, and two fields of the nested facet records.
+    if set(RENAMED_COLUMNS) & set(table.column_names):
+        table = table.rename_columns(
+            [RENAMED_COLUMNS.get(name, name) for name in table.column_names])
+        if "flags" in table.column_names:
+            flags = [None if fl is None else [RENAMED_FLAGS.get(f, f) for f in fl]
+                     for fl in table.column("flags").to_pylist()]
+            table = table.set_column(table.column_names.index("flags"), "flags",
+                                     pa.array(flags, pa.list_(pa.string())))
+        if "facets" in table.column_names and table.schema.field("facets").type != SEGMENT_TYPE:
+            table = table.set_column(table.column_names.index("facets"), "facets",
+                                     relabel_struct_list(table.column("facets"), SEGMENT_TYPE))
+    if "status" not in table.column_names and "tilt_deg" in table.column_names:
+        fitted = table.column("tilt_deg").is_valid()
         status = pa.array([MEASURED if ok else NO_FIT for ok in fitted.to_pylist()], pa.string())
         table = table.append_column("status", status)
     needed = {"status", "geometry_basis", "flags"}

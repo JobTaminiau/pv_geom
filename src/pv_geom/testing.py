@@ -18,24 +18,24 @@ import pandas as pd
 # Tolerances absorb floating-point differences between platforms and BLAS
 # builds, not algorithm changes: a real change moves many rows by far more.
 GOLDEN_TOLERANCES: dict[str, float] = {
-    "panel_tilt_deg": 0.05,
-    "panel_azimuth_deg": 0.25,
-    "panel_rmse_m": 0.002,
-    "panel_fit_tolerance_m": 0.002,
-    "panel_tilt_unc_deg": 0.05,
+    "tilt_deg": 0.05,
+    "azimuth_deg": 0.25,
+    "fit_rmse_m": 0.002,
+    "fit_tolerance_m": 0.002,
+    "tilt_unc_deg": 0.05,
     "roof_tilt_deg": 0.05,
     "height_above_roof_m": 0.005,
     "height_above_ground_m": 0.01,
-    "panel_roof_angle_deg": 0.1,
+    "angle_to_roof_deg": 0.1,
     "surface_area_m2": 0.01,
     # A return sitting exactly on the inlier boundary can fall either side
     # depending on the last bit of a dot product.
-    "n_inliers_panel": 2,
+    "n_inliers": 2,
 }
 
 # Columns that must match exactly.
 GOLDEN_EXACT: tuple[str, ...] = (
-    "geometry_basis", "n_points_panel", "n_planes_detected",
+    "geometry_basis", "n_points", "n_facets",
     "roof_ref_source", "on_building", "lidar_date", "vintage_gap_days", "flags",
 )
 
@@ -79,7 +79,7 @@ def compare_golden(actual: pd.DataFrame, golden: pd.DataFrame) -> list[str]:
         g = pd.to_numeric(golden[col], errors="coerce").to_numpy(dtype=float)
         null_mismatch = np.isnan(a) != np.isnan(g)
         diff = np.abs(a - g)
-        if col == "panel_azimuth_deg":              # 359.9 and 0.1 are 0.2 apart
+        if col == "azimuth_deg":              # 359.9 and 0.1 are 0.2 apart
             diff = np.minimum(diff, 360.0 - diff)
         bad = null_mismatch | (np.nan_to_num(diff, nan=0.0) > tol)
         for i in np.flatnonzero(bad):

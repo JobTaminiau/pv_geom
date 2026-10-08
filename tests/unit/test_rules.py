@@ -62,9 +62,9 @@ def test_conf_nan_input_is_zero() -> None:
 def _features(**overrides) -> MountingFeatures:
     base = dict(
         on_building=True,
-        panel_tilt_deg=5.0,
-        panel_azimuth_deg=180.0,
-        panel_roof_angle_deg=2.0,
+        tilt_deg=5.0,
+        azimuth_deg=180.0,
+        angle_to_roof_deg=2.0,
         height_above_roof_m=0.2,
         height_above_ground_m=4.0,
         area_m2=50.0,
@@ -78,7 +78,7 @@ def _features(**overrides) -> MountingFeatures:
 
 
 def test_R1_flush_mount_pitched_roof() -> None:
-    f = _features(panel_roof_angle_deg=1.0, height_above_roof_m=0.1, roof_tilt_deg=18.0)
+    f = _features(angle_to_roof_deg=1.0, height_above_roof_m=0.1, roof_tilt_deg=18.0)
     r = classify_mounting(f, MountingRulesConfig())
     assert r.label == "flush_mount_pitched_roof"
     assert r.triggered_rule == "R1"
@@ -87,7 +87,7 @@ def test_R1_flush_mount_pitched_roof() -> None:
 
 def test_R1_flush_mount_flat_roof() -> None:
     """Same R1 predicate; roof tilt at/below flat_roof_tilt_deg_max flips the label."""
-    f = _features(panel_roof_angle_deg=1.0, height_above_roof_m=0.1, roof_tilt_deg=2.0)
+    f = _features(angle_to_roof_deg=1.0, height_above_roof_m=0.1, roof_tilt_deg=2.0)
     r = classify_mounting(f, MountingRulesConfig())
     assert r.label == "flush_mount_flat_roof"
     assert r.triggered_rule == "R1"
@@ -110,8 +110,8 @@ def test_R7_east_west_rack_on_flat_roof() -> None:
     f = _features(
         east_west_rack=True,
         roof_tilt_deg=2.0,
-        panel_tilt_deg=10.0,
-        panel_roof_angle_deg=10.0,   # would satisfy R2
+        tilt_deg=10.0,
+        angle_to_roof_deg=10.0,   # would satisfy R2
         height_above_roof_m=0.5,
     )
     r = classify_mounting(f, MountingRulesConfig())
@@ -126,8 +126,8 @@ def test_R7_gable_facet_guard() -> None:
     f = _features(
         east_west_rack=True,
         roof_tilt_deg=20.0,          # pitched -> EW signature is facet bleed
-        panel_tilt_deg=20.0,
-        panel_roof_angle_deg=1.0,    # panel parallel to its facet
+        tilt_deg=20.0,
+        angle_to_roof_deg=1.0,    # panel parallel to its facet
         height_above_roof_m=0.1,
     )
     r = classify_mounting(f, MountingRulesConfig())
@@ -142,9 +142,9 @@ def test_R7_fires_without_roof_plane() -> None:
         east_west_rack=True,
         roof_plane_available=False,
         roof_tilt_deg=None,
-        panel_roof_angle_deg=float("nan"),
+        angle_to_roof_deg=float("nan"),
         height_above_roof_m=float("nan"),
-        panel_tilt_deg=8.0,
+        tilt_deg=8.0,
         height_above_ground_m=5.0,   # would satisfy R2's fallback
     )
     r = classify_mounting(f, MountingRulesConfig())
@@ -155,10 +155,10 @@ def test_R7_fires_without_roof_plane() -> None:
 def test_R8_pole_mount() -> None:
     f = _features(
         on_building=False, roof_plane_available=False,
-        panel_roof_angle_deg=float("nan"), height_above_roof_m=float("nan"),
+        angle_to_roof_deg=float("nan"), height_above_roof_m=float("nan"),
         roof_tilt_deg=None,
         height_above_ground_m=4.0, area_m2=8.0, aspect_ratio=1.2,
-        panel_tilt_deg=25.0,
+        tilt_deg=25.0,
     )
     r = classify_mounting(f, MountingRulesConfig())
     assert r.label == "pole_mount"
@@ -171,10 +171,10 @@ def test_R8_does_not_steal_carports() -> None:
     them long before R3 is consulted."""
     f = _features(
         on_building=False, roof_plane_available=False,
-        panel_roof_angle_deg=float("nan"), height_above_roof_m=float("nan"),
+        angle_to_roof_deg=float("nan"), height_above_roof_m=float("nan"),
         roof_tilt_deg=None,
         height_above_ground_m=3.0, area_m2=60.0, aspect_ratio=4.0,
-        panel_tilt_deg=10.0,
+        tilt_deg=10.0,
     )
     r = classify_mounting(f, MountingRulesConfig())
     assert r.label == "carport"
@@ -183,7 +183,7 @@ def test_R8_does_not_steal_carports() -> None:
 
 def test_R2_tilted_rack_with_roof() -> None:
     f = _features(
-        panel_roof_angle_deg=15.0,   # >> 5 deg, very far past threshold
+        angle_to_roof_deg=15.0,   # >> 5 deg, very far past threshold
         height_above_roof_m=0.5,
     )
     r = classify_mounting(f, MountingRulesConfig())
@@ -195,9 +195,9 @@ def test_R2_tilted_rack_with_roof() -> None:
 def test_R2_tilted_rack_fallback_no_roof() -> None:
     f = _features(
         roof_plane_available=False,
-        panel_roof_angle_deg=float("nan"),
+        angle_to_roof_deg=float("nan"),
         height_above_roof_m=float("nan"),
-        panel_tilt_deg=20.0,
+        tilt_deg=20.0,
         height_above_ground_m=4.0,
     )
     r = classify_mounting(f, MountingRulesConfig())
@@ -208,9 +208,9 @@ def test_R2_tilted_rack_fallback_no_roof() -> None:
 def test_R3_carport() -> None:
     f = _features(
         on_building=False, roof_plane_available=False,
-        panel_roof_angle_deg=float("nan"), height_above_roof_m=float("nan"),
+        angle_to_roof_deg=float("nan"), height_above_roof_m=float("nan"),
         height_above_ground_m=3.0, aspect_ratio=4.0,
-        panel_tilt_deg=10.0,
+        tilt_deg=10.0,
     )
     r = classify_mounting(f, MountingRulesConfig())
     assert r.label == "carport"
@@ -220,9 +220,9 @@ def test_R3_carport() -> None:
 def test_R4_tracker() -> None:
     f = _features(
         on_building=False, roof_plane_available=False,
-        panel_roof_angle_deg=float("nan"), height_above_roof_m=float("nan"),
+        angle_to_roof_deg=float("nan"), height_above_roof_m=float("nan"),
         height_above_ground_m=1.0, aspect_ratio=10.0,
-        panel_tilt_deg=15.0,
+        tilt_deg=15.0,
     )
     r = classify_mounting(f, MountingRulesConfig())
     assert r.label == "ground_mount_tracker_suspected"
@@ -232,9 +232,9 @@ def test_R4_tracker() -> None:
 def test_R5_ground_mount_fixed() -> None:
     f = _features(
         on_building=False, roof_plane_available=False,
-        panel_roof_angle_deg=float("nan"), height_above_roof_m=float("nan"),
+        angle_to_roof_deg=float("nan"), height_above_roof_m=float("nan"),
         height_above_ground_m=1.0, aspect_ratio=2.0,
-        panel_tilt_deg=20.0,
+        tilt_deg=20.0,
     )
     r = classify_mounting(f, MountingRulesConfig())
     assert r.label == "ground_mount_fixed"
@@ -245,8 +245,8 @@ def test_R6_ambiguous_default() -> None:
     """On-building, roof-plane-unavailable, panel-near-horizontal — R1/R2 fail."""
     f = _features(
         on_building=True, roof_plane_available=False,
-        panel_roof_angle_deg=float("nan"), height_above_roof_m=float("nan"),
-        panel_tilt_deg=2.0, height_above_ground_m=2.0,
+        angle_to_roof_deg=float("nan"), height_above_roof_m=float("nan"),
+        tilt_deg=2.0, height_above_ground_m=2.0,
     )
     r = classify_mounting(f, MountingRulesConfig())
     assert r.label == "ambiguous"
@@ -265,10 +265,10 @@ def test_R3_beats_R4_when_both_could_match() -> None:
     but HAG is in carport range (>= 2 m). R3 should fire first."""
     f = _features(
         on_building=False, roof_plane_available=False,
-        panel_roof_angle_deg=float("nan"), height_above_roof_m=float("nan"),
+        angle_to_roof_deg=float("nan"), height_above_roof_m=float("nan"),
         height_above_ground_m=2.5,    # in carport range; R4 needs HAG < 2.0
         aspect_ratio=10.0,
-        panel_tilt_deg=20.0,
+        tilt_deg=20.0,
     )
     r = classify_mounting(f, MountingRulesConfig())
     assert r.triggered_rule == "R3"
@@ -284,7 +284,7 @@ def test_confidence_at_threshold_is_half() -> None:
     """At the threshold exactly, the rule fires with confidence 0.5."""
     cfg = MountingRulesConfig()
     f = _features(
-        panel_roof_angle_deg=cfg.R1.panel_roof_angle_deg_max,   # exactly at threshold
+        angle_to_roof_deg=cfg.R1.angle_to_roof_deg_max,   # exactly at threshold
         height_above_roof_m=0.0,                                # well past threshold
     )
     r = classify_mounting(f, cfg)
@@ -297,9 +297,9 @@ def test_ambiguous_confidence_inverse_of_near_miss() -> None:
     set 1.6 so both fail) — should fall through to R6 with non-zero confidence."""
     cfg = MountingRulesConfig()
     f = _features(
-        panel_roof_angle_deg=6.0,    # R2-leaning angle
+        angle_to_roof_deg=6.0,    # R2-leaning angle
         height_above_roof_m=1.6,     # past both R1 and R2 height caps
-        panel_tilt_deg=2.0,
+        tilt_deg=2.0,
     )
     r = classify_mounting(f, cfg)
     assert r.label == "ambiguous"
@@ -316,7 +316,7 @@ def _off_building(**overrides) -> MountingFeatures:
     base = dict(
         on_building=False,
         roof_plane_available=False,
-        panel_roof_angle_deg=float("nan"),
+        angle_to_roof_deg=float("nan"),
         height_above_roof_m=float("nan"),
         roof_tilt_deg=None,
     )
@@ -329,7 +329,7 @@ def test_nan_hag_off_building_is_ambiguous() -> None:
     coerced to 0.0 upstream, so a canopy with no nearby ground reference fired
     R4/R5 with full margin confidence."""
     f = _off_building(
-        height_above_ground_m=float("nan"), aspect_ratio=4.0, panel_tilt_deg=10.0
+        height_above_ground_m=float("nan"), aspect_ratio=4.0, tilt_deg=10.0
     )
     r = classify_mounting(f, MountingRulesConfig())
     assert r.label == "ambiguous"
@@ -339,7 +339,7 @@ def test_canopy_evidence_rescues_carport_with_nan_hag() -> None:
     """No HAG measurement, but plenty of ground returns under the panels with
     a 3 m gap: the LiDAR canopy signature alone supports carport."""
     f = _off_building(
-        height_above_ground_m=float("nan"), aspect_ratio=4.0, panel_tilt_deg=8.0,
+        height_above_ground_m=float("nan"), aspect_ratio=4.0, tilt_deg=8.0,
         n_ground_under=50, ground_under_gap_m=3.0,
     )
     r = classify_mounting(f, MountingRulesConfig())
@@ -353,7 +353,7 @@ def test_canopy_evidence_overrides_on_building() -> None:
     flush-mount (panel parallel to the 'roof' it IS), but ground returns under
     the panels reroute it to carport."""
     f = _features(
-        panel_roof_angle_deg=1.0, height_above_roof_m=0.1, roof_tilt_deg=2.0,
+        angle_to_roof_deg=1.0, height_above_roof_m=0.1, roof_tilt_deg=2.0,
         aspect_ratio=3.0, height_above_ground_m=3.5,
         n_ground_under=80, ground_under_gap_m=3.5,
     )
@@ -366,7 +366,7 @@ def test_few_under_returns_do_not_reroute_rooftop() -> None:
     """A handful of stray ground returns inside a rooftop polygon (edge
     effects, misclassification) must not trip the canopy detector."""
     f = _features(
-        panel_roof_angle_deg=1.0, height_above_roof_m=0.1,
+        angle_to_roof_deg=1.0, height_above_roof_m=0.1,
         n_ground_under=5, ground_under_gap_m=4.0,
     )
     r = classify_mounting(f, MountingRulesConfig())
@@ -378,7 +378,7 @@ def test_high_hag_off_building_is_ambiguous_not_carport() -> None:
     rooftop whose building is missing from the footprint layer — pre-0.3 this
     was a confident carport."""
     f = _off_building(
-        height_above_ground_m=9.0, aspect_ratio=4.0, panel_tilt_deg=10.0
+        height_above_ground_m=9.0, aspect_ratio=4.0, tilt_deg=10.0
     )
     r = classify_mounting(f, MountingRulesConfig())
     assert r.label == "ambiguous"
@@ -398,7 +398,7 @@ def test_ground_rules_suppressed_by_canopy_evidence() -> None:
     under the panels — trust the direct under-panel signal, never emit
     ground_mount alongside canopy evidence."""
     f = _off_building(
-        height_above_ground_m=0.5, aspect_ratio=5.0, panel_tilt_deg=10.0,
+        height_above_ground_m=0.5, aspect_ratio=5.0, tilt_deg=10.0,
         n_ground_under=40, ground_under_gap_m=2.5,
     )
     r = classify_mounting(f, MountingRulesConfig())
@@ -408,7 +408,7 @@ def test_ground_rules_suppressed_by_canopy_evidence() -> None:
 def test_pole_mount_via_canopy_evidence() -> None:
     f = _off_building(
         height_above_ground_m=float("nan"), area_m2=8.0, aspect_ratio=1.2,
-        panel_tilt_deg=25.0, n_ground_under=30, ground_under_gap_m=3.0,
+        tilt_deg=25.0, n_ground_under=30, ground_under_gap_m=3.0,
     )
     r = classify_mounting(f, MountingRulesConfig())
     assert r.label == "pole_mount"
@@ -431,9 +431,9 @@ def test_classifier_class_can_be_reused() -> None:
     clf = RulesMountingClassifier(MountingRulesConfig())
     f1 = _features()
     f2 = _features(on_building=False, roof_plane_available=False,
-                   panel_roof_angle_deg=float("nan"),
+                   angle_to_roof_deg=float("nan"),
                    height_above_roof_m=float("nan"),
-                   height_above_ground_m=1.0, panel_tilt_deg=20.0)
+                   height_above_ground_m=1.0, tilt_deg=20.0)
     r1 = clf.classify(f1)
     r2 = clf.classify(f2)
     assert r1.triggered_rule == "R1"
@@ -451,40 +451,40 @@ def test_no_panel_standoff_caps_confidence() -> None:
     missing from the point cloud looks like. The label stands; the confidence
     must not."""
     cfg = MountingRulesConfig()
-    clean = _features(panel_roof_angle_deg=0.5, height_above_roof_m=0.10)
+    clean = _features(angle_to_roof_deg=0.5, height_above_roof_m=0.10)
     flat = classify_mounting(clean, cfg)
     assert flat.triggered_rule == "R1"
     assert flat.confidence == pytest.approx(1.0)
 
-    suspect = _features(panel_roof_angle_deg=0.0, height_above_roof_m=0.0,
-                        no_panel_standoff=True)
+    suspect = _features(angle_to_roof_deg=0.0, height_above_roof_m=0.0,
+                        no_standoff=True)
     r = classify_mounting(suspect, cfg)
     assert r.triggered_rule == "R1"
     assert r.label == flat.label                       # same reading of the evidence
-    assert r.confidence == pytest.approx(cfg.no_panel_standoff_confidence_max)
+    assert r.confidence == pytest.approx(cfg.no_standoff_confidence_max)
 
 
 def test_no_panel_standoff_cap_is_configurable_and_never_raises_confidence() -> None:
-    disabled = MountingRulesConfig(no_panel_standoff_confidence_max=1.0)
-    f = _features(panel_roof_angle_deg=0.0, height_above_roof_m=0.0,
-                  no_panel_standoff=True)
+    disabled = MountingRulesConfig(no_standoff_confidence_max=1.0)
+    f = _features(angle_to_roof_deg=0.0, height_above_roof_m=0.0,
+                  no_standoff=True)
     assert classify_mounting(f, disabled).confidence == pytest.approx(1.0)
 
     # A row that was already below the cap keeps its (lower) confidence.
-    low = _features(panel_roof_angle_deg=4.5, height_above_roof_m=0.0,
-                    no_panel_standoff=True)
+    low = _features(angle_to_roof_deg=4.5, height_above_roof_m=0.0,
+                    no_standoff=True)
     cfg = MountingRulesConfig()
-    assert classify_mounting(low, cfg).confidence <= cfg.no_panel_standoff_confidence_max
+    assert classify_mounting(low, cfg).confidence <= cfg.no_standoff_confidence_max
 
 
 def test_no_panel_standoff_does_not_touch_ambiguous() -> None:
     """`ambiguous` confidence means "how far from any rule firing", which the
     standoff says nothing about — capping it would be meaningless."""
     f = _features(on_building=False, roof_plane_available=False,
-                  panel_roof_angle_deg=float("nan"),
+                  angle_to_roof_deg=float("nan"),
                   height_above_roof_m=float("nan"),
                   height_above_ground_m=float("nan"),
-                  panel_tilt_deg=float("nan"), no_panel_standoff=True)
+                  tilt_deg=float("nan"), no_standoff=True)
     r = classify_mounting(f, MountingRulesConfig())
     assert r.label == "ambiguous"
     assert r.confidence == pytest.approx(1.0)

@@ -10,8 +10,8 @@ def test_required_fields_present() -> None:
     required = {
         "polygon_id",
         "geometry",
-        "panel_tilt_deg",
-        "panel_azimuth_deg",
+        "tilt_deg",
+        "azimuth_deg",
         "geometry_basis",
         "polygon_vintage",
         "lidar_date",
@@ -63,11 +63,11 @@ def test_quality_flags_include_no_panel_standoff() -> None:
     an input polygon whose panels postdate the LiDAR (see README)."""
     from pv_geom.schema import QUALITY_FLAGS
 
-    assert "no_panel_standoff" in QUALITY_FLAGS
+    assert "no_standoff" in QUALITY_FLAGS
 
 
 def test_panel_tilt_is_nullable() -> None:
-    assert OUTPUT_SCHEMA.field("panel_tilt_deg").nullable
+    assert OUTPUT_SCHEMA.field("tilt_deg").nullable
 
 
 def test_flags_is_list_of_string() -> None:
@@ -97,7 +97,7 @@ def test_quality_flags_cover_the_standoff_tri_state() -> None:
     indistinguishable from a screened one."""
     from pv_geom.schema import QUALITY_FLAGS
 
-    assert {"no_panel_standoff", "standoff_unscreenable"} <= QUALITY_FLAGS
+    assert {"no_standoff", "standoff_unscreenable"} <= QUALITY_FLAGS
 
 
 def test_roof_failure_flags_are_split() -> None:
@@ -119,3 +119,63 @@ def test_recommended_rule() -> None:
     assert not is_recommended("no_fit", "no_fit", ["poor_fit"])
     assert not is_recommended("measured", "panel_confirmed", ["overlaps_polygon"])
     assert not is_recommended("measured", "panel_confirmed", ["below_min_area"])
+
+
+def test_old_outputs_are_renamed_as_they_are_read(tmp_path) -> None:
+    """Schema 0.6 renamed the measured columns. An output written under the old
+    names must read back under the new ones, facets and flags included."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    import pv_geom
+    from pv_geom.io.output import read_output_table, relabel_struct_list
+    from pv_geom.sample import write_demo
+    from pv_geom.schema import RENAMED_COLUMNS, RENAMED_FLAGS
+
+    run = pv_geom.run(write_demo(tmp_path), use_dask=False)
+    new = read_output_table(run.output)
+    back = {v: k for k, v in RENAMED_COLUMNS.items()}
+    old_facets = pa.list_(pa.struct([
+        pa.field({"facet_index": "segment_index", "fit_rmse_m": "rmse_m"}.get(f.name, f.name),
+                 f.type) for f in new.schema.field("facets").type.value_type]))
+    flag_back = {v: k for k, v in RENAMED_FLAGS.items()}
+    from pathlib import Path
+
+    for part in sorted(Path(run.output).glob("part-*.parquet")):
+        t = pq.read_table(part)
+        t = t.set_column(t.column_names.index("facets"), "facets",
+                         relabel_struct_list(t.column("facets"), old_facets))
+        flags = [[flag_back.get(f, f) for f in fl] for fl in t.column("flags").to_pylist()]
+        t = t.set_column(t.column_names.index("flags"), "flags",
+                         pa.array(flags, pa.list_(pa.string())))
+        t = t.rename_columns([back.get(n, n) for n in t.column_names])
+        assert "panel_tilt_deg" in t.column_names and "segments" in t.column_names
+        pq.write_table(t, part)
+
+    old = read_output_table(run.output)
+    assert old.column_names == new.column_names
+    assert old.column("tilt_deg").to_pylist() == new.column("tilt_deg").to_pylist()
+    assert old.column("facets").to_pylist() == new.column("facets").to_pylist()
+    assert old.column("flags").to_pylist() == new.column("flags").to_pylist()
+    assert not set(RENAMED_COLUMNS) & set(old.column_names)
+
+
+def test_legacy_names_can_be_asked_for(tmp_path) -> None:
+    import pv_geom
+    from pv_geom.sample import write_demo
+    from pv_geom.schema import RENAMED_COLUMNS
+
+    run = pv_geom.run(write_demo(tmp_path), use_dask=False)
+    plain = pv_geom.load(run.output)
+    assert "tilt_deg" in plain.columns and "panel_tilt_deg" not in plain.columns
+    legacy = pv_geom.load(run.output, legacy_names=True)
+    for old, new in RENAMED_COLUMNS.items():
+        assert legacy[old].equals(legacy[new]) or legacy[old].isna().all()
+
+
+def test_no_measured_column_claims_to_be_a_panel() -> None:
+    """The fitted surface is a panel only where geometry_basis says so."""
+    from pv_geom.schema import output_schema
+
+    names = output_schema(False).names
+    assert not [n for n in names if n.startswith("panel_") or n.endswith("_panel")]

@@ -159,13 +159,13 @@ data dictionary CSV is written with every report):
 
 - **Identity** — `polygon_id`, `parent_polygon_id` (the input feature), `input_row` (its row position in the input file — a join key even when the input has no ids), `status`, `geometry`, `area_m2`, `surface_area_m2` (area along the plane), `aspect_ratio`
 - **Vintage** — `polygon_vintage`, `lidar_date`, `lidar_date_source` (`gps_time` / `declared` / `header_date`), `vintage_gap_days` (positive = polygon newer than LiDAR), `geometry_basis`
-- **Plane fit** — `panel_tilt_deg`, `panel_azimuth_deg` (clockwise from **true north**: 0 = N, 180 = S; null below 1° tilt), `grid_convergence_deg`, `panel_rmse_m`, `panel_tilt_unc_deg`, `panel_azimuth_unc_deg`, `panel_fit_tolerance_m`, `fit_failure`, `n_points_panel`, `n_inliers_panel`, `point_density`, `n_planes_detected`, `secondary_tilt_deg`, `secondary_azimuth_deg`
-- **Roof reference** — `roof_ref_source` (`footprint_ring` / `open_ring` / `none`), `roof_tilt_deg`, `roof_azimuth_deg`, `roof_rmse_m`, `panel_roof_angle_deg`, `height_above_roof_m`, `height_above_ground_m`, `on_building`, `building_id`
+- **Plane fit** — `tilt_deg`, `azimuth_deg` (clockwise from **true north**: 0 = N, 180 = S; null below 1° tilt), `grid_convergence_deg`, `fit_rmse_m`, `tilt_unc_deg`, `azimuth_unc_deg`, `fit_tolerance_m`, `fit_failure`, `n_points`, `n_inliers`, `point_density`, `n_facets`, `secondary_tilt_deg`, `secondary_azimuth_deg`
+- **Roof reference** — `roof_ref_source` (`footprint_ring` / `open_ring` / `none`), `roof_tilt_deg`, `roof_azimuth_deg`, `roof_rmse_m`, `angle_to_roof_deg`, `height_above_roof_m`, `height_above_ground_m`, `on_building`, `building_id`
 - **Quality and provenance** — `flags`, `lidar_tile_ids`, `pkg_version`, `config_hash`, `run_id`, `partition_id`
 
 `flags` is a list. Measurement flags: `low_density`, `poor_fit`,
 `near_horizontal`, `wide_tolerance_fit`, `east_west_rack`, `roof_insufficient`,
-`roof_no_consensus`, `roof_complex`, `no_panel_standoff`,
+`roof_no_consensus`, `roof_complex`, `no_standoff`,
 `standoff_unscreenable`. Input-quality flags, set when the polygon layer is
 read: `below_min_area`, `overlaps_polygon` (shares at least 20% of its area
 with another input polygon), `duplicate_geometry`, `geometry_repaired`. Flagged
@@ -230,12 +230,12 @@ mount against measured facet. See [`docs/validation.md`](docs/validation.md).
 ### Choosing rows
 
 Start from `recommended == True`. Polygons covering more than one roof face
-have one row describing the largest face and a `segments` entry per face
-(`pv_geom_segments` in the release dataset).
+have one row describing the largest face and a `facets` entry per face
+(`pv_geom_facets` in the release dataset).
 
 ## How it measures
 
-1. **Panel plane.** LiDAR returns inside the polygon (eroded 15 cm) are fitted
+1. **Fitted plane.** LiDAR returns inside the polygon (eroded 15 cm) are fitted
    with a consensus search: planes through point triples are scored by how many
    returns lie within tolerance, the best distinct candidates are refitted to
    their inliers until nothing changes, and the winner is settled with a smooth
@@ -247,9 +247,9 @@ have one row describing the largest face and a `segments` entry per face
    around the polygon (other PV polygons removed). A *collar guard* refits on
    the band nearest the array when the ring plane does not describe it, which
    stops the fit landing on the facet across a ridge.
-3. **Standoff screen.** If the panel plane sits at least 5 cm above the roof
+3. **Standoff screen.** If the fitted plane sits at least 5 cm above the roof
    plane the row is `panel_confirmed`. Two fits at ~2 cm RMSE cannot resolve
-   less, so below that the row is flagged `no_panel_standoff`; with no usable
+   less, so below that the row is flagged `no_standoff`; with no usable
    roof reference it is `standoff_unscreenable`.
 4. **Geometry basis.** The screen and the two dates combine as in the table
    above.

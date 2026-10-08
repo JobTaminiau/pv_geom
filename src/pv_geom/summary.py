@@ -34,7 +34,7 @@ def summarise_table(table: pa.Table) -> dict:
             str(k): int(v) for k, v in df["fit_failure"].dropna().value_counts().items()
         }
 
-    fitted = df["panel_tilt_deg"].notna()
+    fitted = df["tilt_deg"].notna()
     out["fitted"] = int(fitted.sum())
     out["fit_rate"] = float(fitted.mean()) if n else 0.0
 
@@ -46,12 +46,12 @@ def summarise_table(table: pa.Table) -> dict:
             float(panel.sum() / fitted.sum()) if fitted.sum() else None
         )
 
-    tilt = df.loc[fitted, "panel_tilt_deg"]
+    tilt = df.loc[fitted, "tilt_deg"]
     if len(tilt):
-        out["panel_tilt_deg"] = {
+        out["tilt_deg"] = {
             f"p{q}": float(np.percentile(tilt, q)) for q in (10, 25, 50, 75, 90)
         }
-    az = df["panel_azimuth_deg"].dropna()
+    az = df["azimuth_deg"].dropna()
     if len(az):
         quadrant = np.bincount(sector_index(az, 4), minlength=4)
         out["azimuth_quadrant_counts"] = {
@@ -72,10 +72,10 @@ def summarise_table(table: pa.Table) -> dict:
             out["mounting_confidence_p50"] = float(confidences.median())
             out["mounting_confidence_p10"] = float(confidences.quantile(0.10))
 
-    rmses = df["panel_rmse_m"].dropna()
+    rmses = df["fit_rmse_m"].dropna()
     if len(rmses):
-        out["panel_rmse_p50"] = float(rmses.median())
-        out["panel_rmse_p90"] = float(rmses.quantile(0.90))
+        out["fit_rmse_p50"] = float(rmses.median())
+        out["fit_rmse_p90"] = float(rmses.quantile(0.90))
     flag_counts: dict[str, int] = {}
     flag_sets: list[set] = []
     for flags in df["flags"]:
@@ -88,14 +88,14 @@ def summarise_table(table: pa.Table) -> dict:
 
     # Panel-standoff screen: how many rows could be tested for panels being
     # physically above the roof, and how many passed.
-    failed = pd.Series([("no_panel_standoff" in s) for s in flag_sets], index=df.index)
+    failed = pd.Series([("no_standoff" in s) for s in flag_sets], index=df.index)
     unscreenable = pd.Series([("standoff_unscreenable" in s) for s in flag_sets], index=df.index)
     state = pd.Series("passed", index=df.index)
-    state[failed] = "no_panel_standoff"
+    state[failed] = "no_standoff"
     state[unscreenable] = "unscreenable"
     out["standoff_screen"] = {
         "passed": int((state == "passed").sum()),
-        "no_panel_standoff": int(failed.sum()),
+        "no_standoff": int(failed.sum()),
         "unscreenable": int(unscreenable.sum()),
         "screened_frac": float((~unscreenable).mean()) if n else 0.0,
         "failed_frac_of_screened": (

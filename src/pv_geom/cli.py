@@ -306,14 +306,14 @@ def describe_output(output_uri: str = typer.Argument(...)) -> None:
             console.print(f"  status {status:20s} {n:>9,}")
     for basis, n in stats.get("geometry_basis_counts", {}).items():
         console.print(f"  basis  {basis:20s} {n:>9,}")
-    if "panel_tilt_deg" in stats:
-        t = stats["panel_tilt_deg"]
+    if "tilt_deg" in stats:
+        t = stats["tilt_deg"]
         console.print(f"tilt p10/p50/p90: {t['p10']:.1f} / {t['p50']:.1f} / {t['p90']:.1f} deg")
     if "azimuth_quadrant_counts" in stats:
         console.print(f"azimuth quadrants: {stats['azimuth_quadrant_counts']}")
-    if "panel_rmse_p50" in stats:
-        console.print(f"panel RMSE p50/p90: {stats['panel_rmse_p50'] * 100:.1f} / "
-                      f"{stats['panel_rmse_p90'] * 100:.1f} cm")
+    if "fit_rmse_p50" in stats:
+        console.print(f"fit RMSE p50/p90: {stats['fit_rmse_p50'] * 100:.1f} / "
+                      f"{stats['fit_rmse_p90'] * 100:.1f} cm")
 
 
 @app.command("compare-reference")

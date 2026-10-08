@@ -96,7 +96,7 @@ several metres on tall buildings.
   reference is independent of both.
 - Polygon vintage is set to the LiDAR date, so rows are `panel_by_vintage`
   unless the standoff test confirms them. The roofs and ground tables here
-  have no separate roof plane beneath the modules, so `no_panel_standoff` is
+  have no separate roof plane beneath the modules, so `no_standoff` is
   expected.
 - Summary statistics in `validation_summary.json` pool every scored facet,
   including the doubtful references above. Use the table in this file.

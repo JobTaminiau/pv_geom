@@ -125,21 +125,21 @@ def test_failed_primary_skips() -> None:
 def test_tracker_clear_yes() -> None:
     assert is_tracker_suspected(
         on_building=False, aspect_ratio=8.0,
-        height_above_ground_m=1.0, panel_tilt_deg=20.0,
+        height_above_ground_m=1.0, tilt_deg=20.0,
     ) is True
 
 
 def test_tracker_on_building_is_no() -> None:
     assert is_tracker_suspected(
         on_building=True, aspect_ratio=8.0,
-        height_above_ground_m=1.0, panel_tilt_deg=20.0,
+        height_above_ground_m=1.0, tilt_deg=20.0,
     ) is False
 
 
 def test_tracker_too_short_is_no() -> None:
     assert is_tracker_suspected(
         on_building=False, aspect_ratio=2.0,
-        height_above_ground_m=1.0, panel_tilt_deg=20.0,
+        height_above_ground_m=1.0, tilt_deg=20.0,
     ) is False
 
 
@@ -147,7 +147,7 @@ def test_tracker_too_high_is_no() -> None:
     """High height-above-ground → carport-like, not tracker."""
     assert is_tracker_suspected(
         on_building=False, aspect_ratio=8.0,
-        height_above_ground_m=3.0, panel_tilt_deg=20.0,
+        height_above_ground_m=3.0, tilt_deg=20.0,
     ) is False
 
 
@@ -155,12 +155,12 @@ def test_tracker_high_tilt_is_no() -> None:
     """A 60 deg tilt isn't physically tracker-like."""
     assert is_tracker_suspected(
         on_building=False, aspect_ratio=8.0,
-        height_above_ground_m=1.0, panel_tilt_deg=60.0,
+        height_above_ground_m=1.0, tilt_deg=60.0,
     ) is False
 
 
 def test_tracker_nan_returns_false() -> None:
     assert is_tracker_suspected(
         on_building=False, aspect_ratio=float("nan"),
-        height_above_ground_m=1.0, panel_tilt_deg=20.0,
+        height_above_ground_m=1.0, tilt_deg=20.0,
     ) is False

@@ -2,6 +2,8 @@
 
 PRD: `docs/pv_geom_PRD.md` (v0.1, 2026-05-01). Changes by version: `CHANGELOG.md`. **Road to 1.0: `docs/pv_geom_v1_spec.md`** (user stories, refactoring pass, milestones, open decisions).
 
+**2026-10-08 — COLUMN NAMING PASS (R14) DONE (branch `v0.6-naming`).** Measured columns no longer say `panel_`: `tilt_deg`, `azimuth_deg`, `fit_rmse_m`, `n_points`, `n_facets`, `facets`, flag `no_standoff` (full table in `CHANGELOG.md`). Old outputs are renamed on read; `pv_geom.load(..., legacy_names=True)` for old code until 1.0. Schema 0.6, package 0.6.0.dev0. The schema is not yet frozen: that waits for the third study area and the full runs.
+
 **2026-10-07 — MILESTONE 0.5 "MEASUREMENT DEPTH" MOSTLY DONE (branch `v0.5-depth`, stacked on `v0.4-usability`).** Detail: spec section 10 and `CHANGELOG.md`.
 
 - **Phoenix uses the dissolved detection layer** (owner decision).

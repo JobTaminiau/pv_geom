@@ -115,7 +115,7 @@ def test_row_bare_roof_is_unresolved_when_polygons_are_newer() -> None:
     """The motivating case: imagery after the LiDAR, no panel in the cloud."""
     row = _row(0.0, polygon_vintage=date(2024, 4, 1), lidar_date=date(2020, 11, 28))
     assert row["geometry_basis"] == SURFACE_UNRESOLVED
-    assert "no_panel_standoff" in row["flags"]
+    assert "no_standoff" in row["flags"]
 
 
 def test_row_flush_array_credited_when_lidar_is_newer() -> None:
@@ -139,7 +139,7 @@ def test_row_has_no_mounting_columns_by_default() -> None:
 
 def test_row_surface_area_exceeds_plan_area_by_cos_tilt() -> None:
     row = _row(0.10)
-    expected = row["area_m2"] / np.cos(np.radians(row["panel_tilt_deg"]))
+    expected = row["area_m2"] / np.cos(np.radians(row["tilt_deg"]))
     assert row["surface_area_m2"] == pytest.approx(expected, rel=1e-5)
 
 
@@ -307,7 +307,7 @@ def test_runs_on_polygons_and_lidar_alone(two_input_run: dict) -> None:
     assert row["lidar_date"] == date(2023, 3, 31)
     assert row["lidar_date_source"] == "declared"
     assert row["vintage_gap_days"] == 641
-    assert row["panel_tilt_deg"] == pytest.approx(20.0, abs=1.0)
+    assert row["tilt_deg"] == pytest.approx(20.0, abs=1.0)
     assert row["geometry_basis"] == PANEL_CONFIRMED       # 0.5 m above the roof
 
     manifest = json.loads(Path(manifest_path).read_text())
@@ -391,7 +391,7 @@ def _noisy_array_row(noise_m: float, cfg: PVGeomConfig | None = None):
 
 def test_clean_returns_fit_at_the_base_tolerance() -> None:
     row = _noisy_array_row(0.02)
-    assert row["panel_fit_tolerance_m"] == pytest.approx(0.05)
+    assert row["fit_tolerance_m"] == pytest.approx(0.05)
     assert "wide_tolerance_fit" not in row["flags"]
 
 
@@ -399,16 +399,16 @@ def test_noisy_returns_are_fitted_at_a_wider_tolerance() -> None:
     """Delaware-like scatter (~7.5 cm): no consensus at 5 cm, but the plane is
     real and the tilt is recoverable — flagged, with the tolerance recorded."""
     row = _noisy_array_row(0.075)
-    assert row["panel_tilt_deg"] == pytest.approx(30.0, abs=1.5)
+    assert row["tilt_deg"] == pytest.approx(30.0, abs=1.5)
     assert "wide_tolerance_fit" in row["flags"] and "poor_fit" not in row["flags"]
-    assert 0.05 < row["panel_fit_tolerance_m"] <= 0.15
+    assert 0.05 < row["fit_tolerance_m"] <= 0.15
 
 
 def test_adaptive_tolerance_can_be_disabled() -> None:
     cfg = PVGeomConfig()
     cfg.panel_plane.ransac_threshold_max_m = cfg.panel_plane.ransac_threshold_m
     row = _noisy_array_row(0.075, cfg)
-    assert row["panel_tilt_deg"] is None and "poor_fit" in row["flags"]
+    assert row["tilt_deg"] is None and "poor_fit" in row["flags"]
 
 
 def test_scatter_beyond_the_cap_still_fails() -> None:

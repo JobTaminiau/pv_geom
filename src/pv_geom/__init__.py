@@ -7,7 +7,7 @@
     result.report()
 """
 
-__version__ = "0.5.0.dev0"
+__version__ = "0.6.0.dev0"
 
 __all__ = ["RunResult", "__version__", "compare_reference", "compare_runs", "describe",
            "load", "report", "run"]

@@ -56,7 +56,7 @@ def comparison_table(runs: list[tuple[str, pd.DataFrame, dict]], stratum: str,
             "n_polygons": len(df), "share_measured": float(df["fitted"].mean()),
             "share_panel_basis": float(stats.stratum_mask(df, "panel").mean()),
             "share_unscreened": float(basis.get("unscreened", 0.0)),
-            "share_multi_facet": (float((fitted["n_planes_detected"] > 1).mean())
+            "share_multi_facet": (float((fitted["n_facets"] > 1).mean())
                                   if len(fitted) else np.nan),
             "stratum": stratum, "weight": weight, "n": int(s["n"]),
             "area_m2": float(s["area_m2"]),

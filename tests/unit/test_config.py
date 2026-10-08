@@ -24,7 +24,7 @@ def test_default_values() -> None:
     assert cfg.panel_plane.tilt_floor_deg == 1.0
     assert cfg.crs.target == "auto"
     assert cfg.mounting_rules.enabled is False          # archived in 0.2.0
-    assert cfg.mounting_rules.R1.panel_roof_angle_deg_max == 5.0
+    assert cfg.mounting_rules.R1.angle_to_roof_deg_max == 5.0
     # Spike-derived overrides
     assert cfg.panel_plane.min_density_pts_per_m2 == 3
     assert cfg.panel_plane.min_points == 30

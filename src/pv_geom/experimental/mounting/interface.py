@@ -9,9 +9,9 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class MountingFeatures:
     on_building: bool
-    panel_tilt_deg: float
-    panel_azimuth_deg: float
-    panel_roof_angle_deg: float | None     # None / NaN if no roof plane
+    tilt_deg: float
+    azimuth_deg: float
+    angle_to_roof_deg: float | None     # None / NaN if no roof plane
     height_above_roof_m: float | None
     height_above_ground_m: float
     area_m2: float
@@ -25,7 +25,7 @@ class MountingFeatures:
     # flush mount or — the case this exists for — an array absent from the point
     # cloud, so the "panel" plane IS the roof. Both make every panel-vs-roof
     # feature above uninformative, so the classifier caps its confidence.
-    no_panel_standoff: bool = False
+    no_standoff: bool = False
 
 
 @dataclass(frozen=True)

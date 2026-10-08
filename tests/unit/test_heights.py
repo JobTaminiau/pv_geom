@@ -8,9 +8,9 @@ from shapely.geometry import box
 
 from pv_geom.experimental.mounting.features import ground_under_polygon
 from pv_geom.geometry.heights import (
+    angle_to_roof_deg,
     height_above_ground,
     height_above_roof,
-    panel_roof_angle_deg,
 )
 from pv_geom.geometry.plane_fit import PlaneFit
 
@@ -186,7 +186,7 @@ def test_hrooffailed_fit_returns_nan() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# panel_roof_angle_deg
+# angle_to_roof_deg
 # --------------------------------------------------------------------------- #
 
 
@@ -195,7 +195,7 @@ def test_panel_roof_angle_zero_when_aligned() -> None:
     n /= np.linalg.norm(n)
     f = _fit(normal=n, tilt=10.0, az=180.0)
     g = _fit(normal=n, tilt=10.0, az=180.0)
-    assert panel_roof_angle_deg(f, g) == pytest.approx(0.0, abs=1e-6)
+    assert angle_to_roof_deg(f, g) == pytest.approx(0.0, abs=1e-6)
 
 
 def test_panel_roof_angle_known() -> None:
@@ -205,11 +205,11 @@ def test_panel_roof_angle_known() -> None:
     n_tilt = np.array([0.0, np.sin(t), np.cos(t)])
     f = _fit(normal=n_flat, tilt=0.0, az=float("nan"))
     g = _fit(normal=n_tilt, tilt=30.0, az=180.0)
-    assert panel_roof_angle_deg(f, g) == pytest.approx(30.0, abs=1e-6)
+    assert angle_to_roof_deg(f, g) == pytest.approx(30.0, abs=1e-6)
 
 
 def test_panel_roof_anglefailed_fit_is_nan() -> None:
     f = _fit(normal=np.array([0.0, 0.0, 1.0]), n_inliers=100)
     bad = _fit(normal=np.array([0.0, 0.0, 1.0]), n_inliers=0, tilt=float("nan"))
-    assert np.isnan(panel_roof_angle_deg(f, bad))
-    assert np.isnan(panel_roof_angle_deg(bad, f))
+    assert np.isnan(angle_to_roof_deg(f, bad))
+    assert np.isnan(angle_to_roof_deg(bad, f))

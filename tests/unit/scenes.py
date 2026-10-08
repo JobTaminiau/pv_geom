@@ -24,7 +24,7 @@ def write_synthetic_laz(
     *,
     tile_extent: tuple[float, float, float, float] = (0.0, 0.0, 100.0, 100.0),
     panel_extent: tuple[float, float, float, float] = (40.0, 40.0, 50.0, 50.0),
-    panel_tilt_deg: float = 20.0,
+    tilt_deg: float = 20.0,
     panel_az_deg: float = 180.0,
     roof_z0: float = 5.0,
     panel_z0: float = 5.5,
@@ -67,7 +67,7 @@ def write_synthetic_laz(
     r_z = _plane_z(r_xy, 5.0, 180.0, roof_z0, (bcx, bcy)) + rng.normal(0, 0.01, n_roof)
     roof = np.column_stack([r_xy, r_z, np.full(n_roof, 6)])
 
-    # Panel (class 6) above the roof; tilted at panel_tilt_deg facing panel_az_deg
+    # Panel (class 6) above the roof; tilted at tilt_deg facing panel_az_deg
     n_panel = 800
     pcx, pcy = (panel_extent[0] + panel_extent[2]) / 2, (panel_extent[1] + panel_extent[3]) / 2
     p_xy = rng.uniform(
@@ -75,7 +75,7 @@ def write_synthetic_laz(
         [panel_extent[2], panel_extent[3]],
         size=(n_panel, 2),
     )
-    p_z = _plane_z(p_xy, panel_tilt_deg, panel_az_deg, panel_z0, (pcx, pcy)) + rng.normal(0, 0.01, n_panel)
+    p_z = _plane_z(p_xy, tilt_deg, panel_az_deg, panel_z0, (pcx, pcy)) + rng.normal(0, 0.01, n_panel)
     panel = np.column_stack([p_xy, p_z, np.full(n_panel, 6)])
 
     pts = np.concatenate([ground, roof, panel])

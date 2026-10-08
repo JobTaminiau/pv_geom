@@ -7,7 +7,7 @@ comparison shows. Four things make that harder than a subtraction:
 
 **A reference describes a mount, a measurement describes a facet.** A system can
 have several mounts and the record may list one. Every facet (see the
-``segments`` column) of every polygon matched to the system is therefore
+``facets`` column) of every polygon matched to the system is therefore
 compared, and the result is the *share of measured area* the reference
 describes — not the error of whichever facet happens to agree best. Choosing
 the facet by agreement would manufacture accuracy.
@@ -163,13 +163,13 @@ def circular_difference_deg(a: float, b: float) -> float:
 def _facets_of(row: Any) -> list[dict[str, Any]]:
     """The facets of one measured polygon; the primary plane alone for output
     written before the ``segments`` column existed."""
-    segs = getattr(row, "segments", None)
+    segs = getattr(row, "facets", None)
     if segs is not None and len(segs):
         return [dict(s) for s in segs]
-    if pd.isna(row.panel_tilt_deg):
+    if pd.isna(row.tilt_deg):
         return []
-    return [{"segment_index": 0, "area_m2": row.area_m2, "tilt_deg": row.panel_tilt_deg,
-             "azimuth_deg": row.panel_azimuth_deg}]
+    return [{"facet_index": 0, "area_m2": row.area_m2, "tilt_deg": row.tilt_deg,
+             "azimuth_deg": row.azimuth_deg}]
 
 
 def _beyond(error: float, resolution: float) -> float:
@@ -221,7 +221,7 @@ def compare_to_reference(
                          if az_comparable else None)
                 own.append({
                     "reference_id": ref.reference_id, "polygon_id": str(r.polygon_id),
-                    "segment_index": int(seg["segment_index"]),
+                    "facet_index": int(seg["facet_index"]),
                     "area_m2": float(seg["area_m2"]),
                     "geometry_basis": getattr(r, "geometry_basis", None),
                     "lidar_date": getattr(r, "lidar_date", None),

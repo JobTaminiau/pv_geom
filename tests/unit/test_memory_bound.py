@@ -15,9 +15,9 @@ from pv_geom.pipeline import pointpool
 from pv_geom.pipeline.pointpool import GroupOverBudget, budget_points, load_group_points
 from pv_geom.sample import write_demo, write_scene
 
-_COMPARE = ["polygon_id", "status", "geometry_basis", "panel_tilt_deg", "panel_azimuth_deg",
-            "panel_rmse_m", "n_points_panel", "n_inliers_panel", "roof_tilt_deg",
-            "height_above_roof_m", "height_above_ground_m", "lidar_date", "n_planes_detected"]
+_COMPARE = ["polygon_id", "status", "geometry_basis", "tilt_deg", "azimuth_deg",
+            "fit_rmse_m", "n_points", "n_inliers", "roof_tilt_deg",
+            "height_above_roof_m", "height_above_ground_m", "lidar_date", "n_facets"]
 
 
 def test_a_tile_read_in_chunks_is_the_same_tile(tmp_path: Path) -> None:

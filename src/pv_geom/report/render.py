@@ -29,7 +29,7 @@ SECTIONS = [
      "A polygon can cover more than one roof face. Each distinct plane in it is a "
      "facet with its own tilt and azimuth; the figures and tables below describe each "
      "polygon by its primary (largest) facet, and the release dataset carries every "
-     "facet in pv_geom_segments."),
+     "facet in pv_geom_facets."),
     ("Array geometry", ["geometry_overview"], ["summary_statistics"],
      "Statistics are for {unit}; every stratum under both weightings is in "
      "tables/summary_statistics.csv. Brackets give 95% bootstrap intervals over "

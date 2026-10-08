@@ -24,7 +24,7 @@ Panel standoff (0.4.0): when the panel plane is not resolvably above the roof
 plane, every panel-vs-roof feature is uninformative — the row is equally
 consistent with a low-profile flush mount and with an array that was not in the
 point cloud at all. The label still stands, but its confidence is capped at
-``no_panel_standoff_confidence_max``.
+``no_standoff_confidence_max``.
 """
 
 from __future__ import annotations
@@ -102,8 +102,8 @@ class RulesMountingClassifier(MountingClassifier):
         # the label survives but cannot be mistaken for strong evidence.
         # `ambiguous` is exempt: its confidence measures how far the row was
         # from any rule firing, which the standoff tells us nothing about.
-        if f.no_panel_standoff and result.label != "ambiguous":
-            capped = min(result.confidence, self.cfg.no_panel_standoff_confidence_max)
+        if f.no_standoff and result.label != "ambiguous":
+            capped = min(result.confidence, self.cfg.no_standoff_confidence_max)
             if capped != result.confidence:
                 return MountingResult(result.label, float(capped), result.triggered_rule)
         return result
@@ -138,7 +138,7 @@ class RulesMountingClassifier(MountingClassifier):
         # ------------------------------------------------------------------
         if rooftop_context and f.east_west_rack:
             r = cfg.R7
-            c = _conf_le(f.panel_tilt_deg, r.tilt_deg_max, m)
+            c = _conf_le(f.tilt_deg, r.tilt_deg_max, m)
             if f.roof_plane_available:
                 c = min(c, _conf_le(f.roof_tilt_deg, cfg.flat_roof_tilt_deg_max, m))
             if c >= 0.5:
@@ -153,7 +153,7 @@ class RulesMountingClassifier(MountingClassifier):
         if rooftop_context and f.roof_plane_available:
             r = cfg.R1
             c = min(
-                _conf_le(f.panel_roof_angle_deg, r.panel_roof_angle_deg_max, m),
+                _conf_le(f.angle_to_roof_deg, r.angle_to_roof_deg_max, m),
                 _conf_le(f.height_above_roof_m, r.height_above_roof_m_max, m),
             )
             if c >= 0.5:
@@ -173,12 +173,12 @@ class RulesMountingClassifier(MountingClassifier):
             c_with = c_without = 0.0
             if f.roof_plane_available:
                 c_with = min(
-                    _conf_ge(f.panel_roof_angle_deg, r.panel_roof_angle_deg_min, m),
+                    _conf_ge(f.angle_to_roof_deg, r.angle_to_roof_deg_min, m),
                     _conf_le(f.height_above_roof_m, r.height_above_roof_m_max, m),
                 )
             else:
                 c_without = min(
-                    _conf_ge(f.panel_tilt_deg, r.fallback_tilt_deg_min, m),
+                    _conf_ge(f.tilt_deg, r.fallback_tilt_deg_min, m),
                     _conf_ge(f.height_above_ground_m, r.fallback_height_above_ground_m_min, m),
                 )
             c = max(c_with, c_without)
@@ -236,7 +236,7 @@ class RulesMountingClassifier(MountingClassifier):
             c = min(
                 _conf_le(f.height_above_ground_m, r.height_above_ground_m_max, m),
                 _conf_ge(f.aspect_ratio, r.aspect_ratio_min, m),
-                _conf_le(f.panel_tilt_deg, r.tilt_deg_max, m),
+                _conf_le(f.tilt_deg, r.tilt_deg_max, m),
             )
             if c >= 0.5:
                 return MountingResult("ground_mount_tracker_suspected", c, "R4")
@@ -249,7 +249,7 @@ class RulesMountingClassifier(MountingClassifier):
             r = cfg.R5
             c = min(
                 _conf_le(f.height_above_ground_m, r.height_above_ground_m_max, m),
-                _conf_ge(f.panel_tilt_deg, r.tilt_deg_min, m),
+                _conf_ge(f.tilt_deg, r.tilt_deg_min, m),
             )
             if c >= 0.5:
                 return MountingResult("ground_mount_fixed", c, "R5")

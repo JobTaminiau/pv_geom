@@ -164,8 +164,8 @@ def test_every_input_polygon_gets_exactly_one_row(mixed_area: dict) -> None:
     for name in ("tile_gone", "tile_corrupt", "far_away"):
         r = rows[name]
         assert r["geometry"] is not None and r["area_m2"] == pytest.approx(100.0)
-        assert r["geometry_basis"] == NOT_MEASURED and r["panel_tilt_deg"] is None
-        assert r["n_points_panel"] is None and r["partition_id"] == -1
+        assert r["geometry_basis"] == NOT_MEASURED and r["tilt_deg"] is None
+        assert r["n_points"] is None and r["partition_id"] == -1
     assert rows["blank"]["geometry"] is None and rows["blank"]["area_m2"] is None
     assert [r["input_row"] for r in rows.values()].count(5) == 1     # still joins to the input
 
@@ -236,7 +236,7 @@ def test_pre_0_3_output_is_upgraded_on_read(tmp_path: Path) -> None:
 
     from pv_geom.io.output import upgrade_table
 
-    old = pa.table({"polygon_id": ["a", "b"], "panel_tilt_deg": [12.0, None]})
+    old = pa.table({"polygon_id": ["a", "b"], "tilt_deg": [12.0, None]})
     assert upgrade_table(old).column("status").to_pylist() == ["measured", "no_fit"]
 
 

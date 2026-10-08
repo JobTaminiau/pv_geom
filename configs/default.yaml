@@ -75,7 +75,7 @@ heights:
   ground_fallback_k: 50          # k-nearest ground fallback when the disk is empty
   ground_fallback_max_radius_m: 100.0   # (large commercial roofs; 0 disables)
   min_panel_standoff_m: 0.05     # below this the panel plane is not resolvably above the
-                                 # roof -> `no_panel_standoff`; at or above it the row is
+                                 # roof -> `no_standoff`; at or above it the row is
                                  # geometry_basis = panel_confirmed
 
 free_standing:                   # presence evidence for ground mounts and canopies, which
@@ -105,8 +105,8 @@ mounting_rules:
                                  # 5% and pole-mount at 0%. Off by default; enabling adds the
                                  # experimental mounting_* columns. Thresholds below are
                                  # uncalibrated.
-  R1: { panel_roof_angle_deg_max: 5.0, height_above_roof_m_max: 0.5 }
-  R2: { panel_roof_angle_deg_min: 5.0, height_above_roof_m_max: 1.5,
+  R1: { angle_to_roof_deg_max: 5.0, height_above_roof_m_max: 0.5 }
+  R2: { angle_to_roof_deg_min: 5.0, height_above_roof_m_max: 1.5,
         fallback_tilt_deg_min: 5.0, fallback_height_above_ground_m_min: 2.5 }
   R3: { height_above_ground_m_min: 2.0, aspect_ratio_min: 2.0,
         height_above_ground_m_max: 6.0 }   # cap: taller = likely missing-footprint rooftop
@@ -120,8 +120,8 @@ mounting_rules:
   canopy_min_ground_points_under: 15   # ground returns inside the polygon +
   canopy_gap_m_min: 2.0                #   multi-metre gap = open-sided canopy signature
   missing_footprint_hag_m: 6.0   # off-building above this w/o canopy evidence -> flag
-  no_panel_standoff_confidence_max: 0.5   # confidence ceiling for a labelled row carrying
-                                          # `no_panel_standoff`: it satisfies R1 maximally
+  no_standoff_confidence_max: 0.5   # confidence ceiling for a labelled row carrying
+                                          # `no_standoff`: it satisfies R1 maximally
                                           # while being exactly what an array missing from
                                           # the cloud looks like. 1.0 disables.
 

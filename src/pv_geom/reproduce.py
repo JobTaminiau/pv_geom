@@ -94,8 +94,7 @@ def column_digests(table: pa.Table) -> dict[str, str]:
     frame = table.to_pandas().sort_values("polygon_id", kind="stable")
     out = {}
     for name in sorted(frame.columns):
-        text = "
-".join(frame[name].map(_canonical))
+        text = chr(10).join(frame[name].map(_canonical))
         out[name] = hashlib.sha256(text.encode()).hexdigest()[:16]
     return out
 

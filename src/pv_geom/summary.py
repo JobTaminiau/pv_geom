@@ -12,7 +12,7 @@ import pyarrow as pa
 
 from pv_geom.report.stats import QUADRANTS, sector_index
 from pv_geom.schema import STATUSES
-from pv_geom.vintage import GEOMETRY_BASIS, PANEL_BASES
+from pv_geom.vintage import ARRAY_BASES, GEOMETRY_BASIS
 
 
 def summarise_table(table: pa.Table) -> dict:
@@ -41,7 +41,7 @@ def summarise_table(table: pa.Table) -> dict:
     if "geometry_basis" in df.columns:
         counts = df["geometry_basis"].value_counts()
         out["geometry_basis_counts"] = {b: int(counts.get(b, 0)) for b in GEOMETRY_BASIS}
-        panel = df["geometry_basis"].isin(PANEL_BASES)
+        panel = df["geometry_basis"].isin(ARRAY_BASES)
         out["panel_basis_frac_of_fitted"] = (
             float(panel.sum() / fitted.sum()) if fitted.sum() else None
         )

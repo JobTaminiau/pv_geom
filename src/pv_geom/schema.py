@@ -37,7 +37,7 @@ SEGMENT_TYPE = pa.list_(pa.struct([pa.field(n, t) for n, t, _, _ in SEGMENT_FIEL
 
 # The `recommended` column. Provisional until the accuracy work (spec Epic A)
 # says whether wide-tolerance fits and unresolved surfaces belong in or out.
-RECOMMENDED_BASES = frozenset({"panel_confirmed", "panel_by_vintage"})
+RECOMMENDED_BASES = frozenset({"panel_confirmed", "panel_by_vintage", "free_standing"})
 RECOMMENDED_EXCLUDING_FLAGS = frozenset({
     "low_density", "below_min_area", "overlaps_polygon", "duplicate_geometry",
     "envelope_fit",
@@ -100,7 +100,7 @@ _CORE_FIELDS: list[pa.Field] = [
             "newer than the LiDAR, so the installation may be absent from it."),
     _f("recommended", pa.bool_(), nullable=False,
        desc="True for rows suggested for analysis of array geometry: measured, on a panel "
-            "basis (panel_confirmed or panel_by_vintage) and free of the flags that mark an "
+            "basis (panel_confirmed, panel_by_vintage or free_standing) and free of the flags that mark an "
             "unreliable or double-counted row. PROVISIONAL rule, to be fixed once accuracy "
             "is validated; see RECOMMENDED_RULE in the dataset metadata."),
     _f("geometry_basis", pa.string(), nullable=False,
@@ -131,6 +131,12 @@ _CORE_FIELDS: list[pa.Field] = [
     _f("panel_fit_tolerance_m", pa.float32(), unit="m",
        desc="RANSAC inlier distance the accepted fit used. Larger than the "
             "configured base when the returns were too noisy for it."),
+    _f("panel_rival_share", pa.float32(),
+       desc="Support for the strongest different plane found in the same returns, as a "
+            "share of the fitted plane's inliers. Near 1 means two planes fit about "
+            "equally well and the reported one is a fragile choice. Null if none was found."),
+    _f("panel_rival_angle_deg", pa.float32(), unit="deg",
+       desc="Angle between the fitted plane and that rival plane."),
     _f("panel_tilt_unc_deg", pa.float32(), unit="deg",
        desc="Bootstrap 1-sigma uncertainty of the tilt."),
     _f("panel_azimuth_unc_deg", pa.float32(), unit="deg",
@@ -151,6 +157,10 @@ _CORE_FIELDS: list[pa.Field] = [
     _f("roof_ref_source", pa.string(), nullable=False,
        desc="How the roof reference ring was built: footprint_ring (clipped to "
             "a building footprint), open_ring (no footprint) or none."),
+    _f("open_ground_share", pa.float32(),
+       desc="Ground returns as a share of all returns in a 2 m band around the polygon: "
+            "near 0 around an array on a roof, near 1 around a ground mount or canopy. "
+            "Null where the band is too thinly sampled. Feeds the free_standing basis."),
     _f("roof_ref_method", pa.string(),
        desc="How the roof plane was chosen within the ring: dominant_plane (the "
             "ring's main plane), collar_facet (the facet the band beside the array "
@@ -233,6 +243,8 @@ FLAG_DESCRIPTIONS: dict[str, str] = {
     "geometry_repaired": "Input geometry was invalid and was repaired before measuring.",
     "wide_tolerance_fit": "Fit accepted only at a wider inlier tolerance than the base "
                           "(noisy returns); see panel_fit_tolerance_m.",
+    "ambiguous_fit": "A different plane (2 degrees or more away) fits nearly as many "
+                     "returns; see panel_rival_share and panel_rival_angle_deg.",
     "envelope_fit": "Wide-tolerance fit on a near-flat plane: the signature of rows of "
                     "tilted modules on a flat roof (or rooftop clutter). Tilt and azimuth "
                     "describe the envelope of the rows, not the modules.",

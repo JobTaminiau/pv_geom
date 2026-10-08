@@ -21,6 +21,7 @@ from pv_geom.errors import VintageFormatError
 # measurement of the *panel* surface.
 PANEL_CONFIRMED = "panel_confirmed"
 PANEL_BY_VINTAGE = "panel_by_vintage"
+FREE_STANDING = "free_standing"
 SURFACE_UNRESOLVED = "surface_unresolved"
 UNSCREENED = "unscreened"
 NO_FIT = "no_fit"
@@ -29,6 +30,7 @@ NOT_MEASURED = "not_measured"
 GEOMETRY_BASIS: tuple[str, ...] = (
     PANEL_CONFIRMED,
     PANEL_BY_VINTAGE,
+    FREE_STANDING,
     SURFACE_UNRESOLVED,
     UNSCREENED,
     NO_FIT,
@@ -37,6 +39,9 @@ GEOMETRY_BASIS: tuple[str, ...] = (
 
 # Bases under which the fitted plane is known to be the panel itself.
 PANEL_BASES: frozenset[str] = frozenset({PANEL_CONFIRMED, PANEL_BY_VINTAGE})
+# Bases under which the fitted plane is the array's geometry: the panel itself,
+# or the free-standing structure that carries it.
+ARRAY_BASES: frozenset[str] = PANEL_BASES | {FREE_STANDING}
 
 BASIS_DESCRIPTIONS: dict[str, str] = {
     PANEL_CONFIRMED: (
@@ -47,6 +52,13 @@ BASIS_DESCRIPTIONS: dict[str, str] = {
         "Not separable from the roof by height, or no roof reference, but the "
         "polygon vintage is on or before the LiDAR date, so the installation "
         "existed when the LiDAR was flown."
+    ),
+    FREE_STANDING: (
+        "The fitted plane is an elevated structure standing in open ground, not on "
+        "a building: a ground mount or a canopy. It was there when the LiDAR was "
+        "flown. There is no roof beneath it to test a standoff against, so whether "
+        "it already carried modules is not established; since modules lie flush on "
+        "such structures, its tilt and azimuth are the array's either way."
     ),
     SURFACE_UNRESOLVED: (
         "The polygons postdate the LiDAR (or a date is unknown) and the fitted "
@@ -113,6 +125,7 @@ def geometry_basis(
     standoff_passed: bool,
     standoff_screened: bool,
     gap_days: int | None,
+    free_standing: bool = False,
 ) -> str:
     """Classify what a row's tilt and azimuth actually rest on.
 
@@ -127,6 +140,8 @@ def geometry_basis(
         return PANEL_CONFIRMED
     if gap_days is not None and gap_days <= 0:
         return PANEL_BY_VINTAGE
+    if free_standing:
+        return FREE_STANDING
     if standoff_screened:
         return SURFACE_UNRESOLVED
     return UNSCREENED

@@ -59,6 +59,60 @@ Measurement depth, and a first outside check. Schema version 0.5.
   checkout has uncommitted or unpushed changes, and after install if any worker
   runs a different version. New `compute.coiled.worker_threads`.
 
+### Changed — results: the fit no longer depends on the random seed (E9)
+
+Rerunning a benchmark with different seeds used to move tilt by a median of
+0.1 to 0.5 degrees, by more than 0.5 degrees for 17 of 100 Phoenix and 32 of 65
+Delaware polygons, and to change `geometry_basis` for about one in five. Over
+five seeds it now moves nothing: tilt, azimuth, status and facet count are
+identical for every polygon in all three benchmarks. The plane fit:
+
+- tries **every point triple** when a polygon has up to about 120 returns, and
+  many more random ones than before for mid-sized sets, so a second plane with
+  one inlier fewer is no longer missed by chance;
+- refits each of the best *distinct* candidates to its inliers **until the
+  inlier set stops changing**, and picks the winner by inlier count, then
+  residual, then orientation, never by draw order;
+- finishes with a **smooth robust fit** (Tukey biweight), which has one optimum
+  where the hard-threshold refit had several a fraction of a degree apart.
+
+Consequences to know about:
+
+- Every result changes slightly, and a few polygons lose their fit (Delaware
+  benchmark 65 -> 63): the settled plane can hold fewer returns than the
+  count-maximising one and fall under the consensus floor.
+- Against the accuracy set the new fit is as close or closer (NREL roofs
+  10.02, 10.02, 10.02, 10.00 degrees against a reported 10).
+- Fitting takes about three times as long per polygon (about 0.25 s).
+- `geometry_basis` can still differ for a polygon sitting on the standoff
+  threshold (0 to 3 of 100 between seeds): the roof reference is fitted to much
+  larger point sets by random search.
+- New columns `panel_rival_share` and `panel_rival_angle_deg`, and flag
+  `ambiguous_fit` (about 10% of fits): a different plane, 2 degrees or more
+  away, fits at least 90% as many returns. The choice is reproducible but
+  fragile. It is not excluded from `recommended`.
+- `scripts/seed_sensitivity.py` measures this; `tests/benchmark` enforces it.
+
+### Added — ground mounts and canopies can be confirmed (C7)
+
+- New `geometry_basis` value **`free_standing`**: the fitted plane is an
+  elevated structure standing in open ground. The standoff screen needs a roof
+  under the array, so correctly measured canopies and ground rows could never
+  be confirmed; in the USPVDB school case 0 of 51 canopy polygons were usable,
+  and 50 now are.
+- New column `open_ground_share`: ground returns as a share of all returns in a
+  2 m band around the polygon (neighbouring PV polygons excluded). Measured:
+  0.81 to 0.98 around ground-mounted rows, median 0.96 around parking canopies,
+  0.00 to 0.05 around arrays on large roofs, under 0.35 for nine in ten
+  residential roofs. The threshold is 0.6 (`free_standing.min_open_share`).
+- `free_standing` counts toward the panel stratum in reports and toward
+  `recommended`. It ranks below `panel_confirmed` and `panel_by_vintage`.
+- It establishes the structure, not the modules. A carport that was roofed
+  with panels after the LiDAR was flown also qualifies; its geometry is still
+  the array's, since modules lie flush on such structures.
+- The building-footprint layer is not used for this: canopies are in it as
+  buildings.
+
 ### Changed — results (small)
 
 - Spatial grids are anchored to absolute coordinates instead of the extent of

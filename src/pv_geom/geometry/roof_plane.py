@@ -128,7 +128,7 @@ def _reference_plane(
     def _fit(pts: np.ndarray, floor: float) -> PlaneFit:
         return fit_plane_ransac(
             pts, ransac_threshold=cfg.ransac_threshold_m, min_inlier_frac=floor,
-            max_iter=200, seed=seed,
+            thorough=cfg.thorough_search, seed=seed,
         )
 
     def _done(fit: PlaneFit, method: str) -> tuple[PlaneFit, str | None]:
@@ -151,7 +151,8 @@ def _reference_plane(
     if cfg.facet_search:
         facets = fit_planes_sequential(
             points_in_ring, ransac_threshold=cfg.ransac_threshold_m,
-            min_points=cfg.collar_min_points, max_planes=cfg.max_facets, seed=seed,
+            min_points=cfg.collar_min_points, max_planes=cfg.max_facets,
+            thorough=cfg.thorough_search, seed=seed,
         )
         scores = [_collar_agreement(f, collar_pts, cfg.ransac_threshold_m) for f in facets]
         if facets and max(scores) >= cfg.facet_agreement_min:

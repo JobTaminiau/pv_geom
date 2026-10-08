@@ -35,6 +35,7 @@ verdict on what its tilt and azimuth actually describe:
 | --- | --- | --- |
 | `panel_confirmed` | resolvably above the surrounding roof plane — panels were physically in the point cloud | yes |
 | `panel_by_vintage` | not separable from the roof by height, but the polygon vintage is on or before the LiDAR date, so the installation existed | yes |
+| `free_standing` | an elevated structure standing in open ground (a ground mount or a canopy), present when the LiDAR was flown; whether it carried modules then is not tested, but modules lie flush on such structures | yes |
 | `surface_unresolved` | coincident with the roof, and the polygons postdate the LiDAR: a flush-mounted array **or** the roof before installation | only if you can assume flush mounting |
 | `unscreened` | of unknown standing: polygons postdate the LiDAR and there is no roof reference to test against | with caution |
 | `no_fit` | absent — too few points or no consensus | no |
@@ -235,8 +236,13 @@ have one row describing the largest face and a `segments` entry per face
 ## How it measures
 
 1. **Panel plane.** LiDAR returns inside the polygon (eroded 15 cm) are fitted
-   with RANSAC, refined by least squares on the inliers. Tilt and azimuth come
-   from the plane normal; uncertainty from a bootstrap over the inliers.
+   with a consensus search: planes through point triples are scored by how many
+   returns lie within tolerance, the best distinct candidates are refitted to
+   their inliers until nothing changes, and the winner is settled with a smooth
+   robust fit. Small polygons try every triple, so the result does not depend
+   on a random seed. Tilt and azimuth come from the plane normal; uncertainty
+   from a bootstrap over the inliers. If a different plane fits nearly as well
+   the row is flagged `ambiguous_fit`.
 2. **Roof reference.** A second plane is fitted to returns in a 3–5 m ring
    around the polygon (other PV polygons removed). A *collar guard* refits on
    the band nearest the array when the ring plane does not describe it, which
@@ -311,7 +317,7 @@ policy (`scripts/coiled_aws_probe.py` checks access from a real worker).
 
 - **Rows of tilted modules on flat roofs are not resolved.** A polygon over many short rows is fitted by the envelope of the rows, which is nearly flat whatever the module tilt. Such fits are flagged `envelope_fit` and left out of `recommended`.
 - **The run CRS is metric.** LiDAR in feet or another CRS is converted on read.
-- **The standoff screen needs a roof under the array**, so ground mounts and canopies are rarely `panel_confirmed`, however well they are measured; they are `panel_by_vintage` when the dates allow and `unscreened` otherwise.
+- **Ground mounts and canopies have no roof to stand off from**, so they are rarely `panel_confirmed`. They are recognised instead by the open ground around them (`free_standing`; see `open_ground_share`). That establishes the structure, not the modules: a carport roofed with panels after the LiDAR was flown also qualifies.
 - **`surface_unresolved` rows are not wrong rows.** A flush array is parallel to its roof facet, so their tilt and azimuth are right for flush-mounted arrays and wrong for racks on flat roofs.
 - **Small polygons** (under ~3 m² at 10 pts/m²) rarely gather the 30 returns a robust fit needs and mostly end as `no_fit`.
 - **Removal is not detected**: a polygon older than the LiDAR is assumed still present when the LiDAR was flown.

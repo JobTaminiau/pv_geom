@@ -40,6 +40,11 @@ class PanelPlaneConfig(BaseModel):
     # roof reported at 10 degrees measured 1.4; 80 of its 82 fits matched this
     # signature against 0.2-0.3% of residential fits.)
     envelope_tilt_max_deg: float = 5.0
+    # A fit is flagged `ambiguous_fit` when a different plane (2 degrees or more
+    # away) holds at least this share of its inliers: the returns support two
+    # planes about equally. The choice between them is reproducible, but a few
+    # returns more or fewer could reverse it.
+    ambiguous_rival_share: float = 0.9
     erosion_m: float = 0.15
     ransac_threshold_m: float = 0.05
     # Noise-adaptive tolerance. 5 cm suits clean, single-swath data (Phoenix:
@@ -53,7 +58,8 @@ class PanelPlaneConfig(BaseModel):
     # disable.
     ransac_threshold_max_m: float = 0.15
     min_inlier_frac: float = 0.6
-    max_iter: int = 200
+    max_iter: int = 300                 # least number of plane hypotheses; small point sets
+                                        # get many more, up to every triple (plane_fit.py)
     min_density_pts_per_m2: float = 3.0
     min_points: int = 30                # flat floor; size-sweep showed ~5 is the precision
                                         # floor but RANSAC robustness needs ~30 inliers.
@@ -121,6 +127,10 @@ class RoofPlaneConfig(BaseModel):
     # the array, the ring's planes are peeled off one at a time (up to
     # `max_facets`) and the one the collar agrees with is taken. Set
     # `facet_search: false` for the pre-0.5 behaviour.
+    # Search the ring's planes as hard as the array's own (see
+    # geometry.plane_fit). It costs about a third more time and, measured on
+    # the benchmarks, does not make the roof reference any steadier.
+    thorough_search: bool = False
     facet_search: bool = True
     max_facets: int = 4
     # A facet found by the search (or a fit to the collar alone) must explain a
@@ -164,6 +174,22 @@ class HeightsConfig(BaseModel):
     # that a panel is physically present above the roof surface; below it the
     # row gets the `no_panel_standoff` flag. See README (Quality flags).
     min_panel_standoff_m: float = 0.05
+
+
+class FreeStandingConfig(BaseModel):
+    """Presence evidence for ground mounts and canopies, which have no roof
+    beneath them for the standoff screen to use. A fitted plane counts as a
+    free-standing structure when it is clear of the ground and the band of
+    returns around it is mostly ground. (Measured 2026-10: 0.81-0.98 around
+    ground-mounted rows, median 0.80 around parking canopies, 0.00-0.05 around
+    arrays on large roofs, under 0.35 for nine in ten residential roofs.)"""
+
+    enabled: bool = True
+    band_m: float = 2.0               # width of the band around the polygon that is examined
+    band_gap_m: float = 0.3           # skipped next to the polygon (its own edge returns)
+    min_open_share: float = 0.6       # ground returns as a share of all returns in the band
+    min_band_points: int = 20         # fewer than this and the band says nothing
+    min_height_above_ground_m: float = 0.4
 
 
 class MountingRule1(BaseModel):
@@ -400,6 +426,7 @@ class PVGeomConfig(BaseModel):
     multi_plane: MultiPlaneConfig = Field(default_factory=MultiPlaneConfig)
     roof_plane: RoofPlaneConfig = Field(default_factory=RoofPlaneConfig)
     heights: HeightsConfig = Field(default_factory=HeightsConfig)
+    free_standing: FreeStandingConfig = Field(default_factory=FreeStandingConfig)
     mounting_rules: MountingRulesConfig = Field(default_factory=MountingRulesConfig)
     io: IOConfig = Field(default_factory=IOConfig)
     compute: ComputeConfig = Field(default_factory=ComputeConfig)

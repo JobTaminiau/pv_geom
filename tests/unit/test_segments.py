@@ -183,3 +183,70 @@ def test_a_noisy_pitched_roof_is_not_an_envelope_fit() -> None:
     z = _plane_z(xy, 30.0, 180.0, 8.0, (5.0, 3.0)) + rng.normal(0, 0.075, 600)
     row = _row(np.column_stack([xy, z]))
     assert "wide_tolerance_fit" in row["flags"] and "envelope_fit" not in row["flags"]
+
+
+# --------------------------------------------------------------------------- #
+# C7: presence evidence for ground mounts and canopies
+# --------------------------------------------------------------------------- #
+
+def _free_standing_row(open_ground: bool, vintage_year: int = 2030, height: float = 3.0):
+    """A 10 x 6 m plane tilted 8 degrees, ``height`` m up. Around it either
+    open ground (a canopy or ground mount) or more raised surface (a roof)."""
+    from datetime import date
+
+    rng = np.random.default_rng(8)
+    poly = box(0, 0, 10, 6)
+    xy = rng.uniform([0.2, 0.2], [9.8, 5.8], size=(500, 2))
+    panel = np.column_stack([xy, _plane_z(xy, 8.0, 180.0, height, (5.0, 3.0))])
+    around = rng.uniform([-12, -12], [22, 18], size=(6000, 2))
+    outside = ~((around[:, 0] > 0) & (around[:, 0] < 10) & (around[:, 1] > 0) & (around[:, 1] < 6))
+    around = around[outside]
+    ground = np.column_stack([around, np.zeros(len(around))])
+    if open_ground:
+        raised = panel
+    else:                                   # the array lies on a roof 5 cm below it
+        roof = np.column_stack([around, _plane_z(around, 8.0, 180.0, height - 0.02,
+                                                 (5.0, 3.0))])
+        raised, ground = np.vstack([panel, roof]), ground[:0]
+        far = rng.uniform([-60, -60], [-40, -40], size=(200, 2))
+        ground = np.column_stack([far, np.zeros(200)])
+    return build_row(
+        polygon=poly, polygon_id="p", cfg=PVGeomConfig(), config_hash="x", run_id="r",
+        partition_id=0, panel_pts=panel, ground_xyz=ground, roof_input_pts=raised,
+        footprints=None, other_pv_polygons=gpd.GeoDataFrame(geometry=[], crs=CRS),
+        contributing_tile_ids=("t",), polygon_vintage=date(vintage_year, 12, 31),
+        lidar_date=date(2020, 11, 28))
+
+
+def test_a_canopy_in_open_ground_is_a_free_standing_structure() -> None:
+    row = _free_standing_row(open_ground=True)
+    assert row["geometry_basis"] == "free_standing" and row["recommended"]
+    assert row["open_ground_share"] > 0.9
+    assert row["panel_tilt_deg"] == pytest.approx(8.0, abs=0.2)
+
+
+def test_an_array_on_a_roof_is_not_free_standing() -> None:
+    row = _free_standing_row(open_ground=False)
+    assert row["geometry_basis"] != "free_standing"
+    assert row["open_ground_share"] < 0.1
+
+
+def test_a_surface_at_ground_level_is_not_free_standing() -> None:
+    row = _free_standing_row(open_ground=True, height=0.2)
+    assert row["geometry_basis"] != "free_standing"
+
+
+def test_vintage_still_outranks_the_free_standing_evidence() -> None:
+    row = _free_standing_row(open_ground=True, vintage_year=2019)
+    assert row["geometry_basis"] == "panel_by_vintage"
+
+
+def test_free_standing_evidence_can_be_switched_off() -> None:
+    from pv_geom.vintage import geometry_basis
+
+    assert geometry_basis(fit_ok=True, standoff_passed=False, standoff_screened=False,
+                          gap_days=100, free_standing=True) == "free_standing"
+    assert geometry_basis(fit_ok=True, standoff_passed=False, standoff_screened=False,
+                          gap_days=100) == "unscreened"
+    assert geometry_basis(fit_ok=True, standoff_passed=True, standoff_screened=True,
+                          gap_days=100, free_standing=True) == "panel_confirmed"

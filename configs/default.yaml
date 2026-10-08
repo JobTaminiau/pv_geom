@@ -20,7 +20,9 @@ panel_plane:
                                  # Noisier collections need it: Delaware 2023 scatters
                                  # ~7.5 cm about a roof plane, Phoenix 2020 ~2 cm.
   min_inlier_frac: 0.6
-  max_iter: 200
+  max_iter: 300                  # least number of plane hypotheses per fit
+  ambiguous_rival_share: 0.9     # flag ambiguous_fit when a different plane holds this
+                                 # share of the fitted plane's inliers
   min_density_pts_per_m2: 3   # spike: tiles deliver ~9-11 pts/m^2; 3 is the safe floor
   min_points: 30              # flat floor (PRD §7.1's area-based formula was too lax)
   tilt_floor_deg: 1.0
@@ -75,6 +77,15 @@ heights:
   min_panel_standoff_m: 0.05     # below this the panel plane is not resolvably above the
                                  # roof -> `no_panel_standoff`; at or above it the row is
                                  # geometry_basis = panel_confirmed
+
+free_standing:                   # presence evidence for ground mounts and canopies, which
+  enabled: true                  # have no roof beneath them for the standoff screen
+  band_m: 2.0                    # band around the polygon that is examined
+  band_gap_m: 0.3                # skipped next to the polygon
+  min_open_share: 0.6            # ground returns as a share of all returns in the band:
+                                 # ~0 around a roof array, ~0.8-1.0 around a ground mount
+  min_band_points: 20
+  min_height_above_ground_m: 0.4
 
 vintage:
   # Capture dates of the two inputs. They are stamped on every row and decide

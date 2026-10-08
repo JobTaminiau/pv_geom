@@ -18,7 +18,12 @@ import numpy as np
 import shapely
 from shapely import contains_xy
 
-from pv_geom.config import MultiPlaneConfig, PanelPlaneConfig, PVGeomConfig
+from pv_geom.config import (
+    FreeStandingConfig,
+    MultiPlaneConfig,
+    PanelPlaneConfig,
+    PVGeomConfig,
+)
 from pv_geom.geometry.heights import (
     height_above_ground,
     height_above_roof,
@@ -257,6 +262,34 @@ class StandoffScreen:
         return None if self.passed else "no_panel_standoff"
 
 
+def open_ground_share(polygon: Any, pts: LocalPoints, cfg: FreeStandingConfig) -> float:
+    """Ground returns as a share of all returns in a band around the polygon.
+
+    Around an array on a roof the band is roof: no ground returns at all.
+    Around a ground mount or a canopy it is the ground it stands on, with at
+    most the next row or a parked car in it. NaN when the band is too thinly
+    sampled to say.
+    """
+    band = polygon.buffer(cfg.band_gap_m + cfg.band_m).difference(polygon.buffer(cfg.band_gap_m))
+    # Neighbouring PV polygons are left out, as they are from the roof ring: the
+    # next piece of the same canopy says nothing about what the canopy stands on.
+    if len(pts.other_polygons):
+        others = shapely.union_all(pts.other_polygons.geometry.to_numpy())
+        band = band.difference(others.buffer(cfg.band_gap_m))
+    if band.is_empty:
+        return NAN
+
+    def _count(xyz: np.ndarray) -> int:
+        if len(xyz) == 0:
+            return 0
+        return int(contains_xy(band, xyz[:, 0], xyz[:, 1]).sum())
+
+    ground, raised = _count(pts.ground), _count(pts.surroundings)
+    if ground + raised < cfg.min_band_points:
+        return NAN
+    return ground / (ground + raised)
+
+
 def screen_standoff(height_above_roof_m: float, roof_usable: bool,
                     min_standoff_m: float) -> StandoffScreen:
     screened = roof_usable and not np.isnan(height_above_roof_m)
@@ -315,6 +348,7 @@ class Measurement:
     fit_failure: str | None = None            # why there is no fit, when there is none
     flags: list[str] = field(default_factory=list)
     segments: list[Segment] = field(default_factory=list)   # every facet, primary first
+    open_ground_share: float = NAN            # see open_ground_share()
     # Heights of the returns the panel plane was fitted to (kept for the
     # experimental mounting classifier, which looks at what lies beneath them).
     panel_z: np.ndarray = field(default_factory=lambda: np.zeros(0), repr=False)
@@ -364,6 +398,8 @@ def measure_polygon(
             flags.append("envelope_fit")
     if panel.multi_facet:
         flags.append("multi_facet")
+    if panel.ok and fit.rival_share >= cfg.panel_plane.ambiguous_rival_share:
+        flags.append("ambiguous_fit")
     if not panel.ok:
         flags.append("poor_fit")
     elif np.isnan(fit.azimuth_deg):
@@ -410,9 +446,16 @@ def measure_polygon(
     # What the tilt and azimuth rest on: the standoff screen is direct evidence
     # that panels were in the cloud; failing that, the two input dates decide.
     gap_days = vintage_gap_days(task.polygon_vintage, lidar_date)
+    # A footprint layer is no help here: canopies and carports are in it as
+    # buildings. What tells them from a roof is the ground around them.
+    open_share = open_ground_share(polygon, pts, cfg.free_standing)
+    free_standing = bool(
+        cfg.free_standing.enabled and panel.ok
+        and not np.isnan(open_share) and open_share >= cfg.free_standing.min_open_share
+        and not np.isnan(hag) and hag >= cfg.free_standing.min_height_above_ground_m)
     basis = geometry_basis(
         fit_ok=panel.ok, standoff_passed=screen.passed,
-        standoff_screened=screen.screened, gap_days=gap_days,
+        standoff_screened=screen.screened, gap_days=gap_days, free_standing=free_standing,
     )
 
     return Measurement(
@@ -420,6 +463,7 @@ def measure_polygon(
         point_density=density, panel=panel, tilt_unc_deg=tilt_unc, azimuth_unc_deg=az_unc,
         secondary=secondary, segments=segments, roof=roof, height_above_roof_m=har,
         panel_roof_angle_deg=angle, height_above_ground_m=hag, screen=screen,
+        open_ground_share=open_share,
         lidar_date=lidar_date, lidar_date_source=lidar_date_source, gap_days=gap_days,
         basis=basis, fit_failure=None if panel.ok else why_no_fit(task, pts, cfg.panel_plane),
         flags=flags, panel_z=panel_z,

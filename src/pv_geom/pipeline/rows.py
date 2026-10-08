@@ -68,6 +68,8 @@ def to_row(m: Measurement, prov: Provenance) -> dict[str, Any]:
         "grid_convergence_deg": np.float32(conv),
         "panel_rmse_m": _f32(fit.rmse),
         "panel_fit_tolerance_m": np.float32(m.panel.tolerance_m) if m.fit_ok else None,
+        "panel_rival_share": _f32(fit.rival_share) if m.fit_ok else None,
+        "panel_rival_angle_deg": _f32(fit.rival_angle_deg) if m.fit_ok else None,
         "panel_tilt_unc_deg": _f32(m.tilt_unc_deg),
         "panel_azimuth_unc_deg": _f32(m.azimuth_unc_deg),
         "n_planes_detected": np.int8(len(m.segments)),
@@ -76,6 +78,7 @@ def to_row(m: Measurement, prov: Provenance) -> dict[str, Any]:
             _true(m.secondary.azimuth_deg) if m.secondary is not None else None
         ),
         "segments": [_segment(m, s, conv) for s in m.segments] if m.fit_ok else None,
+        "open_ground_share": _f32(m.open_ground_share),
         "roof_ref_source": m.roof.source,
         "roof_ref_method": m.roof.method,
         "roof_tilt_deg": _f32(roof_fit.tilt_deg) if roof_fit is not None else None,

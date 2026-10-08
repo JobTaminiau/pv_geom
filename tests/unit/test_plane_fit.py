@@ -254,3 +254,71 @@ def test_bootstrapfailed_fit_returns_nan() -> None:
     )
     tu, au = bootstrap_uncertainty(np.zeros((10, 3)), fit)
     assert np.isnan(tu) and np.isnan(au)
+
+
+# --------------------------------------------------------------------------- #
+# E9: the fitted plane does not depend on the random seed
+# --------------------------------------------------------------------------- #
+
+def _plane_points(tilt: float, azimuth: float, *, n: int, extent: float = 6.0,
+                  noise_m: float = 0.0, seed: int = 0) -> np.ndarray:
+    """``n`` points on a plane of the given tilt and azimuth through the origin,
+    spread over an ``extent`` metre square, with vertical noise."""
+    rng = np.random.default_rng(seed)
+    xy = rng.uniform(-extent / 2, extent / 2, size=(n, 2))
+    nx, ny, nz = normal_from_tilt_azimuth(tilt, azimuth)
+    z = -(nx * xy[:, 0] + ny * xy[:, 1]) / nz + rng.normal(0.0, noise_m, n)
+    return np.column_stack([xy, z])
+
+
+def _two_rival_planes(n_each: int = 40, seed: int = 0) -> np.ndarray:
+    """Two planes 6 degrees apart crossing in the middle of the patch, with
+    almost the same number of points near each: the case a random search
+    settles differently from run to run."""
+    rng = np.random.default_rng(seed)
+    a = _plane_points(20.0, 180.0, n=n_each + 2, extent=6.0, noise_m=0.004, seed=seed)
+    b = _plane_points(26.0, 180.0, n=n_each, extent=6.0, noise_m=0.004, seed=seed + 1)
+    return rng.permutation(np.vstack([a, b]))
+
+
+def test_small_sets_are_searched_exhaustively_so_the_seed_is_irrelevant() -> None:
+    pts = _two_rival_planes()
+    fits = [fit_plane_ransac(pts, ransac_threshold=0.03, min_inlier_frac=0.3, seed=s)
+            for s in range(8)]
+    assert len({round(f.tilt_deg, 6) for f in fits}) == 1
+    assert len({f.n_inliers for f in fits}) == 1
+    # ...and the order the points arrive in does not matter either.
+    shuffled = fit_plane_ransac(pts[::-1].copy(), ransac_threshold=0.03, min_inlier_frac=0.3,
+                                seed=99)
+    assert shuffled.tilt_deg == pytest.approx(fits[0].tilt_deg, abs=1e-6)
+
+
+def test_a_nearly_tied_rival_plane_is_reported() -> None:
+    fit = fit_plane_ransac(_two_rival_planes(), ransac_threshold=0.03, min_inlier_frac=0.3,
+                           seed=0)
+    assert fit.rival_share > 0.8 and 4.0 < fit.rival_angle_deg < 8.0
+    clean = fit_plane_ransac(_plane_points(20.0, 180.0, n=120, noise_m=0.004, seed=3),
+                             ransac_threshold=0.03, seed=0)
+    assert np.isnan(clean.rival_share) or clean.rival_share < 0.5
+
+
+@pytest.mark.parametrize("n", [60, 400, 3000])
+def test_noisy_plane_is_stable_across_seeds_at_every_size(n: int) -> None:
+    """Small sets by exhaustive search, large ones by the smooth final polish."""
+    pts = _plane_points(27.0, 215.0, n=n, extent=8.0, noise_m=0.03, seed=n)
+    fits = [fit_plane_ransac(pts, ransac_threshold=0.05, seed=s) for s in range(6)]
+    tilts = np.array([f.tilt_deg for f in fits])
+    assert np.ptp(tilts) < 1e-3
+    assert abs(tilts[0] - 27.0) < (1.0 if n == 60 else 0.3)
+    az = np.array([f.azimuth_deg for f in fits])
+    assert np.ptp(az) < 1e-2
+
+
+def test_fitted_plane_is_not_biased_by_the_robust_polish() -> None:
+    """Outliers on one side (a roof under a raised array) must not drag it."""
+    plane = _plane_points(18.0, 180.0, n=500, extent=8.0, noise_m=0.01, seed=5)
+    below = _plane_points(18.0, 180.0, n=150, extent=8.0, noise_m=0.01, seed=6)
+    below[:, 2] -= 0.20
+    fit = fit_plane_ransac(np.vstack([plane, below]), ransac_threshold=0.05, seed=1)
+    assert fit.tilt_deg == pytest.approx(18.0, abs=0.15)
+    assert fit.n_inliers == pytest.approx(500, abs=10)

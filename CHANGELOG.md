@@ -47,11 +47,33 @@ Measurement depth, and a first outside check. Schema version 0.5.
 - `cluster_id` is recognised as a polygon id column; geometry collections keep
   their polygons.
 
+- **Bounded worker memory (H5).** Tiles are decoded in chunks
+  (`compute.lidar_chunk_points`) and a tile group whose kept returns exceed
+  `compute.memory_budget_gb` is measured in spatial batches. Peak memory on a
+  44-million-return Delaware tile falls from 3.9 GB to 0.34 GB. Rows are
+  identical with and without batching.
+- **Cloud settings are configuration (H4).** `compute.coiled.package_source`,
+  `region`, `software` and `name` default to `auto`: the client's exact commit,
+  the LiDAR bucket's region, an environment named after the dependency list,
+  and the study name. A cloud run stops before starting a cluster if the
+  checkout has uncommitted or unpushed changes, and after install if any worker
+  runs a different version. New `compute.coiled.worker_threads`.
+
+### Changed — results (small)
+
+- Spatial grids are anchored to absolute coordinates instead of the extent of
+  the loaded points, so a polygon's result no longer depends on which other
+  polygons share its tile group. Random sampling sees points in a different
+  order than before, which moves results exactly as a change of random seed
+  does: on the Phoenix benchmark a median of 0.03 degrees in tilt, but more
+  than 0.5 degrees for about one polygon in eight, and a different
+  `geometry_basis` for 13 of 100. That sensitivity was always there; it is now
+  measured, and is story E9.
+
 ### Not in this release
 
-H4 (cloud settings as configuration) and H5 (bounded worker memory) are carried
-over. Row tilt on flat commercial roofs and presence evidence for canopies are
-new stories (E7, C7).
+Row tilt on flat commercial roofs and presence evidence for canopies are new
+stories (E7, C7).
 
 ## 0.4.0
 

@@ -37,4 +37,3 @@ compute:
     n_workers: 16
     worker_memory: "32GiB"      # tiles are 1.5 km at ~20 pts/m2: ~44M points, 475 MB LAZ
     worker_cpu: 2
-    software: pv-geom-2026-05

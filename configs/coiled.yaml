@@ -7,4 +7,3 @@ compute:
     worker_memory: "16GiB"      # densest Phoenix tile is ~3000 polygons /
                                 # 50M+ points; 8 GiB OOM-kills the worker.
     worker_cpu: 4
-    software: pv-geom-2026-05

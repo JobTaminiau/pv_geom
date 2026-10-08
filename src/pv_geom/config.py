@@ -281,17 +281,25 @@ class IOConfig(BaseModel):
 
 
 class CoiledConfig(BaseModel):
-    name: str = "pv-geom"
+    """The cloud cluster. Settings left on "auto" are worked out at run time
+    (see ``pv_geom.coiled_env``), so nothing here is tied to one project."""
+
+    name: str = "auto"                   # auto: pv-geom-<study.name>
     n_workers: int = 40
     worker_memory: str = "16GiB"
     worker_cpu: int = 4
-    software: str = "pv-geom-2026-05"
-    # Cloud region for the cluster: put it where the LiDAR bucket is.
-    region: str = "us-east-2"
-    # What workers ``pip install`` to get pv_geom (Coiled drops git+ URLs from
-    # environment specs, so it is installed at cluster start). Must be the
-    # version the client runs.
-    package_source: str = "git+https://github.com/JobTaminiau/pv_geom.git@main"
+    # Tasks per worker. Keep at 1 unless compute.memory_budget_gb times this
+    # fits comfortably in worker_memory.
+    worker_threads: int = 1
+    # Coiled software environment. auto: one named after pv-geom's dependency
+    # list, built if missing.
+    software: str = "auto"
+    # Cloud region. auto: where the LiDAR bucket is, so tiles are read in-region.
+    region: str = "auto"
+    # What workers ``pip install`` to get pv-geom. auto: the exact commit the
+    # client is running (it must be pushed). Workers are checked after install
+    # and the run stops if any has a different version.
+    package_source: str = "auto"
     # Optional: what one worker costs per hour, so `--dry-run` can estimate the
     # bill. Leave unset to get a time estimate only.
     usd_per_worker_hour: float | None = None
@@ -304,6 +312,14 @@ class LocalConfig(BaseModel):
 
 class ComputeConfig(BaseModel):
     backend: Literal["coiled", "local"] = "local"
+    # Memory one task may hold in LiDAR returns, in GB. Tiles are decoded in
+    # chunks and only returns near a polygon are kept; if a tile group's kept
+    # returns would exceed this, its polygons are split into spatial batches
+    # that are measured one after another. Results do not depend on it. Set it
+    # to about half a worker's memory; null removes the bound.
+    memory_budget_gb: float | None = 6.0
+    # Returns decoded at a time (about 150 bytes each while being filtered).
+    lidar_chunk_points: int = 2_000_000
     coiled: CoiledConfig = Field(default_factory=CoiledConfig)
     local: LocalConfig = Field(default_factory=LocalConfig)
 

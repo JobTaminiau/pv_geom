@@ -182,8 +182,8 @@ def test_process_tile_group_missing_primary_tile(synth_inputs: dict[str, Path]) 
 
     import pv_geom.pipeline.pointpool as worker_mod
 
-    orig = worker_mod.read_tile
-    worker_mod.read_tile = _raise_missing
+    orig = worker_mod._tile_chunks
+    worker_mod._tile_chunks = _raise_missing
     try:
         table = process_tile_group(
             tile_uri_map={"t1": "s3://fake/missing.laz"},
@@ -197,7 +197,7 @@ def test_process_tile_group_missing_primary_tile(synth_inputs: dict[str, Path]) 
             partition_id=0,
         )
     finally:
-        worker_mod.read_tile = orig
+        worker_mod._tile_chunks = orig
 
     # Empty table, but with the canonical schema (so pyarrow.concat_tables works).
     assert len(table) == 0

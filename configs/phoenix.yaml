@@ -56,4 +56,3 @@ compute:
                                 # cost profile; memory is the binding
                                 # constraint, not cores.
     worker_cpu: 2
-    software: pv-geom-2026-05

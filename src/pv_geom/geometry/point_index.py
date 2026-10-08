@@ -25,8 +25,10 @@ class PointGrid:
             self._nx = self._ny = 0
             self._offsets = np.zeros(1, dtype=np.int64)
             return
-        self._x0 = float(pts[:, 0].min())
-        self._y0 = float(pts[:, 1].min())
+        # Anchored to absolute multiples of the cell (see GroundModel): a query
+        # then returns the same points in the same order whatever else is loaded.
+        self._x0 = float(np.floor(pts[:, 0].min() / self.cell_m) * self.cell_m)
+        self._y0 = float(np.floor(pts[:, 1].min() / self.cell_m) * self.cell_m)
         ix = ((pts[:, 0] - self._x0) / self.cell_m).astype(np.int64)
         iy = ((pts[:, 1] - self._y0) / self.cell_m).astype(np.int64)
         self._nx = int(ix.max()) + 1
@@ -88,8 +90,12 @@ class GroundModel:
         self.empty = len(g) == 0
         if self.empty:
             return
-        self._x0 = float(g[:, 0].min())
-        self._y0 = float(g[:, 1].min())
+        # Cells sit on absolute multiples of the cell size, not on wherever the
+        # data happens to start, so the model under a polygon is the same
+        # however many other polygons were loaded with it.
+        anchor = float(cell_m) * coarse_factor
+        self._x0 = float(np.floor(g[:, 0].min() / anchor) * anchor)
+        self._y0 = float(np.floor(g[:, 1].min() / anchor) * anchor)
         self._global = float(np.median(g[:, 2]))
         self._fine = self._grid(g, float(cell_m))
         self._coarse = self._grid(g, float(cell_m) * coarse_factor)

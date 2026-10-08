@@ -49,12 +49,28 @@ def assert_metric_projected(crs, *, what: str = "run CRS") -> None:
             "pv-geom needs the LiDAR's projected, metric CRS; set crs.target (or --crs) "
             "explicitly if detection failed",
         )
+    if is_web_mercator(c):
+        raise CRSResolutionError(
+            f"{what} {crs_label(c)} is Web Mercator, whose metres are stretched by "
+            "1/cos(latitude): tilts, areas and heights measured in it would be wrong",
+            "set crs.target to a true-scale projected CRS such as the UTM zone, or leave "
+            "it on 'auto'",
+        )
     unit = (c.axis_info[0].unit_name or "").lower() if c.axis_info else ""
     if unit not in _METRE_NAMES:
         raise NonMetricCRSError(
             f"{what} {crs_label(c)} uses '{unit}' units; pv-geom supports metric LiDAR only",
             "reproject the tiles to a metric CRS first",
         )
+
+
+def is_web_mercator(crs) -> bool:
+    """Web Mercator (EPSG:3857 and its aliases), in which public point-cloud
+    services are often delivered and which is not true to scale anywhere but
+    the equator."""
+    c = horizontal(crs)
+    method = (c.coordinate_operation.method_name if c.coordinate_operation else "") or ""
+    return c.to_epsg() == 3857 or "pseudo-mercator" in method.lower()
 
 
 def is_metric(crs) -> bool:
@@ -68,6 +84,11 @@ def metric_equivalent(crs) -> str:
     zone at the centre of its area of use, on the same datum where one exists."""
     c = horizontal(crs)
     aou = c.area_of_use
+    if is_web_mercator(c):
+        raise CRSResolutionError(
+            f"the LiDAR is in Web Mercator ({crs_label(c)}), which covers the whole world, "
+            "so no working CRS can be chosen from it",
+            "set crs.target to the UTM zone of the study area (or pass --crs EPSG:xxxx)")
     if aou is None:
         raise CRSResolutionError(
             f"cannot choose a metric CRS for {crs_label(c)}: it declares no area of use",
@@ -141,11 +162,13 @@ def resolve_target_crs(configured: str, tile_index_crs=None, sample_tile_crs=Non
             continue
         c = horizontal(cand)
         if c.is_projected:
-            if is_metric(c):
+            if is_metric(c) and not is_web_mercator(c):
                 return crs_label(c)
             metric = metric_equivalent(c)
-            log.info("LiDAR CRS %s is in '%s'; working in %s and converting tiles on read",
-                     crs_label(c), c.axis_info[0].unit_name, metric)
+            log.info("LiDAR CRS %s cannot be worked in (%s); working in %s and converting "
+                     "tiles on read", crs_label(c),
+                     "Web Mercator distorts distance" if is_web_mercator(c)
+                     else f"units are '{c.axis_info[0].unit_name}'", metric)
             return metric
     raise CRSResolutionError(
         "crs.target is 'auto' but neither the tile index nor a LAZ header declares a "

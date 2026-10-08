@@ -1,0 +1,437 @@
+[
+  {
+    "site": "1403",
+    "systems": [
+      1403
+    ],
+    "name": "[1403] RTC-FSEC-Baseline",
+    "operating": "2014-2020",
+    "collections": [
+      "USGS_LPC_FL_Upper_Saint_Johns_2017_LAS_2019"
+    ],
+    "chosen": "USGS_LPC_FL_Upper_Saint_Johns_2017_LAS_2019",
+    "in_operating_period": true,
+    "status": "ok"
+  },
+  {
+    "site": "1275",
+    "systems": [
+      1275
+    ],
+    "name": "Commercial - NOLA",
+    "operating": "2010-2013",
+    "collections": [
+      "LA_2021GNO_1_C22"
+    ],
+    "chosen": "LA_2021GNO_1_C22",
+    "in_operating_period": false,
+    "status": "ok"
+  },
+  {
+    "site": "9069",
+    "systems": [
+      9069
+    ],
+    "name": "Simon Solar Farm",
+    "operating": "2016-2023",
+    "collections": [
+      "GA_Central_5_2018",
+      "GA_Walton_County_2010"
+    ],
+    "chosen": "GA_Central_5_2018",
+    "in_operating_period": true,
+    "status": "ok"
+  },
+  {
+    "site": "1429",
+    "systems": [
+      1429
+    ],
+    "name": "[1429] RTC-SNL-Baseline",
+    "operating": "2016-2017",
+    "collections": [
+      "NM_Albuquerque_2010",
+      "NM_MRCOG_B1_2018"
+    ],
+    "chosen": "NM_MRCOG_B1_2018",
+    "in_operating_period": false,
+    "status": "ok"
+  },
+  {
+    "site": "1416",
+    "systems": [
+      1416
+    ],
+    "name": "[1416] GSA Sanford Federal Building",
+    "operating": "2015-2018",
+    "collections": [],
+    "status": "no collection during or after operation"
+  },
+  {
+    "site": "1423",
+    "systems": [
+      1423
+    ],
+    "name": "[1423] RTC-NV-Baseline",
+    "operating": "2015-2025",
+    "collections": [
+      "NV_ClarkCo_2_B22",
+      "NV_LasVegasValley_2010",
+      "USGS_LPC_NV_LasVegas_QL1_2016_LAS_2018"
+    ],
+    "chosen": "USGS_LPC_NV_LasVegas_QL1_2016_LAS_2018",
+    "in_operating_period": true,
+    "status": "ok"
+  },
+  {
+    "site": "1367",
+    "systems": [
+      1367
+    ],
+    "name": "[1367] City of Henderson-NV - Aquatic Complex",
+    "operating": "2013-2020",
+    "collections": [
+      "NV_ClarkCo_2_B22",
+      "NV_LasVegasValley_2010",
+      "USGS_LPC_NV_LasVegas_QL1_2016_LAS_2018"
+    ],
+    "chosen": "USGS_LPC_NV_LasVegas_QL1_2016_LAS_2018",
+    "in_operating_period": true,
+    "status": "ok"
+  },
+  {
+    "site": "1418",
+    "systems": [
+      1418
+    ],
+    "name": "[1418] Clark County-NV - Desert Breeze",
+    "operating": "2015-2020",
+    "collections": [
+      "NV_ClarkCo_2_B22",
+      "NV_LasVegasValley_2010",
+      "USGS_LPC_NV_LasVegas_QL1_2016_LAS_2018"
+    ],
+    "chosen": "USGS_LPC_NV_LasVegas_QL1_2016_LAS_2018",
+    "in_operating_period": true,
+    "status": "ok"
+  },
+  {
+    "site": "1419",
+    "systems": [
+      1419
+    ],
+    "name": "[1419] Clark County-NV - Hollywood Rec Center",
+    "operating": "2015-2020",
+    "collections": [
+      "NV_ClarkCo_2_B22",
+      "NV_LasVegasValley_2010",
+      "USGS_LPC_NV_LasVegas_QL1_2016_LAS_2018"
+    ],
+    "chosen": "USGS_LPC_NV_LasVegas_QL1_2016_LAS_2018",
+    "in_operating_period": true,
+    "status": "ok"
+  },
+  {
+    "site": "1420",
+    "systems": [
+      1420
+    ],
+    "name": "[1420] Clark County-NV - Government Center",
+    "operating": "2015-2020",
+    "collections": [
+      "NV_ClarkCo_2_B22",
+      "NV_LasVegasValley_2010",
+      "USGS_LPC_NV_LasVegas_QL1_2016_LAS_2018"
+    ],
+    "chosen": "USGS_LPC_NV_LasVegas_QL1_2016_LAS_2018",
+    "in_operating_period": true,
+    "status": "ok"
+  },
+  {
+    "site": "34",
+    "systems": [
+      34,
+      1276,
+      1277
+    ],
+    "name": "Andre Agassi Preparatory Academy - Building A",
+    "operating": "2010-2020",
+    "collections": [
+      "NV_ClarkCo_2_B22",
+      "NV_LasVegasValley_2010",
+      "USGS_LPC_NV_LasVegas_QL1_2016_LAS_2018"
+    ],
+    "chosen": "USGS_LPC_NV_LasVegas_QL1_2016_LAS_2018",
+    "in_operating_period": true,
+    "status": "ok"
+  },
+  {
+    "site": "2107",
+    "systems": [
+      2107
+    ],
+    "name": "Farm Solar Array",
+    "operating": "2017-2024",
+    "collections": [
+      "CA_NorthCoastRanges_2_B23",
+      "USGS_LPC_CA_NoCAL_Wildfires_B4_2018"
+    ],
+    "chosen": "USGS_LPC_CA_NoCAL_Wildfires_B4_2018",
+    "in_operating_period": true,
+    "status": "ok"
+  },
+  {
+    "site": "4902",
+    "systems": [
+      4902
+    ],
+    "name": "NIST_Ground_1",
+    "operating": "2014-2018",
+    "collections": [],
+    "status": "no collection during or after operation"
+  },
+  {
+    "site": "4903",
+    "systems": [
+      4903
+    ],
+    "name": "NIST_Roof_1",
+    "operating": "2014-2018",
+    "collections": [],
+    "status": "no collection during or after operation"
+  },
+  {
+    "site": "4901",
+    "systems": [
+      4901,
+      4901
+    ],
+    "name": "NIST_Canopy_1",
+    "operating": "2014-2018",
+    "collections": [],
+    "status": "no collection during or after operation"
+  },
+  {
+    "site": "1200",
+    "systems": [
+      1200
+    ],
+    "name": "Distributed Sun - BWI Hilton",
+    "operating": "2010-2020",
+    "collections": [],
+    "status": "no collection during or after operation"
+  },
+  {
+    "site": "1199",
+    "systems": [
+      1199
+    ],
+    "name": "Distributed Sun - Hunt Valley",
+    "operating": "2010-2020",
+    "collections": [],
+    "status": "no collection during or after operation"
+  },
+  {
+    "site": "1203",
+    "systems": [
+      1203
+    ],
+    "name": "Distributed Sun - EJ DeSeta",
+    "operating": "2011-2020",
+    "collections": [
+      "DE_Statewide_1_B23",
+      "USGS_LPC_DE_Snds_2013_LAS_2015"
+    ],
+    "chosen": "USGS_LPC_DE_Snds_2013_LAS_2015",
+    "in_operating_period": true,
+    "status": "ok"
+  },
+  {
+    "site": "1332",
+    "systems": [
+      1332,
+      1332
+    ],
+    "name": "NREL Parking Garage",
+    "operating": "2013-2024",
+    "collections": [
+      "CO_DRCOG_2_2020",
+      "CO_DenverDNC_2008",
+      "USGS_LPC_CO_SoPlatteRiver_Lot5_2013_LAS_2015"
+    ],
+    "chosen": "CO_DRCOG_2_2020",
+    "in_operating_period": true,
+    "status": "ok"
+  },
+  {
+    "site": "1433",
+    "systems": [
+      1433
+    ],
+    "name": "[1433] NREL RSF1",
+    "operating": "2010-2024",
+    "collections": [
+      "CO_DRCOG_2_2020",
+      "CO_DenverDNC_2008",
+      "USGS_LPC_CO_SoPlatteRiver_Lot5_2013_LAS_2015"
+    ],
+    "chosen": "CO_DRCOG_2_2020",
+    "in_operating_period": true,
+    "status": "ok"
+  },
+  {
+    "site": "1283",
+    "systems": [
+      1283
+    ],
+    "name": "NREL Research Support Facility II",
+    "operating": "1997-2024",
+    "collections": [
+      "CO_DRCOG_2_2020",
+      "CO_DenverDNC_2008",
+      "USGS_LPC_CO_SoPlatteRiver_Lot5_2013_LAS_2015"
+    ],
+    "chosen": "CO_DRCOG_2_2020",
+    "in_operating_period": true,
+    "status": "ok"
+  },
+  {
+    "site": "51",
+    "systems": [
+      51
+    ],
+    "name": "NREL x-Si 7",
+    "operating": "1994-2025",
+    "collections": [
+      "CO_DRCOG_2_2020",
+      "CO_DenverDNC_2008",
+      "USGS_LPC_CO_SoPlatteRiver_Lot5_2013_LAS_2015"
+    ],
+    "chosen": "CO_DRCOG_2_2020",
+    "in_operating_period": true,
+    "status": "ok"
+  },
+  {
+    "site": "50",
+    "systems": [
+      50
+    ],
+    "name": "NREL x-Si 6",
+    "operating": "1994-2025",
+    "collections": [
+      "CO_DRCOG_2_2020",
+      "CO_DenverDNC_2008",
+      "USGS_LPC_CO_SoPlatteRiver_Lot5_2013_LAS_2015"
+    ],
+    "chosen": "CO_DRCOG_2_2020",
+    "in_operating_period": true,
+    "status": "ok"
+  },
+  {
+    "site": "1432",
+    "systems": [
+      1432
+    ],
+    "name": "[1432] NREL S and TF",
+    "operating": "2009-2018",
+    "collections": [
+      "CO_DRCOG_2_2020",
+      "CO_DenverDNC_2008",
+      "USGS_LPC_CO_SoPlatteRiver_Lot5_2013_LAS_2015"
+    ],
+    "chosen": "USGS_LPC_CO_SoPlatteRiver_Lot5_2013_LAS_2015",
+    "in_operating_period": true,
+    "status": "ok"
+  },
+  {
+    "site": "1204",
+    "systems": [
+      1204
+    ],
+    "name": "Distributed Sun - The Wharf",
+    "operating": "2011-2018",
+    "collections": [
+      "NJ_GloucesterCo_2007",
+      "USGS_LPC_DE_DelawareValley_HD_2015_LAS_2017"
+    ],
+    "chosen": "USGS_LPC_DE_DelawareValley_HD_2015_LAS_2017",
+    "in_operating_period": true,
+    "status": "ok"
+  },
+  {
+    "site": "1201",
+    "systems": [
+      1201
+    ],
+    "name": "Distributed Sun - 5 Executive Campus",
+    "operating": "2011-2020",
+    "collections": [
+      "USGS_LPC_DE_DelawareValley_HD_2015_LAS_2017"
+    ],
+    "chosen": "USGS_LPC_DE_DelawareValley_HD_2015_LAS_2017",
+    "in_operating_period": true,
+    "status": "ok"
+  },
+  {
+    "site": "1202",
+    "systems": [
+      1202
+    ],
+    "name": "Distributed Sun - 6 Executive Campus",
+    "operating": "2010-2020",
+    "collections": [
+      "USGS_LPC_DE_DelawareValley_HD_2015_LAS_2017"
+    ],
+    "chosen": "USGS_LPC_DE_DelawareValley_HD_2015_LAS_2017",
+    "in_operating_period": true,
+    "status": "ok"
+  },
+  {
+    "site": "1216",
+    "systems": [
+      1216,
+      1218,
+      1221,
+      1222,
+      1224
+    ],
+    "name": "Mercury Solar Systems - Array 6",
+    "operating": "2011-2015",
+    "collections": [
+      "ARRA-LFTNE_ConnecticutZ18_2010",
+      "ARRA-LFTNE_NewYork_2010",
+      "CT_Statewide_B1_2016",
+      "NY_FEMAR2_Central_B1_2018"
+    ],
+    "chosen": "CT_Statewide_B1_2016",
+    "in_operating_period": false,
+    "status": "ok"
+  },
+  {
+    "site": "1422",
+    "systems": [
+      1422
+    ],
+    "name": "[1422] RTC-VT-Baseline",
+    "operating": "2014-2018",
+    "collections": [
+      "USGS_LPC_VT_EasternVermont_L1_2014_LAS_2017",
+      "VT_Statewide_2_A23"
+    ],
+    "status": "no collection during or after operation"
+  },
+  {
+    "site": "1239",
+    "systems": [
+      1239
+    ],
+    "name": "Univ. of Maine - Presque Isle",
+    "operating": "2011-2020",
+    "collections": [
+      "ME_AroostookCo_2012"
+    ],
+    "chosen": "ME_AroostookCo_2012",
+    "in_operating_period": true,
+    "status": "ok"
+  }
+]

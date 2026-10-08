@@ -33,6 +33,12 @@ Measurement depth, and a first outside check. Schema version 0.5.
   reference's resolution and whether the array existed at the LiDAR date.
   `scripts/pvdaq_references.py` and `scripts/uspvdb_references.py` build the
   reference tables. See `docs/validation.md`.
+- **A first accuracy set**, `validation/pvdaq_documented/`: PVDAQ's documented
+  systems measured on public 3DEP LiDAR with hand-drawn outlines, built by
+  `scripts/accuracy_set.py`. On the three clean sites tilt is within 0.1 degrees
+  on roofs and 0.1 to 1.0 on ground rows; azimuth within 0.04 and 0.2 degrees.
+- **Web Mercator is refused as the working CRS** (public point-cloud services
+  deliver it; it reads as metric but is not true to scale).
 - **Compare runs**: `pv-geom report A B --compare --out dir`.
 - **Results by region**: `pv-geom report --regions layer --region-col name`.
 - **LiDAR in feet or another CRS** is converted to the run CRS on read, and the

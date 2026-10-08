@@ -1,0 +1,41 @@
+{
+  "settings": {
+    "tilt_tolerance_deg": 3.0,
+    "azimuth_tolerance_deg": 10.0,
+    "min_tilt_for_azimuth_deg": 5.0
+  },
+  "n_references": 10,
+  "eligibility": {
+    "eligible": 9,
+    "no_measurement": 1
+  },
+  "outcome": {
+    "inconsistent": 5,
+    "partly_consistent": 2,
+    "consistent": 2,
+    "not_scored": 1
+  },
+  "eligible": {
+    "n": 9,
+    "outcome": {
+      "inconsistent": 5,
+      "partly_consistent": 2,
+      "consistent": 2
+    },
+    "median_area_share_agreeing": 0.0
+  },
+  "mount_scope_accuracy": {
+    "n_references": 5,
+    "n_facets": 17,
+    "tilt_bias_deg": -2.3320702805238613,
+    "tilt_mae_deg": 2.970289104125079,
+    "n_azimuth": 15,
+    "azimuth_bias_deg": -2.702620442708333,
+    "azimuth_mae_deg": 2.7531636555989585
+  },
+  "negative_control": {
+    "n_references": 0,
+    "measured_area_m2": 0.0,
+    "area_share_panel_confirmed": null
+  }
+}

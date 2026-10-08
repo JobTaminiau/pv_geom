@@ -501,12 +501,26 @@ def fit_failure_table(df: pd.DataFrame) -> pd.DataFrame:
     ])
 
 
+def facets_table(df: pd.DataFrame) -> pd.DataFrame:
+    """Measured polygons by the number of distinct facets they hold."""
+    measured = df[df["fitted"]]
+    n = len(measured)
+    planes = measured["n_planes_detected"].fillna(1).astype(int)
+    counts = planes.value_counts().sort_index()
+    return pd.DataFrame([
+        {"facets": int(k), "n": int(v), "share": v / n if n else np.nan,
+         "area_m2": float(measured.loc[planes == k, "w_area"].sum())}
+        for k, v in counts.items()
+    ], columns=["facets", "n", "share", "area_m2"])
+
+
 def all_tables(df: pd.DataFrame, manifest: dict | None = None) -> dict[str, pd.DataFrame]:
     """Every report table, keyed by the file stem it is written under."""
     return {
         "coverage": coverage(df, manifest),
         "status": status_table(df),
         "fit_failure": fit_failure_table(df),
+        "facets": facets_table(df),
         "geometry_basis": basis_composition(df),
         "summary_statistics": summary_statistics(df),
         "tilt_profile": tilt_profile(df),

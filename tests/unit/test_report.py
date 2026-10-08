@@ -86,6 +86,7 @@ def _synthetic_output(out: Path, n: int = 400, *, with_dates: bool = True) -> No
         "lidar_date_source": ["gps_time" if with_dates else None] * n,
         "vintage_gap_days": [1220 if with_dates else None] * n,
         "geometry_basis": basis,
+        "recommended": [b in ("panel_confirmed", "panel_by_vintage") for b in basis],
         "n_points_panel": [200] * n,
         "n_inliers_panel": [190] * n,
         "point_density": [10.0] * n,

@@ -74,6 +74,11 @@ The single most important gap. Everything else assumes it.
 | A4 | As Mia, I want a regression benchmark, so that a refactor cannot silently move the numbers. | A frozen set of ~200 real polygons with their points (a few MB, in the repo or a release asset) and a golden output; CI fails if tilt changes by more than 0.05° on any row without an explicit golden update. | M | M |
 | A5 | As Ravi, I want wide-tolerance fits characterised, so that I know whether to keep them. | A1 metrics split by `wide_tolerance_fit`; recommendation in the README (keep / down-weight / exclude). | S | S |
 | A6 | As Mia, I want synthetic end-to-end truth tests across the parameter space. | Property tests: for tilt 0–60°, all azimuths, noise 1–10 cm, density 2–30 pts/m², recovered tilt within a stated bound. | S | M |
+| A7 | As Ravi, I want measurements compared with externally *reported* geometry (PVDAQ, permits, as-builts), so that I have an outside check before survey-grade truth exists. | `pv-geom compare-reference`: a reference table of reported mounts, each with its resolution, evidence grade and presence dates; every measured facet of the matched polygons compared; result per reference is the share of measured area it describes, never the best-agreeing facet; error statistics only for mount-scope references; placeholders excluded; arrays evidenced absent at the LiDAR date reported as a negative control for the vintage screen. Protocol in `docs/validation.md`. | M | M |
+
+> **A7 progress (2026-10-07, owner request).** Implemented (`pv_geom.validation`, `pv-geom compare-reference`, `scripts/pvdaq_references.py`, `docs/validation.md`), adapting the owner's PVDAQ pilot. PVDAQ findings: 1,456 of its 1,862 systems are PVOutput-derived — azimuth always a compass point (45° steps), 18% with a 1° placeholder tilt, one mount per system, approximate coordinates (3 of 15 Phoenix systems matched to a property). They support a consistency check and a vintage negative control, not an accuracy figure. The other ~400 are documented sites with real angles and per-array records; scoring those means running on 3DEP LiDAR with hand-drawn polygons at their locations. On the three Phoenix pilot properties: the one eligible system is *partly consistent* (the record describes 55% of its area; azimuth offset is uniform and inside the reference's resolution); the one evidenced absent at the LiDAR date had 0% of its area labelled `panel_confirmed`.
+
+> **A7, second source (2026-10-07, owner request): USPVDB.** `scripts/uspvdb_references.py` builds references from the USGS/LBNL large-scale PV database (6,611 facilities, EIA-860 tilt/azimuth, digitised boundaries); polygons are matched by boundary, so no judgement enters. Two Phoenix facilities measured: parking canopies reported at 5°/180° are *consistent* over 100% of area (tilt +0.06°, azimuth −0.5°); a warehouse roof reported at 10° is *inconsistent* (measured 1.4°). Three consequences recorded as new stories below: E7 (tilted rows), C7 (canopy presence), and the `envelope_fit` flag shipped now.
 
 ### Epic B — Complete accounting
 
@@ -94,6 +99,7 @@ The single most important gap. Everything else assumes it.
 | C4 | As Ana, I want an imagery date range, not a single day. | `--polygon-vintage` accepts a start and end; rows carry both; `geometry_basis` uses the end and the report states the window. | S | S |
 | C5 | As Ana, I want the report to estimate how many arrays postdate the LiDAR. | Mixture estimate of the post-LiDAR share (as done by hand for Phoenix: ~43%) with an interval, shown in the vintage section. | S | M |
 | C6 | As Ravi, I want removals considered. | Documented limitation at minimum; Could: flag polygons older than the LiDAR whose surface shows no standoff as `possibly_removed_or_flush`. | C | S |
+| C7 | As Ana, I want canopies and ground mounts to be confirmable. | The standoff screen compares an array with the roof under it; a canopy or ground array has none, so correctly measured canopies come out `surface_unresolved`/`unscreened` (USPVDB school case: 0 of 51 recommended). Add presence evidence that does not need a roof: off-footprint, elevated above ground, planar, and free-standing. | M | M |
 
 ### Epic D — Inputs and portability
 
@@ -116,6 +122,8 @@ The single most important gap. Everything else assumes it.
 | E3 | As Ana, I want an indicative capacity. | Optional `capacity_kw_est` from surface area and a configurable power density, clearly labelled as an estimate, used as an alternative weight in the report. | S | S |
 | E4 | As Ravi, I want small arrays measured where possible. | Erosion scales with polygon size; the minimum-points floor is re-derived from A6. Fit rate for polygons under 5 m² reported before and after. | S | M |
 | E6 | As Ravi, I want azimuth referenced to **true north**, explicitly, so that it means the same thing in every study area and can be compared with other sources. | Today azimuth is the direction of the plane normal in projected x/y, i.e. relative to **grid north**. Grid north differs from true north by the meridian convergence, which varies with position: −0.8° in the Phoenix test block, −0.3° to −1.0° across the Phoenix atlas, −0.1° to −0.4° in Delaware, up to ±1.7° at a UTM zone edge at 33° N, and several degrees in some State Plane zones. Required: (1) `panel_azimuth_deg`, `secondary_azimuth_deg` and `roof_azimuth_deg` are **true-north** azimuths: grid azimuth plus the meridian convergence at the polygon centroid, from PROJ (`Proj.get_factors(lon, lat).meridian_convergence`); (2) a `grid_convergence_deg` column carries the value applied, so the grid azimuth is recoverable; (3) the manifest, data dictionary, report captions and methods text state `azimuth_reference: true_north`; an output written before this change is labelled `grid_north` when read, and reports on it say so; (4) tilt is unaffected (it does not depend on the horizontal axes) and angles between two planes are unaffected; (5) **test**: one physical plane of known true azimuth, expressed in at least three supported CRSs with different convergence (two adjacent UTM zones and a State Plane zone), yields the same true azimuth within 0.05° and the convergence PROJ reports matches an independent geodesic computation; (6) the regression goldens are regenerated once, deliberately, for this change. | M | S |
+| E7 | As Ravi, I want rows of tilted modules on flat roofs measured, not their envelope. | Where a polygon covers repeated rows (commercial flat roofs), report the modules' tilt and azimuth: e.g. parallel planes sharing one normal, or row polygons derived from imagery. Validated on the USPVDB warehouse case (reported 10°). Until then such fits carry `envelope_fit` (wide-tolerance fit below 5°) and are excluded from `recommended` — done 2026-10-07. A first attempt at a pairwise local-slope estimator did not recover the row tilt at ~8 returns/m². | M | L |
+| E8 | As Ravi, I want an array's facing reported both as built and relative to its row axis. | Ground tables that follow sloping terrain face several degrees off their design azimuth (validation: 174 deg measured against a design 180 on ground falling 2.2 deg along the row). Report the as-built plane (as now) and, for row-shaped polygons, the tilt about the row axis and the row axis bearing, so results compare with design values. | S | M |
 | E5 | As Ravi, I want orientation relative to the sun, not just compass. | Derived columns: annual plane-of-array irradiance factor relative to optimal for the site latitude (simple transposition model), enabling an "orientation loss" profile in the report. | C | M |
 
 ### Epic F — Report and figures
@@ -290,6 +298,7 @@ the cross-CRS test uses UTM 12N, UTM 11N and Arizona Central State Plane (metres
 | **0.3** | Solid ground | R1–R13; B1–B3; H1, H3; I3, I4; G1 | Same numbers as 0.2.0 on the benchmark; gates green; one row per input polygon |
 | **0.4** | Usable by config | I7 (inputs in config), E6 (true-north azimuth), I2 (Python API), I1 (sample + demo), D2, D4, H2, F5, F7, G2 | A run is `pv-geom run --config area.yaml`; demo works offline |
 | **0.5** | Measurement depth | C1 (`unscreened` < 20%), E1 (segments), D3 (feet), H4, H5, F1, F2, G4 | Multi-facet polygons measured as segments |
+| **0.5b** | Remaining depth | H4 (cloud settings), H5 (bounded memory), C7 (canopy presence), E7 (tilted rows) | Carried over from 0.5 |
 | **0.6** | Anyone, anywhere | D1 (third study area), I5 docs, G5 | Third study area runs unmodified; tutorial works |
 | **1.0-rc** | Evidence and release runs | A1–A5 (needs truth data), H6 full Phoenix + Delaware runs from the final configs, schema freeze, paper rebuilt from report output | Definition of done in §1 |
 | 1.x | Depth | Should/Could stories: D5–D7, E2–E5, C2–C6, F3, F4, F6, F8, F9, G3, H7, I6, I7 | — |
@@ -321,6 +330,15 @@ before 1.0.
 
 1. **Truth data for A1.** Which source of independently known tilt/azimuth is obtainable?
    This gates the whole "evidence" milestone.
+   *Update 2026-10-07:* PVDAQ is usable in part (see A7). Its documented (non-PVOutput)
+   systems are the realistic route to a small A1 set: a few dozen sites nationally,
+   measured from public 3DEP LiDAR with hand-drawn polygons. Decision needed: do that?
+   *Done 2026-10-07 (owner: "build a small accuracy set"):* `validation/pvdaq_documented/`.
+   Yield is far below A1's 150 arrays: 30 locatable sites, 8 outlined, 3 clean tests
+   (5 distinct planes). On those: tilt error +0.01 to +0.08 deg (roofs), +0.12 and +0.95
+   deg (ground rows); azimuth within 0.04 deg (roofs) and 0.2 deg (rows, after removing
+   terrain slope along the row). A1 as written still needs a larger source; the Maryland
+   NIST arrays (separate canopy, ground and roof records) are the best next additions.
 2. **Segments (E1).** Add segment rows as a second table (clean, two files) or widen the
    polygon table (one file, awkward beyond two planes)? Recommendation: second table.
 3. **Column naming (R14).** Rename `panel_*` to something neutral (`surface_*` / `fit_*`)
@@ -341,3 +359,22 @@ before 1.0.
 - Energy yield modelling beyond the optional orientation factor (E5).
 - Change detection across multiple LiDAR epochs.
 - A hosted service or web application.
+
+
+## 10. Milestone 0.5 progress (2026-10-07)
+
+Done on branch `v0.5-depth`:
+
+- **Phoenix input:** dissolved detection layer (owner decision).
+- **C1:** roof reference by facet search, then the facet parallel to the array plane where
+  the band beside the array is split. `unscreened` on the benchmarks: Phoenix 39% -> 7%,
+  Delaware 42% -> 8% of fitted polygons. New column `roof_ref_method`.
+- **E1:** multi-facet polygons as segments; column `segments`, flat `pv_geom_segments` in the
+  release dataset (second table, as recommended in section 8).
+- **D3:** LiDAR in feet or another CRS converted on read; cross-CRS tests.
+- **F1, F2, G4:** run comparison, results by region, `recommended` column (provisional rule).
+- **A7 (new):** external reference comparison with PVDAQ and USPVDB builders.
+
+Not done, carried to 0.5b: **H4**, **H5**. New from validation: **C7**, **E7**.
+One observation for later: a run CRS used far outside its zone (grid scale ~1.001) shifts
+tilt by a few hundredths of a degree; in-zone the effect is below 0.01 degrees.

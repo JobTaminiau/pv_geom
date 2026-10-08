@@ -52,7 +52,8 @@ def build(name: str, polygons: str, tile: str, n: int, pad_m: float, seed: int,
     # Keep polygons comfortably inside the tile so no neighbour tile is needed.
     polys = polys[polys.geometry.within(tile_box.buffer(-pad_m - 1.0))]
     polys = polys.sample(n=min(n, len(polys)), random_state=seed).sort_index()
-    id_col = next((c for c in ("polygon_id", "detection_id") if c in polys.columns), None)
+    id_col = next((c for c in ("polygon_id", "detection_id", "cluster_id") if c in polys.columns),
+                  None)
     keep = polys[[id_col, "geometry"]] if id_col else polys[["geometry"]]
     keep = keep.reset_index(drop=True)
     keep.to_parquet(out / "polygons.parquet")

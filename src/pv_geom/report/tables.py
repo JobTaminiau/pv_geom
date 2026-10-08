@@ -33,6 +33,10 @@ def display_tables(tables: dict[str, pd.DataFrame], headline: str,
     out["status"] = pd.DataFrame({
         "Status": st["status"], "Polygons": st["n"].map(_i), "Share": st["share"].map(_p),
         "Meaning": st["description"]})
+    fc = tables["facets"]
+    out["facets"] = pd.DataFrame({
+        "Facets in polygon": fc["facets"].map(_i), "Polygons": fc["n"].map(_i),
+        "Share of measured": fc["share"].map(_p)})
     ff = tables["fit_failure"]
     ff = ff[ff["n"] > 0]
     out["fit_failure"] = pd.DataFrame({

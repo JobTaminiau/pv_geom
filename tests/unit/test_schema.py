@@ -107,3 +107,15 @@ def test_roof_failure_flags_are_split() -> None:
     from pv_geom.schema import QUALITY_FLAGS
 
     assert {"roof_no_consensus", "roof_complex", "roof_insufficient"} <= QUALITY_FLAGS
+
+
+def test_recommended_rule() -> None:
+    from pv_geom.schema import is_recommended
+
+    assert is_recommended("measured", "panel_confirmed", [])
+    assert is_recommended("measured", "panel_by_vintage", ["wide_tolerance_fit", "multi_facet"])
+    assert not is_recommended("measured", "surface_unresolved", [])
+    assert not is_recommended("measured", "unscreened", [])
+    assert not is_recommended("no_fit", "no_fit", ["poor_fit"])
+    assert not is_recommended("measured", "panel_confirmed", ["overlaps_polygon"])
+    assert not is_recommended("measured", "panel_confirmed", ["below_min_area"])

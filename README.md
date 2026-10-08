@@ -214,6 +214,24 @@ Conventions:
 Reporting also works on outputs written before 0.2.0; give their dates with
 `--polygon-vintage` / `--lidar-date`.
 
+Two further modes:
+
+- `pv-geom report A B --compare --out dir` sets two to four runs side by side:
+  overlaid tilt and orientation profiles and a comparison table.
+- `pv-geom report <output> --regions districts.gpkg --region-col name` adds a
+  per-region table and map, and a `region` column in the release dataset.
+
+### External validation — `pv-geom compare-reference`
+
+Compares a run with geometry reported by someone else (PVDAQ, USPVDB, permits),
+mount against measured facet. See [`docs/validation.md`](docs/validation.md).
+
+### Choosing rows
+
+Start from `recommended == True`. Polygons covering more than one roof face
+have one row describing the largest face and a `segments` entry per face
+(`pv_geom_segments` in the release dataset).
+
 ## How it measures
 
 1. **Panel plane.** LiDAR returns inside the polygon (eroded 15 cm) are fitted
@@ -283,8 +301,9 @@ policy (`scripts/coiled_aws_probe.py` checks access from a real worker).
 
 ## Limitations
 
-- **Metric LiDAR only**, read in its native CRS; tiles in feet must be reprojected first.
-- **The standoff screen needs a roof reference**, so ground mounts and canopies are never `panel_confirmed`; they are `panel_by_vintage` when the dates allow and `unscreened` otherwise.
+- **Rows of tilted modules on flat roofs are not resolved.** A polygon over many short rows is fitted by the envelope of the rows, which is nearly flat whatever the module tilt. Such fits are flagged `envelope_fit` and left out of `recommended`.
+- **The run CRS is metric.** LiDAR in feet or another CRS is converted on read.
+- **The standoff screen needs a roof under the array**, so ground mounts and canopies are rarely `panel_confirmed`, however well they are measured; they are `panel_by_vintage` when the dates allow and `unscreened` otherwise.
 - **`surface_unresolved` rows are not wrong rows.** A flush array is parallel to its roof facet, so their tilt and azimuth are right for flush-mounted arrays and wrong for racks on flat roofs.
 - **Small polygons** (under ~3 m² at 10 pts/m²) rarely gather the 30 returns a robust fit needs and mostly end as `no_fit`.
 - **Removal is not detected**: a polygon older than the LiDAR is assumed still present when the LiDAR was flown.

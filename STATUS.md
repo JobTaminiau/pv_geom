@@ -2,6 +2,14 @@
 
 PRD: `docs/pv_geom_PRD.md` (v0.1, 2026-05-01). Changes by version: `CHANGELOG.md`. **Road to 1.0: `docs/pv_geom_v1_spec.md`** (user stories, refactoring pass, milestones, open decisions).
 
+**2026-10-07 — MILESTONE 0.5 "MEASUREMENT DEPTH" MOSTLY DONE (branch `v0.5-depth`, stacked on `v0.4-usability`).** Detail: spec section 10 and `CHANGELOG.md`.
+
+- **Phoenix uses the dissolved detection layer** (owner decision).
+- **C1** roof reference by facet search: `unscreened` 39% -> 7% (Phoenix benchmark), 42% -> 8% (Delaware). **E1** multi-facet polygons as segments. **D3** LiDAR in feet / other CRS converted on read. **G4** `recommended` column. **F1** `report A B --compare`. **F2** `report --regions`.
+- **External validation (new, spec A7)**: `pv-geom compare-reference`, with reference builders for PVDAQ and USPVDB; protocol and findings in `docs/validation.md`. Case outputs are local only (`data/validation/`, gitignored). Findings: canopies agree with EIA values to 0.1 deg; a flat warehouse roof with tilted rows measures 1.4 deg against a reported 10 (now flagged `envelope_fit`); the vintage screen passed its one negative control; canopies cannot be `panel_confirmed`.
+- **Accuracy set (branch `v0.5-accuracy-set`)**: `validation/pvdaq_documented/` — 8 sites outlined on public 3DEP LiDAR, 3 clean tests: tilt within 0.1 deg on PV-covered roofs, 0.1-1.0 deg on ground rows; azimuth within 0.04 deg and (terrain slope removed) 0.2 deg. Working clips are local in `data/accuracy/pvdaq/` (regenerable).
+- **Not done:** H4 (cloud settings as config), H5 (bounded memory). **New stories:** E7 (row tilt on flat roofs), C7 (presence evidence for canopies and ground mounts).
+
 **2026-10-07 — MILESTONE 0.4 "USABLE BY CONFIG" DONE (branch `v0.4-usability`, stacked on `v0.3-accounting`).** Owner decisions the same day: no truth data is available yet (accuracy stories A1/A2/A5 deferred); no full-scale runs until the package is final (H6 deferred); runs are to be driven from a config that names the inputs; azimuth must be defined as true north. The spec (`docs/pv_geom_v1_spec.md` §7–8) is re-sequenced accordingly.
 
 - **A run is `pv-geom run --config area.yaml`.** `study:` (name, output) and `inputs:` (polygons, LiDAR prefix, optional tile index and footprints) live in the config, paths relative to it; CLI options override. `configs/phoenix.yaml` and `configs/delaware.yaml` carry the development inputs — **point them at the final layers before the release runs**.

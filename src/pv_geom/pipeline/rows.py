@@ -11,7 +11,8 @@ import pyarrow as pa
 from shapely import wkb
 
 from pv_geom import __version__
-from pv_geom.pipeline.measure import Measurement
+from pv_geom.pipeline.measure import Measurement, Segment
+from pv_geom.schema import is_recommended
 from pv_geom.utils.north import to_true_azimuth
 from pv_geom.vintage import NOT_MEASURED
 
@@ -56,6 +57,7 @@ def to_row(m: Measurement, prov: Provenance) -> dict[str, Any]:
         "lidar_date": m.lidar_date,
         "lidar_date_source": m.lidar_date_source,
         "vintage_gap_days": None if m.gap_days is None else np.int32(m.gap_days),
+        "recommended": is_recommended(m.status, m.basis, m.flags),
         "geometry_basis": m.basis,
         "n_points_panel": int(fit.n_total),
         "n_inliers_panel": int(fit.n_inliers),
@@ -68,12 +70,14 @@ def to_row(m: Measurement, prov: Provenance) -> dict[str, Any]:
         "panel_fit_tolerance_m": np.float32(m.panel.tolerance_m) if m.fit_ok else None,
         "panel_tilt_unc_deg": _f32(m.tilt_unc_deg),
         "panel_azimuth_unc_deg": _f32(m.azimuth_unc_deg),
-        "n_planes_detected": np.int8(2 if m.secondary is not None else int(m.fit_ok)),
+        "n_planes_detected": np.int8(len(m.segments)),
         "secondary_tilt_deg": _f32(m.secondary.tilt_deg) if m.secondary is not None else None,
         "secondary_azimuth_deg": (
             _true(m.secondary.azimuth_deg) if m.secondary is not None else None
         ),
+        "segments": [_segment(m, s, conv) for s in m.segments] if m.fit_ok else None,
         "roof_ref_source": m.roof.source,
+        "roof_ref_method": m.roof.method,
         "roof_tilt_deg": _f32(roof_fit.tilt_deg) if roof_fit is not None else None,
         "roof_azimuth_deg": _true(roof_fit.azimuth_deg) if roof_fit is not None else None,
         "roof_rmse_m": _f32(roof_fit.rmse) if roof_fit is not None else None,
@@ -88,6 +92,26 @@ def to_row(m: Measurement, prov: Provenance) -> dict[str, Any]:
         "config_hash": prov.config_hash,
         "run_id": prov.run_id,
         "partition_id": np.int32(prov.partition_id),
+    }
+
+
+def _segment(m: Measurement, s: Segment, conv: float) -> dict[str, Any]:
+    """One facet as an entry of the `segments` column."""
+    area = m.area_m2 * s.share
+    tilt = s.fit.tilt_deg
+    return {
+        "segment_index": np.int8(s.index),
+        "area_share": _f32(s.share),
+        "area_m2": _f32(area),
+        "surface_area_m2": _f32(area / float(np.cos(np.radians(tilt))) if tilt < 89.0 else None),
+        "tilt_deg": _f32(tilt),
+        "azimuth_deg": _f32(to_true_azimuth(s.fit.azimuth_deg, conv)),
+        "rmse_m": _f32(s.fit.rmse),
+        "tilt_unc_deg": _f32(s.tilt_unc_deg),
+        "azimuth_unc_deg": _f32(s.azimuth_unc_deg),
+        "n_points": int(s.fit.n_inliers),
+        "height_above_ground_m": _f32(s.height_above_ground_m),
+        "geometry": wkb.dumps(s.footprint),
     }
 
 
@@ -115,6 +139,7 @@ def unmeasured_row(
         "geometry": wkb.dumps(polygon) if has_geom else None,
         "area_m2": np.float32(polygon.area) if polygonal else None,
         "polygon_vintage": polygon_vintage,
+        "recommended": False,
         "geometry_basis": NOT_MEASURED,
         "roof_ref_source": "none",
         "flags": list(flags),

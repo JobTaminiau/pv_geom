@@ -155,6 +155,51 @@ def fit_plane_ransac(
     )
 
 
+def fit_planes_sequential(
+    points: np.ndarray,
+    *,
+    ransac_threshold: float,
+    min_points: int,
+    max_planes: int = 4,
+    max_iter: int = 200,
+    tilt_floor_deg: float = 1.0,
+    seed: int | None = None,
+) -> list[PlaneFit]:
+    """Peel planes off a point set one at a time, largest first.
+
+    RANSAC finds the plane with the most support; its inliers are set aside and
+    the search repeats on what is left, until a plane would have fewer than
+    ``min_points`` inliers or ``max_planes`` have been found. No consensus
+    floor is applied — the caller decides what each plane is worth.
+
+    Every returned ``PlaneFit`` has ``n_total = len(points)`` and an
+    ``inlier_mask`` over *all* the points, and the masks are disjoint.
+    """
+    pts = np.asarray(points, dtype=np.float64)
+    remaining = np.ones(len(pts), dtype=bool)
+    planes: list[PlaneFit] = []
+    for k in range(int(max_planes)):
+        idx = np.flatnonzero(remaining)
+        if len(idx) < max(3, min_points):
+            break
+        fit = fit_plane_ransac(
+            pts[idx], ransac_threshold=ransac_threshold, min_inlier_frac=0.0,
+            max_iter=max_iter, tilt_floor_deg=tilt_floor_deg,
+            seed=None if seed is None else seed + k,
+        )
+        if fit.n_inliers < min_points or np.isnan(fit.tilt_deg):
+            break
+        mask = np.zeros(len(pts), dtype=bool)
+        mask[idx[fit.inlier_mask]] = True
+        planes.append(PlaneFit(
+            normal=fit.normal, centroid=fit.centroid, tilt_deg=fit.tilt_deg,
+            azimuth_deg=fit.azimuth_deg, rmse=fit.rmse, n_inliers=fit.n_inliers,
+            n_total=len(pts), inlier_mask=mask,
+        ))
+        remaining &= ~mask
+    return planes
+
+
 def bootstrap_uncertainty(
     points: np.ndarray,
     fit: PlaneFit,

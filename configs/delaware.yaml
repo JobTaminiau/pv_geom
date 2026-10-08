@@ -1,0 +1,26 @@
+# Delaware overrides; unset keys take the defaults in default.yaml.
+#
+# Polygons: delaware-pv-detection v1, detected on the DE 2024 state ortho.
+# LiDAR:    DE/MD 2023 statewide collection (QL1, ~20 pts/m2), tiles at
+#           s3://free-research-data-raw/US/delaware/top-level/lidar/point_cloud/tilecls/
+#           index s3://de-database/data/lidar_support/DE_Statewide_1_B23_MTI.zip (id column NAME)
+#
+# Verified on tile 4875004290000 with `pv-geom inspect-tile` (2026-10-07):
+# classes 1/2/7/9/18/20 — no class 6, so the class-1 fallback applies, exactly
+# as in Phoenix; flown 2023-03-29/31 by GPS time (the header says 2024-10-12).
+crs:
+  target: EPSG:6347             # NAD83(2011) / UTM zone 18N, metres
+
+vintage:
+  polygon_vintage: 2024         # ASSUMPTION: the ortho's flight dates within 2024 are not
+                                # recorded here, so the whole year is used (counted as
+                                # 2024-12-31). Tighten to the real acquisition window.
+
+compute:
+  backend: coiled
+  coiled:
+    name: pv-geom-delaware
+    n_workers: 16
+    worker_memory: "32GiB"      # tiles are 1.5 km at ~20 pts/m2: ~44M points, 475 MB LAZ
+    worker_cpu: 2
+    software: pv-geom-2026-05

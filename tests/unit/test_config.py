@@ -9,7 +9,9 @@ from pv_geom.config import PVGeomConfig
 CONFIGS = Path(__file__).resolve().parents[2] / "configs"
 
 
-@pytest.mark.parametrize("name", ["default.yaml", "phoenix.yaml", "coiled.yaml"])
+@pytest.mark.parametrize(
+    "name", ["default.yaml", "phoenix.yaml", "coiled.yaml", "delaware.yaml"]
+)
 def test_shipped_config_loads(name: str) -> None:
     PVGeomConfig.from_yaml(CONFIGS / name)
 
@@ -18,7 +20,8 @@ def test_default_values() -> None:
     cfg = PVGeomConfig.from_yaml(CONFIGS / "default.yaml")
     assert cfg.panel_plane.ransac_threshold_m == 0.05
     assert cfg.panel_plane.tilt_floor_deg == 1.0
-    assert cfg.crs.target == "EPSG:6341"
+    assert cfg.crs.target == "auto"
+    assert cfg.mounting_rules.enabled is False          # archived in 0.2.0
     assert cfg.mounting_rules.R1.panel_roof_angle_deg_max == 5.0
     # Spike-derived overrides
     assert cfg.panel_plane.min_density_pts_per_m2 == 3
@@ -40,6 +43,12 @@ def test_phoenix_overrides() -> None:
     assert cfg.crs.target == "EPSG:6341"
     assert cfg.compute.backend == "coiled"
     assert cfg.compute.coiled.name == "pv-geom-phoenix"
+    assert str(cfg.vintage.polygon_vintage) == "2024-04-01"
+
+
+def test_default_yaml_matches_code_defaults() -> None:
+    """default.yaml documents the defaults; it must not drift from them."""
+    assert PVGeomConfig.from_yaml(CONFIGS / "default.yaml").hash() == PVGeomConfig().hash()
 
 
 def test_config_hash_stable() -> None:

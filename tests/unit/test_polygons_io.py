@@ -6,7 +6,7 @@ from pathlib import Path
 
 import geopandas as gpd
 import pytest
-from shapely.geometry import MultiPolygon, Polygon, box
+from shapely.geometry import MultiPolygon, box
 
 from pv_geom.io.polygons import read_polygons
 
@@ -40,10 +40,19 @@ def test_aliases_detection_id(tmp_path: Path) -> None:
     assert list(out["polygon_id"]) == ["det1", "det2"]
 
 
-def test_missing_id_raises(tmp_path: Path) -> None:
+def test_missing_id_is_synthesized(tmp_path: Path) -> None:
+    """Detector outputs often carry no id column (the Delaware layer has
+    none); ids are synthesized from the row position, which stays a join key."""
+    gdf = gpd.GeoDataFrame(geometry=[box(0, 0, 1, 1), box(2, 2, 3, 3)], crs="EPSG:4326")
+    out = read_polygons(_write_parquet(tmp_path, gdf), target_crs="EPSG:4326")
+    assert out["polygon_id"].tolist() == ["poly_0000000", "poly_0000001"]
+    assert out["input_row"].tolist() == [0, 1]
+
+
+def test_named_id_column_must_exist(tmp_path: Path) -> None:
     gdf = gpd.GeoDataFrame(geometry=[box(0, 0, 1, 1)], crs="EPSG:4326")
-    with pytest.raises(ValueError, match="polygon_id"):
-        read_polygons(_write_parquet(tmp_path, gdf), target_crs="EPSG:4326")
+    with pytest.raises(ValueError, match="no 'site' column"):
+        read_polygons(_write_parquet(tmp_path, gdf), target_crs="EPSG:4326", id_col="site")
 
 
 def test_explodes_multipolygon(tmp_path: Path) -> None:

@@ -14,7 +14,6 @@ from pv_geom.geometry.multi_plane import (
 )
 from pv_geom.geometry.plane_fit import fit_plane_ransac
 
-
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #

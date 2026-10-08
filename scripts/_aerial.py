@@ -75,6 +75,13 @@ def _fetch_tile(lod: int, row: int, col: int, max_retries: int = 4) -> Image.Ima
                 time.sleep(0.5 * (attempt + 1))   # 0.5s, 1s, 1.5s
                 continue
             break
+        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+            # transient network trouble (DNS blip, reset) — back off harder
+            last_exc = exc
+            if attempt < max_retries - 1:
+                time.sleep(2.0 * (attempt + 1))
+                continue
+            break
         except Exception as exc:
             last_exc = exc
             break

@@ -4,20 +4,35 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class CRSConfig(BaseModel):
-    target: str = "EPSG:6341"           # NAD83(2011) / UTM 12N (metres); USGS LPC AZ
+    # CRS everything is computed in. Points are NOT reprojected, so this must be
+    # the LiDAR's own horizontal CRS, and it must be metric (every threshold in
+    # this file is in metres). "auto" takes it from the tile index, falling back
+    # to a LAZ header; set an explicit "EPSG:xxxx" to assert it instead.
+    target: str = "auto"
 
 
 class PanelPlaneConfig(BaseModel):
     erosion_m: float = 0.15
     ransac_threshold_m: float = 0.05
+    # Noise-adaptive tolerance. 5 cm suits clean, single-swath data (Phoenix:
+    # ~2 cm scatter about the plane) but rejects most arrays where the returns
+    # are noisier — on the Delaware 2023 collection the scatter is ~7.5 cm and
+    # only 24% of polygons reached consensus at 5 cm, against 80% at 15 cm.
+    # When the fit fails at ransac_threshold_m, the scatter of the returns
+    # about the best plane is measured and the fit is repeated at twice that,
+    # capped here. Such rows record the tolerance used and carry the
+    # `wide_tolerance_fit` flag. Set the cap equal to ransac_threshold_m to
+    # disable.
+    ransac_threshold_max_m: float = 0.15
     min_inlier_frac: float = 0.6
     max_iter: int = 200
     min_density_pts_per_m2: float = 3.0
@@ -43,6 +58,35 @@ class RoofPlaneConfig(BaseModel):
     min_points: int = 100
     ransac_threshold_m: float = 0.15    # RANSAC inlier distance for the roof fit
     rmse_max_m: float = 0.10            # rejection threshold on the post-fit inlier RMSE
+    # Consensus floor for the *ring* fit. Deliberately below the panel fit's
+    # 0.6: a ring buffered around an array straddles roof facets, eaves and
+    # parapets, so no single plane holds 60% of it on a gable roof. At 0.6 the
+    # v0.1.0 Phoenix run rejected 163,716 rows (46.9%) as `roof_complex` whose
+    # ring fits had a median RMSE of 5.8 cm — 99.999% of them would have passed
+    # the rmse_max_m quality gate. Those rows lost their roof reference and with
+    # it any chance of a panel-standoff (vintage) screen. Quality is enforced by
+    # rmse_max_m; this only decides whether one plane describes enough of the
+    # ring to be worth reporting.
+    min_inlier_frac: float = 0.4
+    # Collar guard. A ring wide enough to hold min_points can reach across a
+    # ridge, and RANSAC then reports whichever facet is *larger* — not
+    # necessarily the one the array sits on. Measured on real Phoenix polygons:
+    # at min_inlier_frac=0.4 with no guard, 3 of 7 newly-recovered rows picked a
+    # facet 20-45 deg away from the roof directly beside the array, which would
+    # corrupt panel_roof_angle_deg and height_above_roof_m far worse than having
+    # no roof fit at all. So the collar — ring points within `collar_m` of the
+    # polygon, i.e. the roof the array is physically resting against — is the
+    # authority: if the wide-ring plane does not explain at least
+    # `collar_agreement_min` of it, the fit is redone on the collar alone.
+    collar_m: float = 1.2
+    collar_min_points: int = 40
+    collar_agreement_min: float = 0.5
+    # Fit a roof reference from an *open* ring (not clipped to a footprint) when
+    # no footprint layer was supplied, or the polygon misses every footprint.
+    # The ring is then just the elevated returns around the array; the consensus
+    # floor, RMSE gate and collar guard decide whether that is a usable plane.
+    # Rows record which kind they got in `roof_ref_source`.
+    open_ring: bool = True
     # Minimum (footprint ∩ polygon area) / polygon area for on_building=True.
     # A sliver touch must not route ground mounts / adjacent carports down the
     # rooftop rules; 0.5 tolerates typical ML-footprint misregistration (1-3 m)
@@ -58,7 +102,11 @@ class HeightsConfig(BaseModel):
     # NaN. Set ground_fallback_k=0 to disable.
     ground_fallback_k: int = 50
     ground_fallback_max_radius_m: float = 100.0
-    use_whitebox_dem: bool = False
+    # Minimum panel-above-roof separation that a plane fit can resolve. Panel
+    # and roof fits each carry ~2 cm RMSE, so a smaller gap does not establish
+    # that a panel is physically present above the roof surface; below it the
+    # row gets the `no_panel_standoff` flag. See README (Quality flags).
+    min_panel_standoff_m: float = 0.05
 
 
 class MountingRule1(BaseModel):
@@ -110,6 +158,12 @@ class MountingRule8(BaseModel):
 
 
 class MountingRulesConfig(BaseModel):
+    # ARCHIVED in 0.2.0. Ground-truth validation (300 labelled polygons,
+    # 2026-07-30) put carport precision at 5% and pole-mount at 0%, so mounting
+    # classification is off by default and its columns are not part of the core
+    # output schema. Enable to get the experimental mounting_* columns back; the
+    # labels need better heuristics and tested examples before they are trusted.
+    enabled: bool = False
     R1: MountingRule1 = Field(default_factory=MountingRule1)
     R2: MountingRule2 = Field(default_factory=MountingRule2)
     R3: MountingRule3 = Field(default_factory=MountingRule3)
@@ -135,6 +189,16 @@ class MountingRulesConfig(BaseModel):
     # possible_missing_footprint (the R3/R8 height caps then usually route the
     # polygon to ambiguous rather than a confident canopy label).
     missing_footprint_hag_m: float = 6.0
+    # Confidence ceiling for a labelled row carrying `no_panel_standoff`. Such a
+    # row satisfies R1 maximally (panel-roof angle ~0, height above roof ~0) —
+    # on the v0.1.0 Phoenix run 34,873 of them scored >= 0.999 — even though the
+    # evidence is equally consistent with there being no panel in the cloud at
+    # all. Without the cap, filtering on high confidence selects *for* the
+    # unmeasured rows. 0.5 keeps the label (it is still the best reading of what
+    # was observed) while marking it as no better than borderline. Set to 1.0 to
+    # disable. Does not apply to `ambiguous`, whose confidence means the
+    # opposite thing.
+    no_panel_standoff_confidence_max: float = 0.5
 
 
 class S3Config(BaseModel):
@@ -148,11 +212,15 @@ class ClassificationConfig(BaseModel):
     panel_class_primary: int = 6        # building
     panel_class_fallback: int = 1       # unclassified
     ground_class: int = 2
-    # Min height above the tile-group ground median to keep a class-1 return as
-    # a panel candidate. Ground-mount panels live at ~0.5-2.5 m, so 1.5 m was
+    # Min height above *local* ground to keep a class-1 return as a panel
+    # candidate. Ground-mount panels live at ~0.5-2.5 m, so 1.5 m was
     # deleting their lower halves (biasing tilt + HAG and starving density);
     # 0.8 keeps them while still rejecting near-ground clutter.
     fallback_height_above_ground_m: float = 0.8
+    # Cell size of the ground-elevation grid that "local ground" is read from.
+    # (Before 0.2.0 this was one median per tile group, which only holds on
+    # flat terrain.)
+    ground_grid_cell_m: float = 5.0
 
 
 class IOConfig(BaseModel):
@@ -180,13 +248,44 @@ class ComputeConfig(BaseModel):
     local: LocalConfig = Field(default_factory=LocalConfig)
 
 
-class OutputConfig(BaseModel):
-    partition_size: int = 100000
-    write_geoparquet: bool = True
-    also_write_csv: bool = False
+class VintageConfig(BaseModel):
+    """Acquisition dates of the two inputs.
+
+    pv_geom measures geometry from LiDAR at polygons detected some other way —
+    usually aerial or satellite imagery. The two are rarely captured at the same
+    time. If the imagery postdates the LiDAR, arrays built in between are in the
+    polygon set but not in the point cloud, and the plane fitted there is the
+    bare roof (or ground). Both dates are therefore run inputs: they are stamped
+    on every row and decide each row's ``geometry_basis``.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    # When the polygon set's source imagery was captured: "2024", "2024-04" or
+    # "2024-04-01". A year or month is treated as a window and its *latest* day
+    # is used, so the gap to the LiDAR is never understated. (`input_epoch` is
+    # the pre-0.2.0 name and still accepted.)
+    polygon_vintage: str | int | date | None = Field(
+        default=None, validation_alias=AliasChoices("polygon_vintage", "input_epoch")
+    )
+    # Optional per-polygon date column in the polygon file (mosaics, permit
+    # dates). Rows where it is null fall back to `polygon_vintage`.
+    polygon_vintage_column: str | None = None
+    # Declared LiDAR capture date (same formats). Leave unset to have it
+    # *measured* per tile from per-point GPS time, which is the flight date; the
+    # LAS header date is the delivery date and can lag by more than a year.
+    lidar_date: str | int | date | None = None
+    # Tiles sampled up front for the run-level flight window reported before
+    # compute starts (header + first chunk only). 0 disables the preview; rows
+    # still get their own tile's measured date.
+    sample_tiles: int = 25
 
 
 class PVGeomConfig(BaseModel):
+    # Unknown keys are ignored so configs written for older versions (which
+    # carried a never-implemented `output:` block) still load.
+    model_config = ConfigDict(extra="ignore")
+
     crs: CRSConfig = Field(default_factory=CRSConfig)
     panel_plane: PanelPlaneConfig = Field(default_factory=PanelPlaneConfig)
     multi_plane: MultiPlaneConfig = Field(default_factory=MultiPlaneConfig)
@@ -195,7 +294,7 @@ class PVGeomConfig(BaseModel):
     mounting_rules: MountingRulesConfig = Field(default_factory=MountingRulesConfig)
     io: IOConfig = Field(default_factory=IOConfig)
     compute: ComputeConfig = Field(default_factory=ComputeConfig)
-    output: OutputConfig = Field(default_factory=OutputConfig)
+    vintage: VintageConfig = Field(default_factory=VintageConfig)
 
     @classmethod
     def from_yaml(cls, path: Path | str) -> PVGeomConfig:

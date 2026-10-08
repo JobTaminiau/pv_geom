@@ -1,274 +1,242 @@
 # pv-geom
 
-Geometric attribute extraction for solar PV polygons from co-temporal classified LiDAR.
+Tilt, orientation and height of solar PV installations, measured from LiDAR.
 
-Given a vector inventory of PV polygons and a multi-terabyte LAZ archive on
-S3, `pv_geom` writes a polygon-keyed GeoParquet table containing tilt,
-azimuth, mounting type, roof orientation, panel–roof angle,
-height-above-ground / height-above-roof, and quality/provenance metadata.
-Designed to run on a Coiled-managed Dask cluster with a single-machine
-`LocalCluster` fallback for development. First deployment: metropolitan
-Phoenix (~100k+ polygons, ~10 pts/m² LiDAR).
+`pv-geom` takes two things:
 
-Full PRD in `docs/pv_geom_PRD.md`. Per-milestone log in `STATUS.md`.
+1. **a set of PV polygons** (from aerial or satellite imagery) and the date that imagery was captured, and
+2. **a classified LiDAR point cloud** and the date it was flown,
 
-## Status
+and produces a per-polygon dataset, summary tables, publication figures and a
+report characterising the geometry of the installations: tilt profile,
+orientation profile, joint distributions, heights, and how far each measurement
+can be trusted.
 
-M1 (scaffolding) → M7 (Coiled integration) complete. M8 hardening in
-progress; see `STATUS.md` for the open list. Validated end-to-end on real
-Phoenix data on both `LocalCluster` and Coiled, including a 1000-polygon
-benchmark that produces bit-for-bit identical output across the two
-backends.
+```
+polygons (+ vintage)  ─┐
+                       ├─►  pv-geom run  ─►  dataset (GeoParquet)  ─►  pv-geom report  ─►  tables · figures · report
+LiDAR tiles (+ date)  ─┘
+```
 
-143 unit tests pass; one integration test runs against real Phoenix data
-when `RUN_INTEGRATION=1` is set and the prerequisite cache files are
-present.
+Per-milestone history is in `STATUS.md`; changes by version in `CHANGELOG.md`.
+
+## Why the two dates matter
+
+The polygons and the LiDAR are almost never captured at the same time. If the
+imagery is the newer of the two, some polygons mark installations that **did not
+exist yet when the LiDAR was flown**. There are then no panels in the point
+cloud; the plane fitted inside the polygon is the bare roof, and nothing about
+that row's fit quality gives it away.
+
+So both dates are run inputs, and every row carries them together with a
+verdict on what its tilt and azimuth actually describe:
+
+| `geometry_basis` | The fitted plane is… | Use for panel geometry? |
+| --- | --- | --- |
+| `panel_confirmed` | resolvably above the surrounding roof plane — panels were physically in the point cloud | yes |
+| `panel_by_vintage` | not separable from the roof by height, but the polygon vintage is on or before the LiDAR date, so the installation existed | yes |
+| `surface_unresolved` | coincident with the roof, and the polygons postdate the LiDAR: a flush-mounted array **or** the roof before installation | only if you can assume flush mounting |
+| `unscreened` | of unknown standing: polygons postdate the LiDAR and there is no roof reference to test against | with caution |
+| `no_fit` | absent — too few points or no consensus | no |
+
+The report leads with the *panel basis* rows (the first two) and shows every
+statistic for all fitted rows alongside, so the effect of the vintage gap is
+visible rather than buried.
 
 ## Quickstart
 
 ```bash
-# install (uv recommended; pip works too)
 uv sync --extra dev
 
-# sanity checks
-uv run pv-geom version
-uv run pv-geom validate-config configs/phoenix.yaml
+# 1. Vet the LiDAR: classes present, density, CRS, units, true flight dates
+uv run pv-geom inspect-tile path/or/s3/to/one_tile.laz
 
-# run on real data (paths illustrative — see "Inputs" below)
+# 2. Measure
 uv run pv-geom run \
-  --config configs/phoenix.yaml \
-  --polygons s3://your-bucket/sam3/atlas/latest.parquet \
-  --tile-index s3://your-bucket/lidar/tile_index.zip \
-  --lidar-prefix s3://your-bucket/lidar_data \
-  --footprints s3://your-bucket/fema/az.geoparquet \
-  --output ./out_phoenix \
-  --bbox 432000 3719000 432900 3719900 \
-  --max-polygons 20 \
+  --polygons   polygons.parquet \
+  --polygon-vintage 2024-04 \
+  --lidar-prefix s3://bucket/lidar/tiles \
+  --tile-index   s3://bucket/lidar/tile_index.zip \
+  --output ./out \
   --local
+
+# 3. Report (run does this automatically for local outputs)
+uv run pv-geom report ./out --area-name "Metropolitan Phoenix"
 ```
 
-`--local` forces the LocalCluster backend regardless of what the config
-says. Drop it to use the backend selected in the config (`coiled` for
-`configs/phoenix.yaml`).
-
-For dev iteration without a cluster, add `--no-dask` to run the same
-pipeline serially in-process.
+`--local` runs on a `LocalCluster`; add `--no-dask` to run serially in-process.
+`--dry-run` plans the run and performs the vintage check without computing
+anything — worth doing before a long run. `--bbox` and `--max-polygons` bound a
+test run.
 
 ## Inputs
 
-| Input | Format | Notes |
-|---|---|---|
-| PV polygons | GeoParquet | Must have a `polygon_id` (or `detection_id`) column. MultiPolygons are exploded into one row per part with `parent_polygon_id` linking back. |
-| Building footprints | GeoParquet / GPKG / SHP | FEMA's `build_id` is normalized to canonical `building_id`. Synthesizes `auto_<i>` ids when neither column is present. |
-| LiDAR tile index | GeoParquet / GPKG / SHP / zipped SHP | Auto-detected from extension. The default tile-id column is `Name`; override with `--tile-id-col`. |
-| LAZ tiles | classified ASPRS LAZ on S3 (or local) | One file per tile, named per a configurable template — Phoenix uses `USGS_LPC_AZ_MaricopaPinal_2020_B20_{name}.laz`. Class assignments configurable in `io.classification`. |
+| Input | Required | Notes |
+| --- | --- | --- |
+| PV polygons | yes | GeoParquet, GeoPackage, GeoJSON, Shapefile or FlatGeobuf, in any CRS. An id column is optional: `polygon_id`, `detection_id`, `id`, `fid` or `objectid` is used if present (or name one with `--polygon-id-col`), otherwise ids are synthesized. MultiPolygons are exploded into one row per part. |
+| Polygon vintage | recommended | `--polygon-vintage 2024`, `2024-04` or `2024-04-01`. A year or month counts as its last day, so the gap to the LiDAR is never understated. For mosaics or permit-dated layers use `--polygon-vintage-col` to read a per-polygon date. |
+| LiDAR tiles | yes | Classified LAZ, one file per tile, local or on S3, in a **projected, metric CRS** (points are not reprojected; foot-based CRSs are refused). Needs ground (ASPRS class 2). Building (class 6) is used when present; otherwise unclassified returns above local ground are used, which is the common case for public collections. |
+| LiDAR tile index | yes | GeoParquet / GPKG / SHP / zipped SHP with one polygon per tile. The id column is auto-detected (`Name`, `NAME`, `tile_id`, …); `--name-template` turns it into a filename (default `{name}.laz`). |
+| LiDAR date | measured | Left out, it is **measured per tile from per-point GPS time**, which is the flight date. Declare it with `--lidar-date` only if the tiles carry no usable GPS time. The LAS header date is the *delivery* date: Phoenix's tiles were flown 2020-11-26/28 and stamped 2021-06-30; Delaware's were flown 2023-03 and stamped 2024-10. |
+| Building footprints | no | `--footprints`. With them, `on_building`/`building_id` are filled and the roof reference is clipped to the building. Without them `on_building` is null and the roof reference comes from an open ring around each polygon. |
 
-S3 reads are cached locally (`$TMP/pv_geom_cache/`). Missing tiles
-(404s) are tolerated: each group's fetch list is filtered before
-dispatch; if the *primary* tile is missing, the group emits zero rows.
+Without a polygon vintage the run still works, but no row can be credited as
+present-by-date: `geometry_basis` then rests on the height screen alone.
 
 ## Outputs
 
-A GeoParquet partition file per tile group plus a JSON `manifest.json`
-under the output prefix. Per-row schema (canonical source:
-`src/pv_geom/schema.py`):
+### Dataset — `pv-geom run`
 
-- **Identity**: `polygon_id` (unique per row; exploded MultiPolygon parts get a
-  `__p<i>` suffix), `parent_polygon_id` (the original input id — join on this
-  to aggregate back to input detections)
-- **Geometry**: `geometry` (WKB), `area_m2`, `aspect_ratio`
-- **Panel fit (M3)**: `panel_tilt_deg`, `panel_azimuth_deg`, `panel_rmse_m`,
-  `n_points_panel`, `n_inliers_panel`, `panel_tilt_unc_deg`,
-  `panel_azimuth_unc_deg`
-- **Multi-plane (M5)**: `n_planes_detected`, `secondary_tilt_deg`,
-  `secondary_azimuth_deg`
-- **Roof plane (M4)**: `roof_tilt_deg`, `roof_azimuth_deg`, `roof_rmse_m`,
-  `panel_roof_angle_deg`, `on_building`, `building_id`
-- **Heights (M4)**: `height_above_ground_m` (null when no ground reference
-  exists near the polygon — never silently 0.0), `height_above_roof_m`
-- **Mounting (M5)**: `mounting_type`, `mounting_confidence`, `mounting_rule`
-- **Quality + provenance**: `flags`, `lidar_tile_ids`, `pkg_version`,
-  `config_hash`, `run_id`, `partition_id`
+One GeoParquet partition per LiDAR tile group plus `manifest.json`. The
+manifest records inputs, resolved CRS, both vintages and the gap, the
+configuration and its hash, counts, and summary statistics.
 
-`mounting_type` is one of `flush_mount_pitched_roof`, `flush_mount_flat_roof`
-(both rule R1 — the label splits on roof tilt vs `flat_roof_tilt_deg_max`),
-`tilted_rack_rooftop`, `east_west_rack_rooftop` (R7 — the M5 east-west
-two-plane signature, guarded against gable-facet false positives by requiring
-a flat roof when a roof fit exists), `ground_mount_fixed`,
-`ground_mount_tracker_suspected`, `carport`, `pole_mount` (R8 — small,
-near-square, elevated, off-building), `ambiguous`. `mounting_rule` records
-which rule fired (R1–R8; rule IDs are stable identifiers — R7 is evaluated
-before R1/R2 and R8 before R3, most-specific first). Releases before 0.2
-emitted `flush_mount_rooftop` for what is now the two flush-mount labels.
+Per-row columns (source of truth and descriptions: `src/pv_geom/schema.py`; a
+data dictionary CSV is written with every report):
 
-The rooftop / canopy / ground superclass split is primarily LiDAR-driven:
-ground-class returns *inside* the polygon with a multi-metre vertical gap to
-the panel plane are the signature of an open-sided canopy (a roof blocks the
-pulse; a carport doesn't). This "canopy evidence" reroutes carports that
-footprint layers map as buildings, substitutes for a missing
-height-above-ground in the carport/pole-mount rules, and suppresses the
-ground-mount rules when present. `on_building` requires a real footprint
-overlap fraction (default ≥ 0.5 of the polygon), not a sliver touch; carport
-and pole mount carry upper height caps (6 m / 8 m) so a rooftop on a building
-missing from the footprint layer degrades to `ambiguous` +
-`possible_missing_footprint` instead of a confident wrong label. Unknown
-(NaN) heights are never treated as evidence — they propagate to `ambiguous`.
+- **Identity** — `polygon_id`, `parent_polygon_id` (the input feature), `input_row` (its row position in the input file — a join key even when the input has no ids), `geometry`, `area_m2`, `surface_area_m2` (area along the plane), `aspect_ratio`
+- **Vintage** — `polygon_vintage`, `lidar_date`, `lidar_date_source` (`gps_time` / `declared` / `header_date`), `vintage_gap_days` (positive = polygon newer than LiDAR), `geometry_basis`
+- **Plane fit** — `panel_tilt_deg`, `panel_azimuth_deg` (0 = N, 180 = S; null below 1° tilt), `panel_rmse_m`, `panel_tilt_unc_deg`, `panel_azimuth_unc_deg`, `n_points_panel`, `n_inliers_panel`, `point_density`, `n_planes_detected`, `secondary_tilt_deg`, `secondary_azimuth_deg`
+- **Roof reference** — `roof_ref_source` (`footprint_ring` / `open_ring` / `none`), `roof_tilt_deg`, `roof_azimuth_deg`, `roof_rmse_m`, `panel_roof_angle_deg`, `height_above_roof_m`, `height_above_ground_m`, `on_building`, `building_id`
+- **Quality and provenance** — `flags`, `lidar_tile_ids`, `pkg_version`, `config_hash`, `run_id`, `partition_id`
 
 `flags` is a list drawn from `low_density`, `poor_fit`, `near_horizontal`,
-`east_west_rack`, `tracker_suspected`, `roof_insufficient`, `roof_complex`,
-`possible_missing_footprint`.
+`east_west_rack`, `roof_insufficient`, `roof_no_consensus`, `roof_complex`,
+`no_panel_standoff`, `standoff_unscreenable`.
 
-The manifest captures aggregate stats (mounting-type counts, RMSE
-percentiles, flag counts), the config hash, the input URIs, the cluster
-spec, the run id, and a UTC timestamp.
+### Report — `pv-geom report <output>`
+
+Written to `<output>/report/` (or `--out`):
+
+| Path | Contents |
+| --- | --- |
+| `report.html` | Self-contained report: key findings, vintage statement, every figure and table, methods, data dictionary |
+| `report.md` | The same as Markdown with linked figures, for pasting into a manuscript or Quarto document |
+| `methods.md` | A methods paragraph filled in with this run's parameters and dates |
+| `summary.json` | The headline numbers, machine-readable |
+| `tables/*.csv` | Coverage funnel, geometry-basis composition, summary statistics, tilt profile (5° bins), azimuth profile (8 and 16 sectors), joint tilt × azimuth, roof relation, fit quality, flags |
+| `figures/*.png\|pdf\|svg` | Overview (tilt + orientation rose + joint heatmap), each of those separately, geometry basis, vintage timeline, array-vs-roof, measurement quality, spatial distribution |
+| `dataset/` | Consolidated `pv_geom.parquet` (GeoParquet), `pv_geom.csv` (no geometry; centroid lon/lat), `data_dictionary.csv`, flag and basis definitions, manifest |
+
+Conventions:
+
+- Every statistic is given **per polygon and weighted by array surface**, for
+  **all fitted polygons and per geometry basis**.
+- Azimuth is summarised with circular statistics (mean direction, resultant
+  length R, circular SD).
+- Figures are sized to journal column widths (89 mm / 183 mm) in 7 pt type;
+  PNGs are 300 dpi and the PDF/SVG keep text editable.
+
+Reporting also works on outputs written before 0.2.0; give their dates with
+`--polygon-vintage` / `--lidar-date`.
+
+## How it measures
+
+1. **Panel plane.** LiDAR returns inside the polygon (eroded 15 cm) are fitted
+   with RANSAC, refined by least squares on the inliers. Tilt and azimuth come
+   from the plane normal; uncertainty from a bootstrap over the inliers.
+2. **Roof reference.** A second plane is fitted to returns in a 3–5 m ring
+   around the polygon (other PV polygons removed). A *collar guard* refits on
+   the band nearest the array when the ring plane does not describe it, which
+   stops the fit landing on the facet across a ridge.
+3. **Standoff screen.** If the panel plane sits at least 5 cm above the roof
+   plane the row is `panel_confirmed`. Two fits at ~2 cm RMSE cannot resolve
+   less, so below that the row is flagged `no_panel_standoff`; with no usable
+   roof reference it is `standoff_unscreenable`.
+4. **Geometry basis.** The screen and the two dates combine as in the table
+   above.
+
+Calibrated against dated permits for Phoenix (34,837 single-permit parcels),
+the 5 cm screen flags 90% of arrays known to postdate the LiDAR and 32% of
+those known to predate it. It is a filter for building a trustworthy stratum,
+not a way to date an individual array.
 
 ## Configuration
 
-`configs/default.yaml` is the canonical schema; `configs/phoenix.yaml` and
-`configs/coiled.yaml` are sparse overlays. Pydantic models in
-`src/pv_geom/config.py` validate everything at load time. Every config is
-hashed (sha256 of the model dump) and stamped into both the per-row
-`config_hash` and the manifest, so any drift between runs is detectable.
+`configs/default.yaml` documents every key with its default; a study-area
+config only lists what it changes (`configs/phoenix.yaml`,
+`configs/delaware.yaml`). `--config` is optional. The resolved configuration is
+hashed into every row and the manifest.
 
-Key knobs you'll likely touch:
+Keys you are most likely to touch:
 
-- `crs.target` — coordinate system everything is reprojected into.
-  Phoenix is `EPSG:6341` (NAD83(2011) / UTM 12N, metres).
-- `panel_plane.{ransac_threshold_m, min_inlier_frac, min_points}` — RANSAC
-  shape and "is the fit any good" floor.
-- `io.classification` — ASPRS class assignments and the class-1 fallback
-  height (USGS LPC tiles often lack class 6; `pv_geom` falls back to
-  class-1 returns above local ground).
-- `mounting_rules` — thresholds for each of R1–R8 in `classify/rules.py`,
-  plus the canopy-evidence knobs (`canopy_min_ground_points_under`,
-  `canopy_gap_m_min`) and the missing-footprint flag threshold.
+- `vintage.{polygon_vintage, polygon_vintage_column, lidar_date}` — also settable from the CLI.
+- `crs.target` — `auto` (from the tile index) or an explicit EPSG code.
+- `io.classification` — ASPRS classes for panel candidates and ground, and the height-above-local-ground cutoff used when there is no building class.
+- `panel_plane.{ransac_threshold_m, min_inlier_frac, min_points, erosion_m}`.
+- `roof_plane.{open_ring, min_inlier_frac, collar_m}` and `heights.min_panel_standoff_m`.
 - `compute.backend` — `local` or `coiled`.
 
-## Compute backends
+### Mounting classification (archived)
 
-### Local
+Earlier versions labelled each array's mounting type (flush, tilted rack,
+carport, …). A 300-polygon ground-truth sample put carport precision at 5% and
+pole-mount at 0%, so in 0.2.0 the classifier is **off by default and its
+columns are not in the output**. `mounting_rules.enabled: true` restores the
+experimental `mounting_type` / `mounting_confidence` / `mounting_rule` columns;
+treat them as unvalidated. The code and its tests remain in `classify/`.
 
-Default in `configs/default.yaml`. Spins up a `distributed.LocalCluster`
-or runs serially with `--no-dask`. No setup beyond `uv sync`.
+## Compute
 
-### Coiled
+**Local** (default): `--local` for a `LocalCluster`, `--no-dask` for serial.
+Each task holds one tile group's points in memory — roughly 1–3 GB for 10
+pts/m² 1 km tiles, more for denser or larger tiles.
 
-Phoenix config defaults to `compute.backend: coiled`. One-time setup:
+**Coiled**: set `compute.backend: coiled`. One-time setup:
 
 ```bash
-# 1) authenticate
 coiled login
-
-# 2) build the software environment (idempotent; ~3 min)
 uv run python -c "from pv_geom.coiled_env import ensure_software_env; ensure_software_env()"
-
-# 3) make sure the repo is published so workers can pip-install pv_geom
-#    git+https://github.com/JobTaminiau/pv_geom.git@main is what
-#    install_pv_geom_on_workers expects.
 ```
 
-The cluster is created in the region defined by `coiled_env.REGION` (this
-project: `us-east-2`, matching the LiDAR bucket). `pv_geom` is installed
-on **both the scheduler and the workers** at cluster start — the
-scheduler needs it because Dask deserializes the task graph there before
-dispatch.
+Workers install `pv_geom` from the GitHub repo, so the version you want must be
+pushed. Outputs can go straight to `s3://`; partitions are written as each tile
+group finishes, and `--resume` retries only what is missing. Workers need read
+access to the LiDAR bucket; for a bucket in another account grant the Coiled
+role `s3:GetObject`, `s3:ListBucket` and `s3:GetBucketLocation` in the bucket
+policy (`scripts/_coiled_aws_probe.py` checks access from a real worker).
 
-#### Cross-account S3 access
+## Limitations
 
-Coiled BYOC workers run under an IAM role in your AWS account
-(`coiled-<your-coiled-username>`). To read from a bucket owned by
-another account (or a same-account bucket without an IAM identity policy
-allowing the role), grant the role bucket-side access. Minimum bucket
-policy:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [{
-    "Effect": "Allow",
-    "Principal": {"AWS": "arn:aws:iam::<your-account-id>:role/coiled-<username>"},
-    "Action": ["s3:GetObject", "s3:ListBucket", "s3:GetBucketLocation"],
-    "Resource": ["arn:aws:s3:::<bucket>", "arn:aws:s3:::<bucket>/*"]
-  }]
-}
-```
-
-Note there's no `s3:HeadObject` action in IAM; HEAD on objects is
-authorized under `s3:GetObject`.
-
-`scripts/_coiled_aws_probe.py` is a single-task diagnostic that runs
-`sts.get_caller_identity` plus a battery of S3 calls on a real Coiled
-worker — useful for confirming role and bucket-access state before
-debugging the full pipeline.
-
-## Phoenix-specific assumptions
-
-- **CRS**: EPSG:6341 (NAD83(2011) / UTM 12N, metres). Verified in spike
-  against USGS LPC AZ MaricopaPinal 2020 metadata.
-- **ASPRS class fallback**: USGS LPC tiles in this dataset have classes
-  1, 2, 7 only — no class 6 ("building"). Configured fallback uses
-  class-1 returns above ground (`fallback_height_above_ground_m: 0.8`;
-  a higher cutoff deletes the lower half of ground-mount arrays).
-- **Density**: tiles deliver ~9–11 pts/m². The `min_density_pts_per_m2`
-  floor of 3 leaves comfortable margin; the `min_points: 30` floor
-  protects RANSAC robustness on small polygons (~3 m² and below).
-- **FEMA AZ footprints**: ~92% of atlas polygons intersect at least one
-  FEMA AZ footprint; the remaining ~8% sit in genuine FEMA gaps and
-  surface as `on_building=False`. FEMA's `shape_area` column is all
-  zeros — always compute `geometry.area` instead. Source bucket:
-  `s3://free-research-data/national/fema_footprints/az.geoparquet`.
+- **Metric LiDAR only**, read in its native CRS; tiles in feet must be reprojected first.
+- **The standoff screen needs a roof reference**, so ground mounts and canopies are never `panel_confirmed`; they are `panel_by_vintage` when the dates allow and `unscreened` otherwise.
+- **`surface_unresolved` rows are not wrong rows.** A flush array is parallel to its roof facet, so their tilt and azimuth are right for flush-mounted arrays and wrong for racks on flat roofs.
+- **Small polygons** (under ~3 m² at 10 pts/m²) rarely gather the 30 returns a robust fit needs and mostly end as `no_fit`.
+- **Removal is not detected**: a polygon older than the LiDAR is assumed still present when the LiDAR was flown.
 
 ## Tests
 
 ```bash
-# unit tests (synthetic data; ~3 s)
-uv run pytest tests/unit/
-
-# integration test (real Phoenix data; ~30–45 s; requires cached prereqs)
-RUN_INTEGRATION=1 uv run pytest tests/integration/test_phoenix_subset.py -v
+uv run pytest tests/unit/                    # synthetic data, ~1 min
+RUN_INTEGRATION=1 uv run pytest tests/integration/ -v   # real Phoenix data; needs cached inputs
 ```
-
-The integration test is gated on both `RUN_INTEGRATION=1` and the
-presence of cached prerequisite files (atlas parquet, FEMA AZ
-geoparquet, USGS tile index, the relevant LAZ tile). It runs the
-pipeline on a 900x900 m east-valley bbox + 20 polygons through a
-2-worker `LocalCluster` and asserts schema correctness, southern-azimuth
-concentration, RMSE ≤ 10 cm, and manifest sanity.
 
 ## Layout
 
 ```
 src/pv_geom/
-  cli.py              Typer CLI (`pv-geom run`, `validate-config`, ...)
+  cli.py              run · report · inspect-tile · describe-output · validate-config
   config.py           Pydantic config models + hash
-  schema.py           Output schema (pyarrow source of truth)
-  quality.py          Quality flags + confidence helpers
-  provenance.py       Run manifest + config hashing
-  coiled_env.py       Coiled software-env spec, cluster + worker bootstrap
-  io/                 Polygons, footprints, tile index, LAZ + S3 cache
-  geometry/           Plane fitting, multi-plane, roof plane, heights
-  classify/           Rules-based mounting classifier (+ ABC for ML swap-in)
+  schema.py           Output schema, flag definitions, data dictionary
+  vintage.py          Vintage parsing and the geometry_basis rule
+  io/                 Polygons, footprints, tile index, LAZ, GeoParquet output
+  geometry/           Plane fit, multi-plane, roof reference, heights, point index
   pipeline/           Partitioner, per-tile-group task, Dask runner
-  utils/              CRS helpers, JSON-line logging
-configs/              default.yaml, phoenix.yaml, coiled.yaml
+  report/             Statistics, figures, report + dataset builder
+  classify/           Archived mounting classifier (experimental)
+configs/              default.yaml, phoenix.yaml, delaware.yaml, coiled.yaml
 tests/                unit/, integration/
-scripts/              spike, eda, benchmark prototypes
-docs/                 PRD
+scripts/              spikes, benchmarks, validation tooling
+docs/                 PRD, working paper
 ```
 
 ## License
 
 Not yet selected. The `pyproject.toml` classifier reads
-`License :: Other/Proprietary License` as a placeholder; until a real
-LICENSE file is added, treat the code as all-rights-reserved.
-
-## Citation
-
-Zenodo DOI to be minted on the first tagged release. Until then, cite
-this repo URL.
+`License :: Other/Proprietary License` as a placeholder; until a LICENSE file is
+added, treat the code as all-rights-reserved.
 
 ## Acknowledgments
 
-Built at FREE. LiDAR data: USGS 3DEP / LPC. Building footprints: FEMA
-USA Structures. Phoenix LiDAR is mirrored in the FREE research data
-commons (`s3://free-research-data-raw/US/arizona/top-level/lidar/lidar_data/`).
+Built at FREE. LiDAR: USGS 3DEP (Arizona) and the Delaware/Maryland 2023
+statewide collection. Building footprints: FEMA USA Structures.

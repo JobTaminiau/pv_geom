@@ -106,6 +106,7 @@ def test_phoenix_bbox_end_to_end(tmp_path: Path) -> None:
     manifest = json.loads(manifest_path.read_text())
     assert manifest["counts"]["succeeded"] == len(df)
     assert manifest["pkg_version"]
-    assert manifest["config_hash"] == cfg.hash()
+    assert manifest["config_hash"] == cfg.hash()     # phoenix.yaml pins the CRS
+    assert manifest["vintage"]["rows_lidar_date_max"].startswith("2020-11")
     assert "w0432n3719" in manifest["tiles_touched"]
-    assert manifest["aggregate_stats"]["mounting_type_counts"]
+    assert manifest["aggregate_stats"]["geometry_basis_counts"]

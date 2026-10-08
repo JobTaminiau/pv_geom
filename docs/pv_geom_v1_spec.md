@@ -353,6 +353,11 @@ before 1.0.
 6. **Mounting classification.** Stays archived through 1.0 (assumed here). Confirm.
 7. **Third study area (D1).** Which one? Ideally unlike both existing areas: foot-based
    LiDAR, or with class 6 present, or satellite-derived polygons.
+   *Owner, 2026-10-08:* New York City. Its LiDAR (uncompressed LAS, State Plane feet),
+   tile catalog and footprints exist in `nyc-solarcity`, but there is no installed-PV layer,
+   only rooftop technical-potential segments. The owner is building one in the new sister
+   repo `../nyc-pv-detection` (scaffolded 2026-10-08). D1 waits on that layer and on its
+   imagery capture date.
 8. **Sample data licence (I1).** A clip of public 3DEP LiDAR is unencumbered; the polygon
    sample must be one we may redistribute.
 
@@ -400,5 +405,19 @@ neighbouring PV polygons excluded. School canopies: 50 of 51 polygons now on an 
 (was 0 usable). Warehouse roof: none. Residential benchmarks: 1 of 100 (Phoenix, a 489 m2
 structure 4 m up) and 0 of 63 (Delaware). Limit recorded in the README: it shows the
 structure was present, not that modules were on it. **E7** (row tilt on flat roofs) remains.
+
+**G5 (2026-10-08, branch `v0.6-repro`):** done, with the acceptance criterion amended.
+The manifest records a content hash, input fingerprints and the environment; `pv-geom
+verify` and `pv-geom reproduce` check them. Bit-for-bit holds on one machine. Across CI
+platforms it does not and cannot (BLAS last-bit differences, even between two Windows
+runners): measured differences are at most 1.5e-5 deg and 1e-8 m with every row, label and
+count identical, so the cross-platform criterion is "equivalent within 1e-4", enforced in CI
+against a committed reference output.
+
+**I5 (2026-10-08, same branch):** documentation site written (`docs/guide/`, mkdocs-material):
+tutorial, five how-to guides, three concept pages, FAQ, five generated reference pages.
+Tested for currency and for agreeing with the code. Not done: the "15 minutes on Windows,
+macOS and Linux by someone new" check needs people; only Windows was exercised by hand and
+Linux through CI. The site is not published.
 One observation for later: a run CRS used far outside its zone (grid scale ~1.001) shifts
 tilt by a few hundredths of a degree; in-zone the effect is below 0.01 degrees.

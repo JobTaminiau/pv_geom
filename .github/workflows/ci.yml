@@ -13,12 +13,13 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         python-version: ["3.11", "3.12"]
     runs-on: ${{ matrix.os }}
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
-        with:
-          python-version: ${{ matrix.python-version }}
       - run: uv sync --extra dev
+      - run: uv run python --version
       - name: Lint
         run: uv run ruff check src tests scripts
       - name: Types
@@ -28,6 +29,18 @@ jobs:
       - name: Tests
         run: uv run pytest -m "not integration" --cov=pv_geom --cov-fail-under=88
 
+  # The documentation site must build without warnings. (Whether its generated
+  # reference pages are current is a unit test.)
+  docs:
+    runs-on: ubuntu-latest
+    env:
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync --extra docs
+      - run: uv run mkdocs build --strict
+
   # A core-only install (no extras) must measure and report: no cloud packages,
   # no test tooling. Runs the synthetic study area end to end.
   core-install:
@@ -35,9 +48,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
-        with:
-          python-version: "3.12"
-      - run: uv sync
+      - run: uv sync --python 3.12
       - run: uv run pv-geom version
       - name: Measure and report without extras
         run: |

@@ -316,6 +316,53 @@ def describe_output(output_uri: str = typer.Argument(...)) -> None:
                       f"{stats['fit_rmse_p90'] * 100:.1f} cm")
 
 
+@app.command()
+def verify(
+    output_uri: str = typer.Argument(..., help="A finished run's output."),
+    against: str | None = typer.Option(
+        None, help="Another output to compare with, row by row."),
+) -> None:
+    """Check that an output is what its manifest says it is, or how it differs
+    from another run of the same inputs."""
+    from pv_geom import reproduce as rp
+
+    if against is None:
+        result = rp.verify(output_uri)
+        if result["recorded"] is None:
+            console.print(f"[yellow]no content hash in the manifest[/yellow] (written before "
+                          f"0.6); content hash now: {result['actual']}")
+            return
+        if result["intact"]:
+            console.print(f"[green]intact[/green]: content hash {result['actual'][:16]} "
+                          "matches the manifest")
+            return
+        console.print(f"[red]modified[/red]: manifest records {result['recorded'][:16]}, "
+                      f"the rows hash to {result['actual'][:16]}")
+        raise typer.Exit(1)
+    comparison = rp.compare_outputs(output_uri, against)
+    console.print(comparison.summary())
+    if not comparison.identical:
+        raise typer.Exit(1)
+
+
+@app.command()
+def reproduce(
+    output_uri: str = typer.Argument(..., help="A finished run's output."),
+    out: Path = typer.Option(..., "--out", help="Where to write the rerun."),
+    local: bool = typer.Option(False, "--local", help="Use a local Dask cluster "
+                                                      "(default: serial)."),
+) -> None:
+    """Rerun a finished run from its manifest and check the result is identical."""
+    from pv_geom import reproduce as rp
+
+    comparison, notes = rp.reproduce(output_uri, out, use_dask=local)
+    for note in notes:
+        console.print(f"[yellow]note[/yellow] {note}")
+    console.print(comparison.summary())
+    if not comparison.identical:
+        raise typer.Exit(1)
+
+
 @app.command("compare-reference")
 def compare_reference_cmd(
     output_uri: str = typer.Argument(..., help="A finished run's output."),

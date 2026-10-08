@@ -35,6 +35,7 @@ from pv_geom.pipeline.rows import Provenance, rows_to_table, unmeasured_row
 from pv_geom.pipeline.sink import OutputSink
 from pv_geom.pipeline.vintage_check import probe_lidar_vintage, row_vintage_summary
 from pv_geom.provenance import write_manifest
+from pv_geom.reproduce import content_digest, environment, input_fingerprint
 from pv_geom.schema import (
     INVALID_GEOMETRY,
     NO_LIDAR_TILE,
@@ -234,6 +235,7 @@ def run_pipeline(
     vintage = probe_lidar_vintage(cfg, plan.primary_tile_uris)
 
     estimate: dict[str, Any] = {}
+    reproducibility: dict[str, Any] = {}
 
     def _manifest(cluster_spec: dict, counts: dict, stats: dict) -> None:
         write_manifest(
@@ -251,6 +253,7 @@ def run_pipeline(
             plan_fingerprint=plan.fingerprint,
             result_hash=cfg.result_hash(),
             estimate=estimate,
+            reproducibility=reproducibility,
         )
 
     base_counts = {"polygons": plan.n_polygons, "tile_groups": len(plan.groups)}
@@ -294,6 +297,14 @@ def run_pipeline(
 
     full = _concat([t for t in (produced, unmeasured) if t is not None])
     stats = summarise_table(full) if full is not None else {}
+    if full is not None:
+        reproducibility.update({
+            "content_hash": content_digest(full),
+            "inputs": input_fingerprint(
+                plan.inputs.as_manifest(),
+                [uri for t in plan.tiles_touched if (uri := plan.tile_uri_map.get(t))]),
+            "environment": environment(),
+        })
     if collector.failed:
         stats["task_errors"] = collector.failed
     if produced is not None:

@@ -28,6 +28,7 @@ def write_manifest(
     plan_fingerprint: str | None = None,
     result_hash: str | None = None,
     estimate: dict[str, Any] | None = None,
+    reproducibility: dict[str, Any] | None = None,
 ) -> None:
     """Write the run manifest JSON sidecar at the output prefix root.
 
@@ -57,6 +58,9 @@ def write_manifest(
         "tiles_touched": tiles_touched,
         "run_id": run_id,
         "estimate": estimate or {},
+        # What the output contains, what went in and what it ran on: enough to
+        # rerun it and check the result (pv-geom verify / reproduce).
+        "reproducibility": reproducibility or {},
     }
     payload = json.dumps(manifest, indent=2, default=str)
     if str(output_path).startswith("s3://"):

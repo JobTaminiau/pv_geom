@@ -68,6 +68,8 @@ def to_row(m: Measurement, prov: Provenance) -> dict[str, Any]:
         "grid_convergence_deg": np.float32(conv),
         "panel_rmse_m": _f32(fit.rmse),
         "panel_fit_tolerance_m": np.float32(m.panel.tolerance_m) if m.fit_ok else None,
+        "panel_rival_share": _f32(fit.rival_share) if m.fit_ok else None,
+        "panel_rival_angle_deg": _f32(fit.rival_angle_deg) if m.fit_ok else None,
         "panel_tilt_unc_deg": _f32(m.tilt_unc_deg),
         "panel_azimuth_unc_deg": _f32(m.azimuth_unc_deg),
         "n_planes_detected": np.int8(len(m.segments)),

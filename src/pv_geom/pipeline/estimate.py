@@ -25,7 +25,7 @@ from pv_geom.pipeline.plan import PendingGroup, Plan
 log = logging.getLogger(__name__)
 
 WORKER_SECONDS_PER_GB = 240.0          # read + decode + index one GB of LAZ
-WORKER_SECONDS_PER_POLYGON = 0.06      # fits, bootstrap, roof reference
+WORKER_SECONDS_PER_POLYGON = 0.25      # fits, bootstrap, roof reference (benchmarks, 2026-10)
 COILED_STARTUP_SECONDS = 150.0         # cluster spin-up and worker install
 
 

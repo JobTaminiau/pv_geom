@@ -364,6 +364,8 @@ def measure_polygon(
             flags.append("envelope_fit")
     if panel.multi_facet:
         flags.append("multi_facet")
+    if panel.ok and fit.rival_share >= cfg.panel_plane.ambiguous_rival_share:
+        flags.append("ambiguous_fit")
     if not panel.ok:
         flags.append("poor_fit")
     elif np.isnan(fit.azimuth_deg):

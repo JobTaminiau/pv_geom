@@ -20,7 +20,9 @@ panel_plane:
                                  # Noisier collections need it: Delaware 2023 scatters
                                  # ~7.5 cm about a roof plane, Phoenix 2020 ~2 cm.
   min_inlier_frac: 0.6
-  max_iter: 200
+  max_iter: 300                  # least number of plane hypotheses per fit
+  ambiguous_rival_share: 0.9     # flag ambiguous_fit when a different plane holds this
+                                 # share of the fitted plane's inliers
   min_density_pts_per_m2: 3   # spike: tiles deliver ~9-11 pts/m^2; 3 is the safe floor
   min_points: 30              # flat floor (PRD §7.1's area-based formula was too lax)
   tilt_floor_deg: 1.0

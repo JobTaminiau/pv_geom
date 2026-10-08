@@ -383,5 +383,12 @@ install. Unit-tested with fakes; not yet run on a live cluster (no cloud runs au
 benchmark tile (44.1M returns: peak 3.89 GB -> 0.34 GB) and by a test that forces repeated
 splitting and requires identical rows. The densest Phoenix group has not been re-measured.
 Still open from validation: **C7**, **E7**.
+
+**E9 (2026-10-08, branch `v0.5c-stability`):** done for the fitted plane. Baseline over three
+seeds: tilt spread p95 1.1 deg (Phoenix) and 2.5 deg (Delaware), 17 and 32 polygons over
+0.5 deg, basis changed for 18 and 19. Now, over five seeds: zero spread in tilt and azimuth
+and no status or facet changes on all three benchmarks (target was under 0.1 deg for 95%).
+Not fully met: `geometry_basis` still changes for 0-3 of 100 polygons, through the roof
+reference; searching the roof harder did not help. Cost: about 3x fit time.
 One observation for later: a run CRS used far outside its zone (grid scale ~1.001) shifts
 tilt by a few hundredths of a degree; in-zone the effect is below 0.01 degrees.

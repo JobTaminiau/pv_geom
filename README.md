@@ -235,8 +235,13 @@ have one row describing the largest face and a `segments` entry per face
 ## How it measures
 
 1. **Panel plane.** LiDAR returns inside the polygon (eroded 15 cm) are fitted
-   with RANSAC, refined by least squares on the inliers. Tilt and azimuth come
-   from the plane normal; uncertainty from a bootstrap over the inliers.
+   with a consensus search: planes through point triples are scored by how many
+   returns lie within tolerance, the best distinct candidates are refitted to
+   their inliers until nothing changes, and the winner is settled with a smooth
+   robust fit. Small polygons try every triple, so the result does not depend
+   on a random seed. Tilt and azimuth come from the plane normal; uncertainty
+   from a bootstrap over the inliers. If a different plane fits nearly as well
+   the row is flagged `ambiguous_fit`.
 2. **Roof reference.** A second plane is fitted to returns in a 3–5 m ring
    around the polygon (other PV polygons removed). A *collar guard* refits on
    the band nearest the array when the ring plane does not describe it, which

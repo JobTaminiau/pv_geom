@@ -131,6 +131,12 @@ _CORE_FIELDS: list[pa.Field] = [
     _f("panel_fit_tolerance_m", pa.float32(), unit="m",
        desc="RANSAC inlier distance the accepted fit used. Larger than the "
             "configured base when the returns were too noisy for it."),
+    _f("panel_rival_share", pa.float32(),
+       desc="Support for the strongest different plane found in the same returns, as a "
+            "share of the fitted plane's inliers. Near 1 means two planes fit about "
+            "equally well and the reported one is a fragile choice. Null if none was found."),
+    _f("panel_rival_angle_deg", pa.float32(), unit="deg",
+       desc="Angle between the fitted plane and that rival plane."),
     _f("panel_tilt_unc_deg", pa.float32(), unit="deg",
        desc="Bootstrap 1-sigma uncertainty of the tilt."),
     _f("panel_azimuth_unc_deg", pa.float32(), unit="deg",
@@ -233,6 +239,8 @@ FLAG_DESCRIPTIONS: dict[str, str] = {
     "geometry_repaired": "Input geometry was invalid and was repaired before measuring.",
     "wide_tolerance_fit": "Fit accepted only at a wider inlier tolerance than the base "
                           "(noisy returns); see panel_fit_tolerance_m.",
+    "ambiguous_fit": "A different plane (2 degrees or more away) fits nearly as many "
+                     "returns; see panel_rival_share and panel_rival_angle_deg.",
     "envelope_fit": "Wide-tolerance fit on a near-flat plane: the signature of rows of "
                     "tilted modules on a flat roof (or rooftop clutter). Tilt and azimuth "
                     "describe the envelope of the rows, not the modules.",

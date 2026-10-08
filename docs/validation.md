@@ -146,7 +146,9 @@ find things out:
   area labelled `panel_confirmed`.
 - **The standoff screen cannot confirm canopies.** A canopy has no roof under
   it to stand off from, so correctly measured canopies came out
-  `surface_unresolved` or `unscreened` and none was `recommended`.
+  `surface_unresolved` or `unscreened` and none was `recommended`. Since fixed:
+  they are now recognised as `free_standing` from the open ground around them
+  (50 of the 51 polygons).
 - **One whole-system record did not describe the whole system.** A residence
   reported at 18 degrees has two blocks at 18 and two at 11; the record
   describes about half its area.

@@ -243,7 +243,7 @@
  },
  {
   "polygon_id":"poly_0000011",
-  "geometry_basis":"unscreened",
+  "geometry_basis":"free_standing",
   "n_points_panel":448,
   "n_planes_detected":1,
   "roof_ref_source":"none",
@@ -265,7 +265,7 @@
  },
  {
   "polygon_id":"poly_0000012",
-  "geometry_basis":"unscreened",
+  "geometry_basis":"free_standing",
   "n_points_panel":439,
   "n_planes_detected":1,
   "roof_ref_source":"none",

@@ -390,5 +390,12 @@ seeds: tilt spread p95 1.1 deg (Phoenix) and 2.5 deg (Delaware), 17 and 32 polyg
 and no status or facet changes on all three benchmarks (target was under 0.1 deg for 95%).
 Not fully met: `geometry_basis` still changes for 0-3 of 100 polygons, through the roof
 reference; searching the roof harder did not help. Cost: about 3x fit time.
+
+**C7 (2026-10-08, same branch):** done. `geometry_basis = free_standing` from the share of
+ground returns in a band around the polygon (`open_ground_share`, threshold 0.6), with
+neighbouring PV polygons excluded. School canopies: 50 of 51 polygons now on an array basis
+(was 0 usable). Warehouse roof: none. Residential benchmarks: 1 of 100 (Phoenix, a 489 m2
+structure 4 m up) and 0 of 63 (Delaware). Limit recorded in the README: it shows the
+structure was present, not that modules were on it. **E7** (row tilt on flat roofs) remains.
 One observation for later: a run CRS used far outside its zone (grid scale ~1.001) shifts
 tilt by a few hundredths of a degree; in-zone the effect is below 0.01 degrees.

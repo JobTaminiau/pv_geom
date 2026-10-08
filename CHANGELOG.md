@@ -93,6 +93,26 @@ Consequences to know about:
   fragile. It is not excluded from `recommended`.
 - `scripts/seed_sensitivity.py` measures this; `tests/benchmark` enforces it.
 
+### Added — ground mounts and canopies can be confirmed (C7)
+
+- New `geometry_basis` value **`free_standing`**: the fitted plane is an
+  elevated structure standing in open ground. The standoff screen needs a roof
+  under the array, so correctly measured canopies and ground rows could never
+  be confirmed; in the USPVDB school case 0 of 51 canopy polygons were usable,
+  and 50 now are.
+- New column `open_ground_share`: ground returns as a share of all returns in a
+  2 m band around the polygon (neighbouring PV polygons excluded). Measured:
+  0.81 to 0.98 around ground-mounted rows, median 0.96 around parking canopies,
+  0.00 to 0.05 around arrays on large roofs, under 0.35 for nine in ten
+  residential roofs. The threshold is 0.6 (`free_standing.min_open_share`).
+- `free_standing` counts toward the panel stratum in reports and toward
+  `recommended`. It ranks below `panel_confirmed` and `panel_by_vintage`.
+- It establishes the structure, not the modules. A carport that was roofed
+  with panels after the LiDAR was flown also qualifies; its geometry is still
+  the array's, since modules lie flush on such structures.
+- The building-footprint layer is not used for this: canopies are in it as
+  buildings.
+
 ### Changed — results (small)
 
 - Spatial grids are anchored to absolute coordinates instead of the extent of

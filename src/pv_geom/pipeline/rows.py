@@ -78,6 +78,7 @@ def to_row(m: Measurement, prov: Provenance) -> dict[str, Any]:
             _true(m.secondary.azimuth_deg) if m.secondary is not None else None
         ),
         "segments": [_segment(m, s, conv) for s in m.segments] if m.fit_ok else None,
+        "open_ground_share": _f32(m.open_ground_share),
         "roof_ref_source": m.roof.source,
         "roof_ref_method": m.roof.method,
         "roof_tilt_deg": _f32(roof_fit.tilt_deg) if roof_fit is not None else None,

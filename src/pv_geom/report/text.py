@@ -71,7 +71,8 @@ def key_findings(s: dict) -> list[str]:
     label = ("panel-basis polygons" if s["headline_stratum"] == "panel"
              else "fitted polygons")
     gb = s["geometry_basis"]
-    panel_share = gb["panel_confirmed"]["share_count"] + gb["panel_by_vintage"]["share_count"]
+    panel_share = sum(gb[b]["share_count"] for b in
+                      ("panel_confirmed", "panel_by_vintage", "free_standing") if b in gb)
     quad = {q: h[f"share_facing_{q}"] for q in stats.QUADRANTS}
     names = {"N": "north", "E": "east", "S": "south", "W": "west"}
     ranked = sorted(quad, key=lambda q: -quad[q] if np.isfinite(quad[q]) else 0)

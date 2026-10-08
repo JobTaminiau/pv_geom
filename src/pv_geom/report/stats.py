@@ -23,10 +23,11 @@ import pandas as pd
 from pv_geom.schema import FIT_FAILURE_DESCRIPTIONS, MEASURED, STATUS_DESCRIPTIONS
 from pv_geom.schema import NO_FIT as NO_FIT_STATUS
 from pv_geom.vintage import (
+    ARRAY_BASES,
+    FREE_STANDING,
     GEOMETRY_BASIS,
     NO_FIT,
     NOT_MEASURED,
-    PANEL_BASES,
     PANEL_BY_VINTAGE,
     PANEL_CONFIRMED,
     SURFACE_UNRESOLVED,
@@ -37,8 +38,9 @@ from pv_geom.vintage import (
 # Report strata: key -> (label, set of geometry_basis values).
 STRATA: dict[str, tuple[str, frozenset[str]]] = {
     "all_fitted": ("All fitted polygons",
-                   frozenset({PANEL_CONFIRMED, PANEL_BY_VINTAGE, SURFACE_UNRESOLVED, UNSCREENED})),
-    "panel": ("Panel basis", PANEL_BASES),
+                   frozenset({PANEL_CONFIRMED, PANEL_BY_VINTAGE, FREE_STANDING,
+                              SURFACE_UNRESOLVED, UNSCREENED})),
+    "panel": ("Panel basis", ARRAY_BASES),
     "surface_unresolved": ("Surface unresolved", frozenset({SURFACE_UNRESOLVED})),
     "unscreened": ("Unscreened", frozenset({UNSCREENED})),
 }
@@ -46,6 +48,7 @@ STRATA: dict[str, tuple[str, frozenset[str]]] = {
 BASIS_LABELS: dict[str, str] = {
     PANEL_CONFIRMED: "Panel confirmed",
     PANEL_BY_VINTAGE: "Panel by vintage",
+    FREE_STANDING: "Free-standing structure",
     SURFACE_UNRESOLVED: "Surface unresolved",
     UNSCREENED: "Unscreened",
     NO_FIT: "No fit",

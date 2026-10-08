@@ -176,6 +176,22 @@ class HeightsConfig(BaseModel):
     min_panel_standoff_m: float = 0.05
 
 
+class FreeStandingConfig(BaseModel):
+    """Presence evidence for ground mounts and canopies, which have no roof
+    beneath them for the standoff screen to use. A fitted plane counts as a
+    free-standing structure when it is clear of the ground and the band of
+    returns around it is mostly ground. (Measured 2026-10: 0.81-0.98 around
+    ground-mounted rows, median 0.80 around parking canopies, 0.00-0.05 around
+    arrays on large roofs, under 0.35 for nine in ten residential roofs.)"""
+
+    enabled: bool = True
+    band_m: float = 2.0               # width of the band around the polygon that is examined
+    band_gap_m: float = 0.3           # skipped next to the polygon (its own edge returns)
+    min_open_share: float = 0.6       # ground returns as a share of all returns in the band
+    min_band_points: int = 20         # fewer than this and the band says nothing
+    min_height_above_ground_m: float = 0.4
+
+
 class MountingRule1(BaseModel):
     panel_roof_angle_deg_max: float = 5.0
     height_above_roof_m_max: float = 0.5
@@ -410,6 +426,7 @@ class PVGeomConfig(BaseModel):
     multi_plane: MultiPlaneConfig = Field(default_factory=MultiPlaneConfig)
     roof_plane: RoofPlaneConfig = Field(default_factory=RoofPlaneConfig)
     heights: HeightsConfig = Field(default_factory=HeightsConfig)
+    free_standing: FreeStandingConfig = Field(default_factory=FreeStandingConfig)
     mounting_rules: MountingRulesConfig = Field(default_factory=MountingRulesConfig)
     io: IOConfig = Field(default_factory=IOConfig)
     compute: ComputeConfig = Field(default_factory=ComputeConfig)

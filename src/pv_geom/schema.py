@@ -37,7 +37,7 @@ SEGMENT_TYPE = pa.list_(pa.struct([pa.field(n, t) for n, t, _, _ in SEGMENT_FIEL
 
 # The `recommended` column. Provisional until the accuracy work (spec Epic A)
 # says whether wide-tolerance fits and unresolved surfaces belong in or out.
-RECOMMENDED_BASES = frozenset({"panel_confirmed", "panel_by_vintage"})
+RECOMMENDED_BASES = frozenset({"panel_confirmed", "panel_by_vintage", "free_standing"})
 RECOMMENDED_EXCLUDING_FLAGS = frozenset({
     "low_density", "below_min_area", "overlaps_polygon", "duplicate_geometry",
     "envelope_fit",
@@ -100,7 +100,7 @@ _CORE_FIELDS: list[pa.Field] = [
             "newer than the LiDAR, so the installation may be absent from it."),
     _f("recommended", pa.bool_(), nullable=False,
        desc="True for rows suggested for analysis of array geometry: measured, on a panel "
-            "basis (panel_confirmed or panel_by_vintage) and free of the flags that mark an "
+            "basis (panel_confirmed, panel_by_vintage or free_standing) and free of the flags that mark an "
             "unreliable or double-counted row. PROVISIONAL rule, to be fixed once accuracy "
             "is validated; see RECOMMENDED_RULE in the dataset metadata."),
     _f("geometry_basis", pa.string(), nullable=False,
@@ -157,6 +157,10 @@ _CORE_FIELDS: list[pa.Field] = [
     _f("roof_ref_source", pa.string(), nullable=False,
        desc="How the roof reference ring was built: footprint_ring (clipped to "
             "a building footprint), open_ring (no footprint) or none."),
+    _f("open_ground_share", pa.float32(),
+       desc="Ground returns as a share of all returns in a 2 m band around the polygon: "
+            "near 0 around an array on a roof, near 1 around a ground mount or canopy. "
+            "Null where the band is too thinly sampled. Feeds the free_standing basis."),
     _f("roof_ref_method", pa.string(),
        desc="How the roof plane was chosen within the ring: dominant_plane (the "
             "ring's main plane), collar_facet (the facet the band beside the array "

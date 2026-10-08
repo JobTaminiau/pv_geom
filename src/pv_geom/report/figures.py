@@ -28,7 +28,7 @@ from pv_geom.report.stats import (
     stratum_mask,
     weighted_quantile,
 )
-from pv_geom.vintage import GEOMETRY_BASIS, PANEL_BASES
+from pv_geom.vintage import ARRAY_BASES, GEOMETRY_BASIS
 
 MM = 1.0 / 25.4
 SINGLE_COL_MM = 89.0
@@ -315,7 +315,7 @@ def fig_geometry_basis(df: pd.DataFrame) -> FigureSpec:
         fig = _figure(SINGLE_COL_MM, 46)
         ax = fig.add_subplot()
         y = np.arange(len(cats))[::-1]
-        colours = [BLUE if c in PANEL_BASES else CONTEXT_LINE for c in cats]
+        colours = [BLUE if c in ARRAY_BASES else CONTEXT_LINE for c in cats]
         ax.barh(y, share, height=0.58, color=colours)
         for yi, s, k in zip(y, share, n, strict=True):
             ax.annotate(f"{s:.1f}%  ({k:,})", xy=(s, yi), xytext=(3, 0),

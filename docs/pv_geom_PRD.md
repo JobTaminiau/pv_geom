@@ -1,5 +1,10 @@
 # PRD: `pv_geom` — Geometric Attribute Extraction for Solar PV Polygons from LiDAR
 
+> **Historical document.** This is the v0.1 design (2026-05-01). It describes
+> mounting classification as a core output and a single Phoenix deployment; both
+> have changed. Current behaviour is in `README.md`; the forward plan is
+> `docs/pv_geom_v1_spec.md`.
+
 **Status:** Draft v0.1
 **Owner:** Job Taminiau, FREE
 **Target implementer:** Claude Code

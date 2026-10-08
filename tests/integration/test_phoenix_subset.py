@@ -32,8 +32,16 @@ if not os.environ.get("RUN_INTEGRATION"):
                 allow_module_level=True)
 
 # ---- Prerequisite file paths (on the dev machine) -------------------------
-ATLAS_PARQUET = Path(r"C:\Users\job_t\code\free\pv_sam3\artifacts\atlas\latest.parquet")
-FEMA_AZ_PARQUET = Path(r"C:\Users\job_t\code\free\pv-geom\data\fema\az.geoparquet")
+# Inputs come from the environment so the test carries no machine-specific
+# paths: PV_GEOM_IT_POLYGONS (the Phoenix polygon layer) and
+# PV_GEOM_IT_FOOTPRINTS (FEMA AZ; default data/fema/az.geoparquet in the repo).
+_REPO = Path(__file__).resolve().parents[2]
+ATLAS_PARQUET = Path(
+    os.environ.get("PV_GEOM_IT_POLYGONS", _REPO / "data" / "phoenix_polygons.parquet")
+)
+FEMA_AZ_PARQUET = Path(
+    os.environ.get("PV_GEOM_IT_FOOTPRINTS", _REPO / "data" / "fema" / "az.geoparquet")
+)
 LIDAR_PREFIX = "s3://free-research-data-raw/US/arizona/top-level/lidar/lidar_data"
 # Tile index read straight from S3 (localized + cached at runtime) — no
 # %TEMP%-staged SHP to get evicted.

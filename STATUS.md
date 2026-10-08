@@ -2,6 +2,61 @@
 
 PRD: `docs/pv_geom_PRD.md` (v0.1, 2026-05-01). Changes by version: `CHANGELOG.md`. **Road to 1.0: `docs/pv_geom_v1_spec.md`** (user stories, refactoring pass, milestones, open decisions).
 
+**2026-10-07 — MILESTONE 0.5 "MEASUREMENT DEPTH" MOSTLY DONE (branch `v0.5-depth`, stacked on `v0.4-usability`).** Detail: spec section 10 and `CHANGELOG.md`.
+
+- **Phoenix uses the dissolved detection layer** (owner decision).
+- **C1** roof reference by facet search: `unscreened` 39% -> 7% (Phoenix benchmark), 42% -> 8% (Delaware). **E1** multi-facet polygons as segments. **D3** LiDAR in feet / other CRS converted on read. **G4** `recommended` column. **F1** `report A B --compare`. **F2** `report --regions`.
+- **External validation (new, spec A7)**: `pv-geom compare-reference`, with reference builders for PVDAQ and USPVDB; protocol and findings in `docs/validation.md`. Case outputs are local only (`data/validation/`, gitignored). Findings: canopies agree with EIA values to 0.1 deg; a flat warehouse roof with tilted rows measures 1.4 deg against a reported 10 (now flagged `envelope_fit`); the vintage screen passed its one negative control; canopies cannot be `panel_confirmed`.
+- **Accuracy set (branch `v0.5-accuracy-set`)**: `validation/pvdaq_documented/` — 8 sites outlined on public 3DEP LiDAR, 3 clean tests: tilt within 0.1 deg on PV-covered roofs, 0.1-1.0 deg on ground rows; azimuth within 0.04 deg and (terrain slope removed) 0.2 deg. Working clips are local in `data/accuracy/pvdaq/` (regenerable).
+- **Not done:** H4 (cloud settings as config), H5 (bounded memory). **New stories:** E7 (row tilt on flat roofs), C7 (presence evidence for canopies and ground mounts).
+
+**2026-10-07 — MILESTONE 0.4 "USABLE BY CONFIG" DONE (branch `v0.4-usability`, stacked on `v0.3-accounting`).** Owner decisions the same day: no truth data is available yet (accuracy stories A1/A2/A5 deferred); no full-scale runs until the package is final (H6 deferred); runs are to be driven from a config that names the inputs; azimuth must be defined as true north. The spec (`docs/pv_geom_v1_spec.md` §7–8) is re-sequenced accordingly.
+
+- **A run is `pv-geom run --config area.yaml`.** `study:` (name, output) and `inputs:` (polygons, LiDAR prefix, optional tile index and footprints) live in the config, paths relative to it; CLI options override. `configs/phoenix.yaml` and `configs/delaware.yaml` carry the development inputs — **point them at the final layers before the release runs**.
+- **Azimuth is true north** (spec E6). It was relative to the projection's grid north. Now grid azimuth + meridian convergence (PROJ) per polygon, with `grid_convergence_deg` recorded and `azimuth_reference` in the manifest. Verified: one physical plane measures the same true azimuth in UTM 12N, UTM 11N and Arizona Central State Plane to 0.05°. On the Phoenix test block every azimuth moved by −0.79° to −0.81° and nothing else changed. **Any azimuth in an earlier output or report is grid north.**
+- **Python API** (`pv_geom.run / load / report / describe`); **`pv-geom demo`** (generated sample area, offline).
+- **Tile index optional** (read from LAZ headers). **Run-start class check** (stops without a ground class). **Estimate before a run** (`--dry-run`: tiles, GB, rough time; cost on Coiled if a price is configured — predicted 68 s vs 88 s actual on the Phoenix block).
+- **Report**: `--headline`, `--weight`, 95% bootstrap intervals on median tilt and facing shares. **Release dataset** carries a README, deposit metadata and checksums.
+
+Test output: `out_v0.4.0_phoenix_test` (main checkout), run straight from `configs/phoenix.yaml` with only the bbox, backend and local paths overridden.
+
+*Next (spec milestone 0.5, measurement depth):* C1 (cut `unscreened` below 20%), E1 (multi-facet polygons as segments), D3 (LiDAR in feet), H4/H5, F1/F2 (compare runs, regional breakdown), G4. None needs truth data or a full run. Still open for the owner: which Phoenix layer to measure (raw vs dissolved), R14 (column names), segment table layout (§8.2), licence.
+
+**2026-10-07 — MILESTONE 0.3 COMPLETE (branch `v0.3-accounting`, stacked on `v0.3-refactor`).** Stories B1–B3, G1, H1, H3, I3, I4 on top of the refactoring pass below. Only R14 (renaming the `panel_*` columns) is left, and that is an owner decision.
+
+- **One row per input polygon** with a `status` (`measured` / `no_fit` / `no_lidar_tile` / `outside_tile_index` / `tile_unreadable` / `invalid_geometry`) and, for no-fits, a `fit_failure` reason. Unmeasured polygons are in `part-unmeasured.parquet`, rewritten each run so `--resume` can still retry a failed group.
+- **Input screening**: nothing is dropped; invalid polygons are repaired and flagged; new flags `below_min_area`, `overlaps_polygon`, `duplicate_geometry`.
+- **Schema version 0.3** in every partition and the manifest; older outputs upgrade on read.
+- **Safe resume**: refuses an output made from different polygons, measurement settings or schema (`--force-resume` overrides; a different cluster shape is fine).
+- **Progress line** per finished group; **typed errors with a remedy** (`pv_geom.errors`), printed by the CLI without a traceback; **cloud packages are optional extras** (`[cloud]`, `[coiled]`).
+
+*Verified on real data* (`out_v0.3.0_phoenix_test`, `out_v0.3.0_delaware_test` in the main checkout): every measured value is identical to the v0.2.0 runs on all 3,390 Phoenix and 816 Delaware rows; only flags were added. Planning the full 457,037-part atlas with the new checks reproduces the known 3,990 tile groups and 15,453 polygons outside the index.
+
+*What the accounting shows — worth acting on:*
+
+| | Phoenix block (3,390) | Delaware block (816) | Full Phoenix atlas (457,037) |
+|---|---|---|---|
+| No fit: no single plane / too few points / ground-level only | 365 / 24 / 7 | 84 / 12 / 37 | — |
+| `overlaps_polygon` (≥ 20% of own area shared) | 136 (4.0%) | 276 (34%) | 36,037 (7.9%) |
+| `duplicate_geometry` | 1 | 10 | 1 |
+| `below_min_area` (< 1 m²) | 1 | 0 | 133 |
+
+1. **The raw detection layers double-count.** A third of the Delaware test polygons overlap another one, and 7.9% of the Phoenix atlas does. The Phoenix working paper (`pv_prediction_pipeline`, "Bootstrap Permits") dissolves its 456,997 raw detections to 435,295 for exactly this reason. pv-geom has so far been run on the **raw** layer, so its count- and area-weighted statistics count those arrays twice. **Open decision: measure the dissolved layer** (not available in this repo's inputs yet).
+2. **Most no-fits are not a data shortage.** 92% of Phoenix no-fits and 63% of Delaware's have enough returns but no single plane — the case multi-facet segmentation (spec E1) addresses.
+3. **Delaware has ground-level polygons**: 37 of 816 hold only ground returns.
+
+*Corrected:* `configs/phoenix.yaml` declared the polygon vintage as 2024-04-01; the imagery is the Maricopa County Sep–Oct 2024 ortho, so the gap to the LiDAR is ~3.9 years, not 3.3. Every earlier Phoenix report in this file and under `out_v0.2.0_*` states the old figure. No `geometry_basis` changes (the polygons postdate the LiDAR either way).
+
+*State:* 300+ unit tests; lint and types clean; version `0.3.0.dev0`. Next per the spec is milestone 0.4 (evidence: accuracy against truth, `geometry_basis` validation, segments, full reruns) — gated on the truth-data decision in spec §8.
+
+**2026-10-07 — 0.3 REFACTORING PASS DONE (branch `v0.3-refactor`, stacked on `v0.2-geometry-report`).** Spec §5 stories R1–R13, under a no-change-in-results rule. The two worst functions are gone: `run_pipeline` 449 → ~100 lines over `plan`/`executor`/`sink`; `_build_row` (224 lines, 17 params, dict) → `measure_polygon` over typed records with separately testable steps. Also: one vector reader, one storage module, one summary, logging instead of `print`, mounting moved to `experimental/`, report builder split by concern, config cleanup. **Quality: mypy 88 → 0, ruff 26 → 0, tests 254 → 277, coverage 83 → 91%; CI gates on Linux + Windows.** `uv run python scripts/check.py` runs every gate.
+
+*Safety net:* `tests/benchmark` compares the whole pipeline's output against golden files. A synthetic 15-array area is committed and runs in CI. Real slices (120 Phoenix + 80 Delaware polygons, 35 MB) live in `data/benchmark/` in the main checkout, gitignored — **the GitHub repo is public and the polygon layers are unpublished, so they were deliberately not committed**; rebuild with `scripts/build_benchmark.py`, point `PV_GEOM_BENCHMARK_DIR` at them from a worktree. Every refactoring commit reproduced all three; the split report reproduces the Phoenix test report byte for byte.
+
+*Found along the way:* `version` and `inspect-tile --json` were emitting colour codes into machine-readable output (fixed); `.coverage` was tracked in git (untracked); CI had been failing its own lint step.
+
+*Not done, still in milestone 0.3:* B1–B3 (one row per input polygon, with a status), H1 (safe resume), H3 (progress line), I3 (cloud packages as extras), I4 (typed errors), G1 (schema version). These change behaviour, so they come after the pass rather than inside it. Config hash changed (R7); version is `0.3.0.dev0`.
+
 **2026-10-07 — v0.2.0: THE PACKAGE'S JOB IS RESTATED, AND IT NOW RUNS ON A SECOND JURISDICTION.** Goal as set by the user: ingest a polygon set (with a vintage) and a LiDAR dataset (with a capture date) and produce datasets, visualizations and a report characterising the geometry of the polygons, fit for reporting or journal publication. **Mounting classification is archived** (off by default, columns out of the schema; code + tests kept in `classify/`) — it needs better heuristics with tested examples, and it no longer blocks anything. The parking-lot-first redesign (old pick-up item #1) is parked with it.
 
 What 0.2.0 does (branch `v0.2-geometry-report`; 254 unit tests, was 194):

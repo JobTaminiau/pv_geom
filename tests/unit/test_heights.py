@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 from shapely.geometry import box
 
+from pv_geom.experimental.mounting.features import ground_under_polygon
 from pv_geom.geometry.heights import (
-    ground_under_polygon,
     height_above_ground,
     height_above_roof,
     panel_roof_angle_deg,
@@ -179,7 +179,7 @@ def test_hroof_tilted_roof_offset_panel() -> None:
     assert h == pytest.approx(0.5, abs=1e-9)
 
 
-def test_hroof_failed_fit_returns_nan() -> None:
+def test_hrooffailed_fit_returns_nan() -> None:
     panel = np.zeros((10, 3))
     failed = _fit(n_inliers=0, tilt=float("nan"))
     assert np.isnan(height_above_roof(panel, failed))
@@ -208,7 +208,7 @@ def test_panel_roof_angle_known() -> None:
     assert panel_roof_angle_deg(f, g) == pytest.approx(30.0, abs=1e-6)
 
 
-def test_panel_roof_angle_failed_fit_is_nan() -> None:
+def test_panel_roof_anglefailed_fit_is_nan() -> None:
     f = _fit(normal=np.array([0.0, 0.0, 1.0]), n_inliers=100)
     bad = _fit(normal=np.array([0.0, 0.0, 1.0]), n_inliers=0, tilt=float("nan"))
     assert np.isnan(panel_roof_angle_deg(f, bad))

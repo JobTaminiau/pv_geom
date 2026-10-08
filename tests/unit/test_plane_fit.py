@@ -56,7 +56,7 @@ def synthesize_plane(
         pts = pts + rng.normal(0.0, noise_m, size=n)[:, None] * n_truth
 
     if outlier_frac > 0:
-        n_out = int(round(n * outlier_frac))
+        n_out = round(n * outlier_frac)
         out_idx = rng.choice(n, size=n_out, replace=False)
         pts[out_idx] = rng.uniform(
             -outlier_scale_m, outlier_scale_m, size=(n_out, 3)
@@ -168,7 +168,7 @@ def test_rejects_outliers() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_too_few_points_returns_failed_fit() -> None:
+def test_too_few_points_returnsfailed_fit() -> None:
     pts = np.zeros((2, 3))
     fit = fit_plane_ransac(pts)
     assert fit.n_inliers == 0
@@ -241,7 +241,7 @@ def test_bootstrap_uncertainty_grows_with_noise() -> None:
     assert tu_hi > tu_low
 
 
-def test_bootstrap_failed_fit_returns_nan() -> None:
+def test_bootstrapfailed_fit_returns_nan() -> None:
     fit = PlaneFit(
         normal=np.array([0.0, 0.0, 1.0]),
         centroid=np.zeros(3),

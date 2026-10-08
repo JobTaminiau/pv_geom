@@ -40,7 +40,7 @@ def tilt_azimuth_from_normal(
     return tilt_deg, azimuth_deg
 
 
-def _failed_fit(n_total: int) -> PlaneFit:
+def failed_fit(n_total: int) -> PlaneFit:
     return PlaneFit(
         normal=np.array([0.0, 0.0, 1.0]),
         centroid=np.zeros(3),
@@ -83,7 +83,7 @@ def fit_plane_ransac(
         raise ValueError(f"points must be (N, 3); got shape {pts.shape}")
     n = len(pts)
     if n < 3:
-        return _failed_fit(n)
+        return failed_fit(n)
 
     rng = np.random.default_rng(seed)
     best_inliers: np.ndarray | None = None
@@ -107,7 +107,7 @@ def fit_plane_ransac(
             best_inliers = in_mask
 
     if best_inliers is None or best_count < 3:
-        return _failed_fit(n)
+        return failed_fit(n)
 
     # Refine plane on inliers via PCA, then re-classify inliers and recompute RMSE.
     inliers = pts[best_inliers]
@@ -118,7 +118,7 @@ def fit_plane_ransac(
         dists = np.abs((pts - centroid) @ normal)
         best_inliers = dists < ransac_threshold
         if best_inliers.sum() < 3:
-            return _failed_fit(n)
+            return failed_fit(n)
         inliers = pts[best_inliers]
         residuals = (inliers - centroid) @ normal
     else:
@@ -153,6 +153,51 @@ def fit_plane_ransac(
         n_total=n,
         inlier_mask=best_inliers,
     )
+
+
+def fit_planes_sequential(
+    points: np.ndarray,
+    *,
+    ransac_threshold: float,
+    min_points: int,
+    max_planes: int = 4,
+    max_iter: int = 200,
+    tilt_floor_deg: float = 1.0,
+    seed: int | None = None,
+) -> list[PlaneFit]:
+    """Peel planes off a point set one at a time, largest first.
+
+    RANSAC finds the plane with the most support; its inliers are set aside and
+    the search repeats on what is left, until a plane would have fewer than
+    ``min_points`` inliers or ``max_planes`` have been found. No consensus
+    floor is applied — the caller decides what each plane is worth.
+
+    Every returned ``PlaneFit`` has ``n_total = len(points)`` and an
+    ``inlier_mask`` over *all* the points, and the masks are disjoint.
+    """
+    pts = np.asarray(points, dtype=np.float64)
+    remaining = np.ones(len(pts), dtype=bool)
+    planes: list[PlaneFit] = []
+    for k in range(int(max_planes)):
+        idx = np.flatnonzero(remaining)
+        if len(idx) < max(3, min_points):
+            break
+        fit = fit_plane_ransac(
+            pts[idx], ransac_threshold=ransac_threshold, min_inlier_frac=0.0,
+            max_iter=max_iter, tilt_floor_deg=tilt_floor_deg,
+            seed=None if seed is None else seed + k,
+        )
+        if fit.n_inliers < min_points or np.isnan(fit.tilt_deg):
+            break
+        mask = np.zeros(len(pts), dtype=bool)
+        mask[idx[fit.inlier_mask]] = True
+        planes.append(PlaneFit(
+            normal=fit.normal, centroid=fit.centroid, tilt_deg=fit.tilt_deg,
+            azimuth_deg=fit.azimuth_deg, rmse=fit.rmse, n_inliers=fit.n_inliers,
+            n_total=len(pts), inlier_mask=mask,
+        ))
+        remaining &= ~mask
+    return planes
 
 
 def bootstrap_uncertainty(
@@ -198,10 +243,7 @@ def bootstrap_uncertainty(
     if len(sin_az) > 1:
         # Mardia circular std: σ = sqrt(-2 * ln R), R is mean resultant length.
         r = float(np.hypot(np.mean(cos_az), np.mean(sin_az)))
-        if r > 0:
-            azimuth_unc = float(np.degrees(np.sqrt(-2.0 * np.log(r))))
-        else:
-            azimuth_unc = float("nan")
+        azimuth_unc = float(np.degrees(np.sqrt(-2.0 * np.log(r)))) if r > 0 else float("nan")
     else:
         azimuth_unc = float("nan")
     return tilt_unc, azimuth_unc

@@ -1,21 +1,44 @@
-# Metro Phoenix overrides; unset keys take the defaults in default.yaml.
+# Metropolitan Phoenix. Run with:  pv-geom run --config configs/phoenix.yaml
+# Unset keys take the defaults in default.yaml.
+#
+# >>> Check the `inputs` below against the layers chosen for the final analysis
+# >>> before the release run.
+study:
+  name: Metropolitan Phoenix
+  output: ../out/phoenix            # relative to this file; or an s3:// prefix
+
+inputs:
+  # The DISSOLVED detection layer: 435,295 polygons, one per overlap cluster
+  # (owner decision, 2026-10-07). The raw layer beside it (pv_attributes.parquet,
+  # 456,997 detections) counts an array twice wherever two overlapping image
+  # composites both detected it: 5% of rows, 13% of summed area. `cluster_id` is
+  # the smallest member detection_id; `member_ids` in the source file lists the
+  # raw detections each cluster merges.
+  polygons: s3://mc-aerials/segmentation/output/run_20260728T061559Z/overlap_clusters_v1/clusters_dissolved.parquet
+  polygon_id_col: cluster_id
+  # USGS 3DEP LPC AZ MaricopaPinal 2020.
+  lidar_prefix: s3://free-research-data-raw/US/arizona/top-level/lidar/lidar_data
+  tile_index: s3://free-research-data-raw/US/arizona/top-level/lidar/lidar_data/USGS_AZ_MaricopaPinal_1_2020_TileIndex.zip
+  name_template: "USGS_LPC_AZ_MaricopaPinal_2020_B20_{name}.laz"
+  # FEMA USA Structures, Arizona. Optional. The local copy; restage it or
+  # remove this line to run on polygons and LiDAR alone.
+  footprints: ../data/fema/az.geoparquet
+
 crs:
   target: EPSG:6341           # USGS LPC AZ MaricopaPinal 2020 — verified via spike
 
 vintage:
-  # Mask R-CNN detections come from Maricopa County 2024 orthoimagery; the
-  # USGS 3DEP tiles were flown 2020-11-26/28 (GPS time — the LAS header says
-  # 2021-06-30, which is the delivery date). Arrays built in the ~3.4-year gap
-  # are in the inventory but not in the point cloud. Declaring it here makes
-  # the run say so instead of leaving it to tribal knowledge. The LiDAR date
-  # is left to be measured per tile.
-  polygon_vintage: 2024-04-01
+  # The Mask R-CNN detections come from the Maricopa County
+  # Aerial2024Sep2024OctOrtho product, acquired September-October 2024 (a
+  # window, so its last day counts). The USGS 3DEP tiles were flown in late
+  # November 2020 by GPS time (the LAS header says 2021-06-30, the delivery
+  # date). Arrays built in the ~3.9 years between are in the polygon set but
+  # not in the point cloud. The LiDAR date is left to be measured per tile.
+  # (Until 0.3 this file said 2024-04-01, which understated the gap by ~7 months.)
+  polygon_vintage: 2024-10
 
 io:
   lidar_reader: laspy
-  s3:
-    requester_pays: false
-    region: us-east-2
 
 compute:
   backend: coiled

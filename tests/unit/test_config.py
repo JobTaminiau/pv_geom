@@ -1,10 +1,12 @@
 """Config validation: round-trip the YAML files we ship and check hash stability."""
 
+from datetime import date
 from pathlib import Path
 
 import pytest
 
 from pv_geom.config import PVGeomConfig
+from pv_geom.vintage import parse_vintage
 
 CONFIGS = Path(__file__).resolve().parents[2] / "configs"
 
@@ -43,7 +45,7 @@ def test_phoenix_overrides() -> None:
     assert cfg.crs.target == "EPSG:6341"
     assert cfg.compute.backend == "coiled"
     assert cfg.compute.coiled.name == "pv-geom-phoenix"
-    assert str(cfg.vintage.polygon_vintage) == "2024-04-01"
+    assert parse_vintage(cfg.vintage.polygon_vintage) == date(2024, 10, 31)
 
 
 def test_default_yaml_matches_code_defaults() -> None:

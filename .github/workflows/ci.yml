@@ -6,13 +6,46 @@ on:
   pull_request:
 
 jobs:
-  test:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync --extra dev
+      - name: Lint
+        run: uv run ruff check src tests scripts
+      - name: Types
+        run: uv run mypy src
+      # Unit tests plus the synthetic regression benchmark. The real-data
+      # benchmarks need unpublished inputs and skip themselves here.
+      - name: Tests
+        run: uv run pytest -m "not integration" --cov=pv_geom --cov-fail-under=88
+
+  # A core-only install (no extras) must measure and report: no cloud packages,
+  # no test tooling. Runs the synthetic study area end to end.
+  core-install:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
         with:
-          python-version: "3.11"
-      - run: uv sync --extra dev
-      - run: uv run ruff check .
-      - run: uv run pytest -m "not integration"
+          python-version: "3.12"
+      - run: uv sync
+      - run: uv run pv-geom version
+      - name: Measure and report without extras
+        run: |
+          uv run python -c "
+          from pathlib import Path
+          from pv_geom.sample import write_scene
+          from pv_geom.testing import run_benchmark
+          from pv_geom.report import build_report
+          out = run_benchmark(write_scene(Path('core_demo/bench')), Path('core_demo/out'))
+          print(build_report(out).html)
+          "

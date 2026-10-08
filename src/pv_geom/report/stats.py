@@ -20,9 +20,12 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from pv_geom.schema import FIT_FAILURE_DESCRIPTIONS, MEASURED, STATUS_DESCRIPTIONS
+from pv_geom.schema import NO_FIT as NO_FIT_STATUS
 from pv_geom.vintage import (
     GEOMETRY_BASIS,
     NO_FIT,
+    NOT_MEASURED,
     PANEL_BASES,
     PANEL_BY_VINTAGE,
     PANEL_CONFIRMED,
@@ -46,6 +49,7 @@ BASIS_LABELS: dict[str, str] = {
     SURFACE_UNRESOLVED: "Surface unresolved",
     UNSCREENED: "Unscreened",
     NO_FIT: "No fit",
+    NOT_MEASURED: "Not measured",
 }
 
 WEIGHTS = ("count", "area")
@@ -78,6 +82,8 @@ def prepare(df: pd.DataFrame, manifest: dict | None = None, *,
     """
     df = df.copy()
     df["fitted"] = df["panel_tilt_deg"].notna()
+    if "status" not in df.columns:
+        df["status"] = np.where(df["fitted"], MEASURED, NO_FIT_STATUS)
 
     if "surface_area_m2" not in df.columns:
         with np.errstate(invalid="ignore"):
@@ -221,8 +227,64 @@ def basis_composition(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+BOOTSTRAP_REPLICATES = 200
+BOOTSTRAP_MIN_ROWS = 20
+
+
+def bootstrap_intervals(tilt: np.ndarray, az: np.ndarray, w: np.ndarray,
+                        n_boot: int = BOOTSTRAP_REPLICATES, seed: int = 0) -> dict[str, float]:
+    """95% intervals for the median tilt and the four facing shares.
+
+    A Poisson bootstrap over polygons: each replicate reweights every polygon by
+    an independent Poisson(1) draw, which for these sample sizes is the same as
+    resampling polygons with replacement but needs no re-sorting. The interval
+    reflects *sampling* variability across polygons — how much the statistic
+    would move with a different draw of arrays from the same fleet — and not
+    measurement error in any one polygon, nor the vintage question.
+
+    ``az`` is NaN where a polygon has no defined azimuth. Returns NaN intervals
+    below ``BOOTSTRAP_MIN_ROWS`` polygons.
+    """
+    keys = ["tilt_p50_deg", *[f"share_facing_{q}" for q in QUADRANTS]]
+    out = {f"{k}_ci_{side}": np.nan for k in keys for side in ("lo", "hi")}
+    n = len(tilt)
+    if n < BOOTSTRAP_MIN_ROWS:
+        return out
+    order = np.argsort(tilt)
+    x, w_sorted = tilt[order], w[order]
+    has_az = np.isfinite(az)
+    quad = np.full(n, -1)
+    quad[has_az] = sector_index(az[has_az], 4)
+
+    rng = np.random.default_rng(seed)
+    medians = np.empty(n_boot)
+    shares = np.empty((n_boot, 4))
+    for b in range(n_boot):
+        draw = rng.poisson(1.0, n)
+        ww = w_sorted * draw[order]
+        total = ww.sum()
+        if total <= 0:
+            medians[b] = np.nan
+        else:
+            cdf = (np.cumsum(ww) - 0.5 * ww) / total
+            medians[b] = np.interp(0.5, cdf, x)
+        wa = w * draw
+        denom = wa[has_az].sum()
+        for i in range(4):
+            shares[b, i] = wa[quad == i].sum() / denom if denom > 0 else np.nan
+
+    out["tilt_p50_deg_ci_lo"], out["tilt_p50_deg_ci_hi"] = (
+        float(v) for v in np.nanpercentile(medians, [2.5, 97.5]))
+    for i, q in enumerate(QUADRANTS):
+        if np.isfinite(shares[:, i]).any():
+            lo, hi = np.nanpercentile(shares[:, i], [2.5, 97.5])
+            out[f"share_facing_{q}_ci_lo"], out[f"share_facing_{q}_ci_hi"] = float(lo), float(hi)
+    return out
+
+
 def summary_statistics(df: pd.DataFrame) -> pd.DataFrame:
-    """Headline tilt and azimuth statistics per stratum and weighting."""
+    """Headline tilt and azimuth statistics per stratum and weighting, with 95%
+    bootstrap intervals on the median tilt and the facing shares."""
     rows = []
     for key, (label, _) in STRATA.items():
         sub = df[stratum_mask(df, key)]
@@ -248,6 +310,8 @@ def summary_statistics(df: pd.DataFrame) -> pd.DataFrame:
                 row[f"share_facing_{name}"] = (
                     float(w_az[quad == i].sum() / w_az.sum()) if w_az.sum() > 0 else np.nan
                 )
+            row.update(bootstrap_intervals(
+                tilt, sub["panel_azimuth_deg"].to_numpy(dtype=float), w))
             rows.append(row)
     return pd.DataFrame(rows)
 
@@ -398,16 +462,14 @@ def flag_counts(df: pd.DataFrame) -> pd.DataFrame:
 def coverage(df: pd.DataFrame, manifest: dict | None = None) -> pd.DataFrame:
     """The funnel from input polygons to rows whose geometry describes panels."""
     counts = (manifest or {}).get("counts", {})
-    n_rows = len(df)
-    n_fit = int(df["fitted"].sum())
-    n_panel = int(stratum_mask(df, "panel").sum())
-    steps = []
-    if counts.get("polygons"):
-        steps.append(("Input polygon parts", int(counts["polygons"])))
-    steps += [
-        ("Covered by LiDAR (rows written)", n_rows),
-        ("Plane fitted", n_fit),
-        ("Panel basis (confirmed or by vintage)", n_panel),
+    # Outputs before schema 0.3 held rows only for covered polygons; the input
+    # count then comes from the manifest.
+    n_input = max(len(df), int(counts.get("polygons") or 0))
+    steps = [
+        ("Input polygons", n_input),
+        ("Covered by LiDAR", int(df["status"].isin([MEASURED, NO_FIT_STATUS]).sum())),
+        ("Plane fitted", int(df["fitted"].sum())),
+        ("Panel basis (confirmed or by vintage)", int(stratum_mask(df, "panel").sum())),
     ]
     first = steps[0][1] if steps else 0
     return pd.DataFrame([
@@ -416,10 +478,49 @@ def coverage(df: pd.DataFrame, manifest: dict | None = None) -> pd.DataFrame:
     ])
 
 
+def status_table(df: pd.DataFrame) -> pd.DataFrame:
+    """Every input polygon by what happened to it."""
+    n = len(df)
+    counts = df["status"].value_counts()
+    return pd.DataFrame([
+        {"status": s, "n": int(counts.get(s, 0)),
+         "share": counts.get(s, 0) / n if n else np.nan, "description": desc}
+        for s, desc in STATUS_DESCRIPTIONS.items()
+    ])
+
+
+def fit_failure_table(df: pd.DataFrame) -> pd.DataFrame:
+    """Why covered polygons have no fit."""
+    failed = df[df["status"] == NO_FIT_STATUS]
+    counts = failed["fit_failure"].value_counts() if "fit_failure" in df.columns else {}
+    n = len(failed)
+    return pd.DataFrame([
+        {"fit_failure": f, "n": int(counts.get(f, 0)),
+         "share_of_no_fit": counts.get(f, 0) / n if n else np.nan, "description": desc}
+        for f, desc in FIT_FAILURE_DESCRIPTIONS.items()
+    ])
+
+
+def facets_table(df: pd.DataFrame) -> pd.DataFrame:
+    """Measured polygons by the number of distinct facets they hold."""
+    measured = df[df["fitted"]]
+    n = len(measured)
+    planes = measured["n_planes_detected"].fillna(1).astype(int)
+    counts = planes.value_counts().sort_index()
+    return pd.DataFrame([
+        {"facets": int(k), "n": int(v), "share": v / n if n else np.nan,
+         "area_m2": float(measured.loc[planes == k, "w_area"].sum())}
+        for k, v in counts.items()
+    ], columns=["facets", "n", "share", "area_m2"])
+
+
 def all_tables(df: pd.DataFrame, manifest: dict | None = None) -> dict[str, pd.DataFrame]:
     """Every report table, keyed by the file stem it is written under."""
     return {
         "coverage": coverage(df, manifest),
+        "status": status_table(df),
+        "fit_failure": fit_failure_table(df),
+        "facets": facets_table(df),
         "geometry_basis": basis_composition(df),
         "summary_statistics": summary_statistics(df),
         "tilt_profile": tilt_profile(df),

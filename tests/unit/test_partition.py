@@ -32,9 +32,9 @@ def test_simple_inside_one_tile() -> None:
     tindex = _tindex([("t1", (0, 0, 100, 100)), ("t2", (100, 0, 200, 100))])
     polys = _polys([("p1", (10, 10, 12, 12)), ("p2", (110, 10, 112, 12))])
     out = assign_polygons_to_tiles(polys, tindex)
-    pri = dict(zip(out["polygon_id"], out["primary_tile_id"]))
+    pri = dict(zip(out["polygon_id"], out["primary_tile_id"], strict=False))
     assert pri == {"p1": "t1", "p2": "t2"}
-    overlaps = dict(zip(out["polygon_id"], out["overlapping_tile_ids"]))
+    overlaps = dict(zip(out["polygon_id"], out["overlapping_tile_ids"], strict=False))
     assert overlaps == {"p1": ("t1",), "p2": ("t2",)}
 
 

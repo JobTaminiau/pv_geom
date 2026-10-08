@@ -15,6 +15,9 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from pv_geom.errors import require
+from pv_geom.schema import MEASURED, NO_FIT, SCHEMA_VERSION, is_recommended
+
 
 def geo_metadata(table: pa.Table, crs: str | None) -> bytes:
     """GeoParquet 1.0 ``geo`` metadata for a table with a WKB ``geometry`` column."""
@@ -39,9 +42,22 @@ def with_geo_metadata(table: pa.Table, crs: str | None) -> pa.Table:
     return table.replace_schema_metadata(md)
 
 
-def write_partition(table: pa.Table, target: str | Path, crs: str | None, fs=None) -> None:
+# Schema-metadata keys every partition carries, so a partition file is
+# self-describing and ``--resume`` can check what it is continuing.
+META_SCHEMA_VERSION = b"pv_geom.schema_version"
+META_RESULT_HASH = b"pv_geom.result_hash"
+META_PLAN_FINGERPRINT = b"pv_geom.plan_fingerprint"
+
+
+def write_partition(table: pa.Table, target: str | Path, crs: str | None, fs=None,
+                    metadata: dict[bytes, str] | None = None) -> None:
     """Write one partition as GeoParquet to a local path or (with ``fs``) S3."""
     table = with_geo_metadata(table, crs)
+    md = dict(table.schema.metadata or {})
+    md[META_SCHEMA_VERSION] = SCHEMA_VERSION.encode()
+    for key, value in (metadata or {}).items():
+        md[key] = str(value).encode()
+    table = table.replace_schema_metadata(md)
     if fs is not None:
         with fs.open(str(target), "wb") as f:
             pq.write_table(table, f)
@@ -54,6 +70,7 @@ def _list_parts(output_uri: str) -> tuple[list[str], Any]:
     if s.startswith("s3://"):
         import fsspec
 
+        require("s3fs", "cloud", "reading output from S3")
         fs = fsspec.filesystem("s3")
         return sorted("s3://" + p for p in fs.glob(f"{s}/part-*.parquet")), fs
     return sorted(str(p) for p in Path(s).glob("part-*.parquet")), None
@@ -87,9 +104,30 @@ def read_output_table(output_uri: str | Path) -> pa.Table:
             tables.append(pq.read_table(p))
     # Partitions of one run share a schema; "default" promotion also lets a
     # prefix written across versions (missing columns -> null) be read.
-    return pa.concat_tables(
+    return upgrade_table(pa.concat_tables(
         [t.replace_schema_metadata(None) for t in tables], promote_options="default"
-    )
+    ))
+
+
+def upgrade_table(table: pa.Table) -> pa.Table:
+    """Bring a table written by an older schema version up to the current one.
+
+    Older outputs lack ``status`` (added in schema 0.3): they held rows only for
+    polygons the LiDAR covered, so each is ``measured`` or ``no_fit`` according
+    to whether it has a tilt.
+    """
+    if "status" not in table.column_names and "panel_tilt_deg" in table.column_names:
+        fitted = table.column("panel_tilt_deg").is_valid()
+        status = pa.array([MEASURED if ok else NO_FIT for ok in fitted.to_pylist()], pa.string())
+        table = table.append_column("status", status)
+    needed = {"status", "geometry_basis", "flags"}
+    if "recommended" not in table.column_names and needed <= set(table.column_names):
+        # Added in schema 0.5; derived from columns older outputs already have.
+        rec = [is_recommended(st, basis, flags or ()) for st, basis, flags in zip(
+            table.column("status").to_pylist(), table.column("geometry_basis").to_pylist(),
+            table.column("flags").to_pylist(), strict=True)]
+        table = table.append_column("recommended", pa.array(rec, pa.bool_()))
+    return table
 
 
 def output_crs(output_uri: str | Path, manifest: dict | None = None) -> str | None:
@@ -100,12 +138,11 @@ def output_crs(output_uri: str | Path, manifest: dict | None = None) -> str | No
         return str(crs)
     parts, fs = _list_parts(str(output_uri))
     if parts:
-        src = fs.open(parts[0], "rb") if fs is not None else parts[0]
-        try:
-            md = pq.read_schema(src).metadata or {}
-        finally:
-            if fs is not None:
-                src.close()
+        if fs is not None:
+            with fs.open(parts[0], "rb") as f:
+                md = pq.read_schema(f).metadata or {}
+        else:
+            md = pq.read_schema(parts[0]).metadata or {}
         if b"geo" in md:
             from pyproj import CRS
 

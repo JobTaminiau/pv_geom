@@ -1,0 +1,44 @@
+site_name: pv-geom
+site_description: Geometry of photovoltaic arrays from airborne LiDAR
+repo_url: https://github.com/JobTaminiau/pv_geom
+docs_dir: docs/guide
+site_dir: build/site
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - content.code.copy
+  palette:
+    - scheme: default
+      toggle: {icon: material/brightness-7, name: Dark mode}
+    - scheme: slate
+      toggle: {icon: material/brightness-4, name: Light mode}
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc: {permalink: true}
+  - pymdownx.highlight
+  - pymdownx.superfences
+
+nav:
+  - Home: index.md
+  - Tutorial: tutorial.md
+  - How-to:
+      - A new study area: how-to/new-study-area.md
+      - Running in the cloud: how-to/cloud.md
+      - Reports: how-to/reports.md
+      - Validation against outside data: how-to/validate.md
+      - Reproducing a run: how-to/reproduce.md
+  - Concepts:
+      - Vintage and basis: concepts/vintage-and-basis.md
+      - How it measures: concepts/how-it-measures.md
+      - Limits: concepts/limits.md
+  - Reference:
+      - Output columns: reference/columns.md
+      - Status, basis and flags: reference/status-basis-flags.md
+      - Configuration: reference/configuration.md
+      - Command line: reference/cli.md
+      - Python API: reference/python-api.md
+  - Questions: faq.md

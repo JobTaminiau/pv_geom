@@ -2,6 +2,22 @@
 
 ## Unreleased — 0.6.0
 
+### Added — documentation site (I5)
+
+- `docs/guide/`: a tutorial on the bundled demo, how-to guides (a new study
+  area, running in the cloud, reports, validation, reproducing a run), concept
+  pages (vintage and basis, how it measures, limits), a FAQ, and reference
+  pages for columns, status/basis/flags, configuration, the command line and
+  the Python API.
+- The reference pages are **generated from the code** by
+  `scripts/build_docs.py`; a test fails if they are out of date. Other tests
+  check that every command and option the pages show exists, that every column
+  they name exists, that links resolve, and that the tutorial's stated results
+  are what the demo produces.
+- `mkdocs build --strict` runs in CI. The site is not published anywhere yet.
+- CI now really runs on both Python versions (the version was being passed to
+  the wrong setting).
+
 ### Added — reproducibility (G5)
 
 - Every manifest now has a `reproducibility` block: a **content hash** of the

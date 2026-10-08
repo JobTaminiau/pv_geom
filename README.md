@@ -20,6 +20,8 @@ LiDAR tiles (+ date)  ─┘
 
 Per-milestone history is in `STATUS.md`; changes by version in `CHANGELOG.md`.
 
+**Documentation:** the guide is in [`docs/guide/`](docs/guide/index.md) (tutorial, how-to guides, concepts, reference). Build the site with `uv sync --extra docs && uv run mkdocs serve`.
+
 ## Why the two dates matter
 
 The polygons and the LiDAR are almost never captured at the same time. If the
@@ -120,7 +122,7 @@ one saying what to do.
 | --- | --- | --- |
 | PV polygons | yes | GeoParquet, GeoPackage, GeoJSON, Shapefile or FlatGeobuf, in any CRS. An id column is optional: `polygon_id`, `detection_id`, `id`, `fid` or `objectid` is used if present (or name one with `--polygon-id-col`), otherwise ids are synthesized. MultiPolygons are exploded into one row per part. |
 | Polygon vintage | recommended | `--polygon-vintage 2024`, `2024-04` or `2024-04-01`. A year or month counts as its last day, so the gap to the LiDAR is never understated. For mosaics or permit-dated layers use `--polygon-vintage-col` to read a per-polygon date. |
-| LiDAR tiles | yes | Classified LAZ, one file per tile, local or on S3, in a **projected, metric CRS** (points are not reprojected; foot-based CRSs are refused). Needs ground (ASPRS class 2). Building (class 6) is used when present; otherwise unclassified returns above local ground are used, which is the common case for public collections. |
+| LiDAR tiles | yes | Classified LAZ, one file per tile, local or on S3, in a **projected CRS**. Tiles in feet, or in a different CRS from the working one, are converted as they are read. Needs ground (ASPRS class 2). Building (class 6) is used when present; otherwise unclassified returns above local ground are used, which is the common case for public collections. |
 | LiDAR tile index | no | Without one, the index is read from the tiles' own headers (they must declare a CRS). Otherwise: GeoParquet / GPKG / SHP / zipped SHP with one polygon per tile. The id column is auto-detected (`Name`, `NAME`, `tile_id`, …); `--name-template` turns it into a filename (default `{name}.laz`). |
 | LiDAR date | measured | Left out, it is **measured per tile from per-point GPS time**, which is the flight date. Declare it with `--lidar-date` only if the tiles carry no usable GPS time. The LAS header date is the *delivery* date: Phoenix's tiles were flown 2020-11-26/28 and stamped 2021-06-30; Delaware's were flown 2023-03 and stamped 2024-10. |
 | Building footprints | no | `--footprints`. With them, `on_building`/`building_id` are filled and the roof reference is clipped to the building. Without them `on_building` is null and the roof reference comes from an open ring around each polygon. |
@@ -226,6 +228,14 @@ Two further modes:
 
 Compares a run with geometry reported by someone else (PVDAQ, USPVDB, permits),
 mount against measured facet. See [`docs/validation.md`](docs/validation.md).
+
+### Reproducing a run — `pv-geom verify`, `pv-geom reproduce`
+
+Every manifest records a content hash of the rows, the inputs read and the
+environment. `pv-geom verify <output>` checks an output against its manifest
+(or `--against` another output); `pv-geom reproduce <output> --out <new>` reruns
+it and compares. The result is bit for bit on one machine and within 0.0001
+across platforms.
 
 ### Choosing rows
 

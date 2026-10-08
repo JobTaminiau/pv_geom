@@ -408,5 +408,11 @@ platforms it does not and cannot (BLAS last-bit differences, even between two Wi
 runners): measured differences are at most 1.5e-5 deg and 1e-8 m with every row, label and
 count identical, so the cross-platform criterion is "equivalent within 1e-4", enforced in CI
 against a committed reference output.
+
+**I5 (2026-10-08, same branch):** documentation site written (`docs/guide/`, mkdocs-material):
+tutorial, five how-to guides, three concept pages, FAQ, five generated reference pages.
+Tested for currency and for agreeing with the code. Not done: the "15 minutes on Windows,
+macOS and Linux by someone new" check needs people; only Windows was exercised by hand and
+Linux through CI. The site is not published.
 One observation for later: a run CRS used far outside its zone (grid scale ~1.001) shifts
 tilt by a few hundredths of a degree; in-zone the effect is below 0.01 degrees.

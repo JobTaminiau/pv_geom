@@ -8,6 +8,7 @@ and it is all ``--dry-run`` needs.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from datetime import date
@@ -21,6 +22,7 @@ from pv_geom.io.footprints import read_footprints
 from pv_geom.io.polygons import read_polygons
 from pv_geom.io.storage import RemoteFileMissing, is_remote, list_s3_uris, localize
 from pv_geom.io.tile_index import build_tile_uris, load_tile_index, resolve_tile_id_col
+from pv_geom.io.tile_scan import scan_tile_index
 from pv_geom.pipeline.partition import TileGroup, assign_polygons_to_tiles, build_tile_groups
 from pv_geom.utils.crs import resolve_target_crs
 from pv_geom.vintage import parse_vintage
@@ -29,7 +31,8 @@ log = logging.getLogger(__name__)
 
 # Columns of the polygon layer the workers need. Detector outputs drag along
 # wide attribute columns that would otherwise be pickled into every task.
-_WORKER_COLUMNS = ("polygon_id", "parent_polygon_id", "input_row", "polygon_vintage")
+_WORKER_COLUMNS = ("polygon_id", "parent_polygon_id", "input_row", "polygon_vintage",
+                   "input_flags", "input_issue")
 
 PendingGroup = tuple[int, TileGroup]          # (partition_id, group)
 
@@ -39,7 +42,7 @@ class RunInputs:
     """Where a run's inputs are and how to read them."""
 
     polygons_uri: str
-    tile_index_uri: str
+    tile_index_uri: str | None               # None = build the index from tile headers
     lidar_prefix: str
     footprints_uri: str | None = None
     name_template: str = "{name}.laz"
@@ -51,7 +54,7 @@ class RunInputs:
     def as_manifest(self) -> dict[str, str | None]:
         return {
             "polygons": str(self.polygons_uri),
-            "tile_index": str(self.tile_index_uri),
+            "tile_index": str(self.tile_index_uri) if self.tile_index_uri else None,
             "lidar_prefix": str(self.lidar_prefix),
             "footprints": str(self.footprints_uri) if self.footprints_uri else None,
         }
@@ -65,7 +68,9 @@ class Plan:
     cfg: PVGeomConfig                         # with crs.target resolved
     config_hash: str
     crs: str
-    polygons: gpd.GeoDataFrame                # indexed by polygon_id
+    polygons: gpd.GeoDataFrame                # measurable polygons, indexed by polygon_id
+    invalid: gpd.GeoDataFrame                 # features with no usable polygon geometry
+    outside: gpd.GeoDataFrame                 # polygons outside every tile of the index
     footprints: gpd.GeoDataFrame | None
     tile_uri_map: dict[str, str]
     groups: list[TileGroup]
@@ -74,7 +79,21 @@ class Plan:
 
     @property
     def n_polygons(self) -> int:
-        return len(self.polygons)
+        """Every input polygon part in scope, measurable or not."""
+        return len(self.polygons) + len(self.invalid) + len(self.outside)
+
+    @property
+    def fingerprint(self) -> str:
+        """Identifies *what* is being measured and how it is partitioned: the
+        polygon ids of every tile group, in order. Two plans with the same
+        fingerprint assign the same polygons to the same partition ids, which
+        is what ``--resume`` needs to be true."""
+        h = hashlib.sha256()
+        for pid, g in enumerate(self.groups):
+            h.update(f"{pid}|{g.primary_tile_id}|".encode())
+            h.update(",".join(g.polygon_ids).encode())
+            h.update(b"\n")
+        return h.hexdigest()
 
     @property
     def n_attempted(self) -> int:
@@ -120,7 +139,10 @@ def build_plan(inputs: RunInputs, cfg: PVGeomConfig) -> Plan:
     """Read the inputs and decide the work."""
     # The tile index is read first: with ``crs.target: auto`` it is what says
     # which CRS the LiDAR — and therefore the whole run — lives in.
-    tindex = load_tile_index(inputs.tile_index_uri)
+    if inputs.tile_index_uri:
+        tindex = load_tile_index(inputs.tile_index_uri)
+    else:
+        tindex = scan_tile_index(inputs.lidar_prefix)
     cfg = cfg.model_copy(deep=True)
     cfg.crs.target = resolve_target_crs(cfg.crs.target, tindex.crs)
     crs = cfg.crs.target
@@ -131,8 +153,18 @@ def build_plan(inputs: RunInputs, cfg: PVGeomConfig) -> Plan:
         inputs.polygons_uri, target_crs=crs, id_col=inputs.polygon_id_col,
         bbox=inputs.bbox, max_polygons=inputs.max_polygons,
         vintage_col=cfg.vintage.polygon_vintage_column,
+        min_area_m2=cfg.polygons.min_area_m2,
+        overlap_flag_frac=cfg.polygons.overlap_flag_frac,
     )
     polygons = polygons[[c for c in _WORKER_COLUMNS if c in polygons.columns] + ["geometry"]]
+    usable = polygons["input_issue"].isna()
+    invalid = polygons[~usable]
+    polygons = polygons[usable].drop(columns="input_issue")
+    if len(invalid):
+        log.warning("%d input features have no usable polygon geometry (%s); they are "
+                    "kept as rows with status invalid_geometry", len(invalid),
+                    ", ".join(f"{k}: {v}" for k, v in
+                              invalid["input_issue"].value_counts().items()))
 
     footprints = None
     if inputs.footprints_uri:
@@ -149,11 +181,20 @@ def build_plan(inputs: RunInputs, cfg: PVGeomConfig) -> Plan:
     assignments = assign_polygons_to_tiles(
         polygons, tindex, polygon_id_col="polygon_id", tile_id_col=tile_id_col)
     groups = build_tile_groups(assignments)
+    outside = polygons[~polygons["polygon_id"].isin(assignments["polygon_id"])]
+    polygons = polygons[polygons["polygon_id"].isin(assignments["polygon_id"])]
     log.info("%d polygons -> %d tile groups", len(polygons), len(groups))
+    if len(outside):
+        log.warning("%d polygons lie outside the LiDAR tile index; they are kept as rows "
+                    "with status outside_tile_index", len(outside))
+    if len(outside) and not groups:
+        log.warning("no polygon falls on any tile: check that the tile index and the "
+                    "polygon layer cover the same area (and that --bbox is in the run CRS)")
 
     return Plan(
         inputs=inputs, cfg=cfg, config_hash=cfg.hash(), crs=crs,
         polygons=polygons.set_index("polygon_id", drop=False),
+        invalid=invalid, outside=outside,
         footprints=footprints, tile_uri_map=tile_uri_map, groups=groups,
         polygon_vintage=parse_vintage(cfg.vintage.polygon_vintage),
         lidar_date=parse_vintage(cfg.vintage.lidar_date),
@@ -173,6 +214,12 @@ def find_missing_tiles(pending: list[PendingGroup], plan: Plan, *, prewarm: bool
     missing: set[str] = set()
     if not pending:
         return missing
+    # Local tiles: a file that is not there is simply not there.
+    for _, g in pending:
+        for t in g.fetch_tile_ids:
+            local_uri = uri_map.get(t)
+            if local_uri and not is_remote(local_uri) and not Path(local_uri).exists():
+                missing.add(local_uri)
 
     if prewarm:
         uris = sorted({uri_map[t] for _, g in pending for t in g.fetch_tile_ids

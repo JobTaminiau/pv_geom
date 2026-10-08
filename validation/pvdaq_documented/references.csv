@@ -1,0 +1,11 @@
+reference_id,system_id,polygon_ids,tilt_deg,azimuth_deg,source,scope,grade,present_by,notes
+pvdaq-1203-m0,1203,1203-flat-roof-rows,20.0,205.0,PVDAQ 1203: Distributed Sun - EJ DeSeta,mount,documented,2011-01-19,"roof; 197.5 kW DC; Wilmington, DE"
+pvdaq-1283-m0,1283,1283-north-wing;1283-middle-wing-west;1283-middle-wing-east;1283-south-wing,10.0,165.0,PVDAQ 1283: NREL Research Support Facility II,system,documented,1997-02-19,"roof; 408.2 kW DC; Golden, CO"
+pvdaq-1433-m0,1433,1283-north-wing;1283-middle-wing-west;1283-middle-wing-east;1283-south-wing,10.0,180.0,PVDAQ 1433: [1433] NREL RSF1,system,documented,2010-12-31,"roof; 449.3 kW DC; Golden, CO"
+pvdaq-1332-m0,1332,1332-upper-west;1332-upper-east;1332-lower-west;1332-lower-east,16.77,180.0,PVDAQ 1332: NREL Parking Garage,system,documented,2013-03-29,"roof; 1153.5 kW DC; Golden, CO"
+pvdaq-1332-m1,1332,1332-upper-west;1332-upper-east;1332-lower-west;1332-lower-east,60.0,180.0,PVDAQ 1332: NREL Parking Garage,system,documented,2013-03-29,"roof; 1153.5 kW DC; Golden, CO"
+pvdaq-1367-m0,1367,1367-roof-array,12.0,172.0,PVDAQ 1367: [1367] City of Henderson-NV - Aquatic Complex,mount,documented,2013-05-08,"unknown; 277.2 kW DC; Henderson, NV"
+pvdaq-1403-m0,1403,1403-row1;1403-row2;1403-row3;1403-row4;1403-row5,35.0,180.0,PVDAQ 1403: [1403] RTC-FSEC-Baseline,mount,documented,2014-12-01,"unknown; 6.0 kW DC; Cocoa Beach, FL"
+pvdaq-1418-m0,1418,1418-flat-roof-rows,10.0,138.0,PVDAQ 1418: [1418] Clark County-NV - Desert Breeze,mount,documented,2015-06-23,"roof; 42.0 kW DC; Clark County, NV"
+pvdaq-2107-m0,2107,2107-row1;2107-row2;2107-row3;2107-row4;2107-row5,25.0,180.0,PVDAQ 2107: Farm Solar Array,mount,documented,2017-01-01,"ground; 893.0 kW DC; Arbuckle, CA"
+pvdaq-9069-m0,9069,9069-row1;9069-row2;9069-row3;9069-row4;9069-row5,20.0,180.0,PVDAQ 9069: Simon Solar Farm,mount,documented,2016-02-17,"ground; 33000.0 kW DC; Social Circle, GA"

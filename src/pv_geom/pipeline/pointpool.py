@@ -18,7 +18,7 @@ import numpy as np
 from pv_geom.config import PVGeomConfig
 from pv_geom.geometry.point_index import GroundModel, PointGrid
 from pv_geom.io.lidar import TileVintage, read_tile
-from pv_geom.io.storage import RemoteFileMissing
+from pv_geom.utils.crs import to_run_crs
 
 log = logging.getLogger(__name__)
 
@@ -153,10 +153,12 @@ def load_group_points(
             continue
         try:
             data = read_tile(uri, reader=cfg.io.lidar_reader)
-        except RemoteFileMissing:
+        except FileNotFoundError:           # includes RemoteFileMissing
             log.warning("%s missing; skipping", uri)
             continue
-        pts = data.points
+        pts, converted = to_run_crs(data.points, data.crs, str(cfg.crs.target))
+        if converted:
+            log.info("%s: %s", tid, converted)
         pts = pts[near_ground(pts[:, 0], pts[:, 1])]
         cls = pts[:, 3].astype(np.int16)
         ground_chunks.append(pts[cls == classes.ground_class][:, :3])

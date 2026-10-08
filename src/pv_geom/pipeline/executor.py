@@ -16,6 +16,7 @@ from typing import Any
 import pyarrow as pa
 
 from pv_geom.config import PVGeomConfig
+from pv_geom.errors import require
 from pv_geom.pipeline.partition import TileGroup
 from pv_geom.pipeline.plan import PendingGroup
 from pv_geom.pipeline.worker import process_tile_group
@@ -43,6 +44,7 @@ def cluster_for(cfg: PVGeomConfig) -> Iterator[Any]:
             processes=True,
         )
     elif backend == "coiled":
+        require("coiled", "coiled", "the coiled compute backend")
         from pv_geom.coiled_env import ensure_software_env, make_cluster
 
         ensure_software_env()

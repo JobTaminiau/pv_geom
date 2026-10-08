@@ -2592,11 +2592,9 @@ wheels = [
 
 [[package]]
 name = "pv-geom"
-version = "0.3.0.dev0"
+version = "0.5.0.dev0"
 source = { editable = "." }
 dependencies = [
-    { name = "boto3" },
-    { name = "coiled" },
     { name = "dask" },
     { name = "distributed" },
     { name = "fsspec" },
@@ -2611,18 +2609,29 @@ dependencies = [
     { name = "pyproj" },
     { name = "pyyaml" },
     { name = "rich" },
-    { name = "s3fs" },
     { name = "shapely" },
     { name = "typer" },
 ]
 
 [package.optional-dependencies]
+cloud = [
+    { name = "boto3" },
+    { name = "s3fs" },
+]
+coiled = [
+    { name = "boto3" },
+    { name = "coiled" },
+    { name = "s3fs" },
+]
 dev = [
+    { name = "boto3" },
     { name = "botocore", extra = ["crt"] },
+    { name = "coiled" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
+    { name = "s3fs" },
 ]
 pdal = [
     { name = "pdal" },
@@ -2630,9 +2639,12 @@ pdal = [
 
 [package.metadata]
 requires-dist = [
-    { name = "boto3", specifier = ">=1.35" },
+    { name = "boto3", marker = "extra == 'cloud'", specifier = ">=1.35" },
+    { name = "boto3", marker = "extra == 'coiled'", specifier = ">=1.35" },
+    { name = "boto3", marker = "extra == 'dev'", specifier = ">=1.35" },
     { name = "botocore", extras = ["crt"], marker = "extra == 'dev'", specifier = ">=1.35" },
-    { name = "coiled", specifier = ">=1.128" },
+    { name = "coiled", marker = "extra == 'coiled'", specifier = ">=1.128" },
+    { name = "coiled", marker = "extra == 'dev'", specifier = ">=1.128" },
     { name = "dask", specifier = ">=2025.10" },
     { name = "distributed", specifier = ">=2025.10" },
     { name = "fsspec", specifier = ">=2024.10" },
@@ -2652,11 +2664,13 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6" },
     { name = "rich", specifier = ">=13.7" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.7" },
-    { name = "s3fs", specifier = ">=2024.10" },
+    { name = "s3fs", marker = "extra == 'cloud'", specifier = ">=2024.10" },
+    { name = "s3fs", marker = "extra == 'coiled'", specifier = ">=2024.10" },
+    { name = "s3fs", marker = "extra == 'dev'", specifier = ">=2024.10" },
     { name = "shapely", specifier = ">=2.0" },
     { name = "typer", specifier = ">=0.12" },
 ]
-provides-extras = ["pdal", "dev"]
+provides-extras = ["pdal", "cloud", "coiled", "dev"]
 
 [[package]]
 name = "pyarrow"

@@ -12,13 +12,36 @@ from pv_geom.report.fmt import pct as _p
 from pv_geom.vintage import BASIS_DESCRIPTIONS
 
 
-def display_tables(tables: dict[str, pd.DataFrame], headline: str) -> dict[str, pd.DataFrame]:
+def _with_interval(value: str, lo: str, hi: str) -> str:
+    """``18.4 (18.2–18.6)``; just the value when there is no interval."""
+    if "–" in (lo, hi) or lo == hi == value:
+        return value
+    return f"{value} ({lo.rstrip('%')}–{hi})"
+
+
+def display_tables(tables: dict[str, pd.DataFrame], headline: str,
+                   weight: str = "area") -> dict[str, pd.DataFrame]:
     out: dict[str, pd.DataFrame] = {}
 
     cov = tables["coverage"]
     out["coverage"] = pd.DataFrame({
         "Step": cov["step"], "Polygons": cov["n"].map(_i),
         "Share": cov["share_of_first"].map(_p)})
+
+    st = tables["status"]
+    st = st[st["n"] > 0]
+    out["status"] = pd.DataFrame({
+        "Status": st["status"], "Polygons": st["n"].map(_i), "Share": st["share"].map(_p),
+        "Meaning": st["description"]})
+    fc = tables["facets"]
+    out["facets"] = pd.DataFrame({
+        "Facets in polygon": fc["facets"].map(_i), "Polygons": fc["n"].map(_i),
+        "Share of measured": fc["share"].map(_p)})
+    ff = tables["fit_failure"]
+    ff = ff[ff["n"] > 0]
+    out["fit_failure"] = pd.DataFrame({
+        "No fit because": ff["fit_failure"], "Polygons": ff["n"].map(_i),
+        "Share of no-fit": ff["share_of_no_fit"].map(_p), "Meaning": ff["description"]})
 
     gb = tables["geometry_basis"]
     out["geometry_basis"] = pd.DataFrame({
@@ -28,20 +51,24 @@ def display_tables(tables: dict[str, pd.DataFrame], headline: str) -> dict[str, 
         "Meaning": gb["geometry_basis"].map(BASIS_DESCRIPTIONS)})
 
     s = tables["summary_statistics"]
-    s = s[s["weight"] == "area"]
+    s = s[s["weight"] == weight]
     out["summary_statistics"] = pd.DataFrame({
         "Stratum": s["stratum_label"], "Polygons": s["n"].map(_i),
-        "Tilt median (°)": s["tilt_p50_deg"].map(_n),
+        "Tilt median (°)": [_with_interval(_n(v), _n(lo), _n(hi)) for v, lo, hi in zip(
+            s["tilt_p50_deg"], s["tilt_p50_deg_ci_lo"], s["tilt_p50_deg_ci_hi"], strict=True)],
         "Tilt IQR (°)": [f"{_n(a)}–{_n(b)}" for a, b in
                          zip(s["tilt_p25_deg"], s["tilt_p75_deg"], strict=True)],
         "Tilt mean (°)": s["tilt_mean_deg"].map(_n),
         "Azimuth mean (°)": s["azimuth_circular_mean_deg"].map(lambda x: _n(x, 0)),
         "Concentration R": s["azimuth_resultant_length"].map(lambda x: _n(x, 2)),
-        "Facing S": s["share_facing_S"].map(_p), "Facing E": s["share_facing_E"].map(_p),
+        "Facing S": [_with_interval(_p(v), _p(lo), _p(hi)) for v, lo, hi in zip(
+            s["share_facing_S"], s["share_facing_S_ci_lo"], s["share_facing_S_ci_hi"],
+            strict=True)],
+        "Facing E": s["share_facing_E"].map(_p),
         "Facing W": s["share_facing_W"].map(_p), "Facing N": s["share_facing_N"].map(_p)})
 
     def _two(table: pd.DataFrame, key_cols: list[str]) -> pd.DataFrame:
-        t = table[table["weight"] == "area"]
+        t = table[table["weight"] == weight]
         a = t[t["stratum"] == headline].set_index(key_cols)["share"]
         b = t[t["stratum"] == "all_fitted"].set_index(key_cols)["share"]
         return pd.DataFrame({stats.STRATA[headline][0]: a, "All fitted polygons": b}).reset_index()

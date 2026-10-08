@@ -1,4 +1,4 @@
-"""pv_geom Typer CLI."""
+"""pv_geom command line: a thin layer over :mod:`pv_geom.api`."""
 
 from __future__ import annotations
 
@@ -10,8 +10,9 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from pv_geom import __version__
+from pv_geom import __version__, api
 from pv_geom.config import PVGeomConfig
+from pv_geom.errors import InputError, PVGeomError
 from pv_geom.utils.logging import add_file_log, configure_logging
 
 app = typer.Typer(
@@ -40,24 +41,55 @@ def version() -> None:
 def validate_config(
     config: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
 ) -> None:
-    """Validate a YAML config against the Pydantic schema."""
+    """Validate a YAML config and show what a run from it would use."""
     cfg = PVGeomConfig.from_yaml(config)
     console.print(f"[green]OK[/green] {config}")
     console.print(f"config_hash: {cfg.hash()}")
+    console.print(f"study: {cfg.study.name or '(unnamed)'}")
+    for label, value in (
+        ("polygons", cfg.resolve(cfg.inputs.polygons)),
+        ("lidar tiles", cfg.resolve(cfg.inputs.lidar_prefix)),
+        ("tile index", cfg.resolve(cfg.inputs.tile_index) or "built from tile headers"),
+        ("footprints", cfg.resolve(cfg.inputs.footprints) or "none"),
+        ("output", cfg.resolve(cfg.study.output)),
+    ):
+        console.print(f"{label}: {value or '[yellow]not set[/yellow]'}")
     console.print(f"backend: {cfg.compute.backend}")
     console.print(f"target CRS: {cfg.crs.target}")
     console.print(f"polygon vintage: {cfg.vintage.polygon_vintage}")
     console.print(f"lidar date: {cfg.vintage.lidar_date or 'measured from GPS time'}")
 
 
+def _with_run_log(output: str | None, dry_run: bool) -> logging.Handler | None:
+    """A JSON-lines log beside a local output, for the duration of a run."""
+    if dry_run or not output or str(output).startswith("s3://"):
+        return None
+    return add_file_log(Path(output) / "logs" / "run.jsonl")
+
+
+def _close_run_log(handler: logging.Handler | None) -> None:
+    if handler is not None:
+        logging.getLogger("pv_geom").removeHandler(handler)
+        handler.close()
+
+
 @app.command()
 def run(
-    polygons: str = typer.Option(
-        ..., help="PV polygon layer: GeoParquet / GPKG / GeoJSON / SHP (path or s3://)"
+    config: Path | None = typer.Option(
+        None, exists=True, dir_okay=False, readable=True,
+        help="YAML config. Its `inputs` and `study` blocks can name everything below; "
+             "options given here override it",
     ),
-    lidar_prefix: str = typer.Option(..., help="Directory or S3 prefix holding the LAZ tiles"),
-    tile_index: str = typer.Option(..., help="LiDAR tile index: GeoParquet/GPKG/SHP/.zip"),
-    output: str = typer.Option(..., help="Output directory or s3:// prefix"),
+    polygons: str | None = typer.Option(
+        None, help="PV polygon layer: GeoParquet / GPKG / GeoJSON / SHP (path or s3://)"
+    ),
+    lidar_prefix: str | None = typer.Option(
+        None, help="Directory or S3 prefix holding the LAZ tiles"
+    ),
+    tile_index: str | None = typer.Option(
+        None, help="LiDAR tile index: GeoParquet/GPKG/SHP/.zip. Default: read from tile headers"
+    ),
+    output: str | None = typer.Option(None, help="Output directory or s3:// prefix"),
     polygon_vintage: str | None = typer.Option(
         None,
         help="When the polygons' source imagery was captured: YYYY, YYYY-MM or YYYY-MM-DD",
@@ -71,10 +103,6 @@ def run(
     ),
     footprints: str | None = typer.Option(
         None, help="Optional building footprints (GeoParquet/GPKG/SHP)"
-    ),
-    config: Path | None = typer.Option(
-        None, exists=True, dir_okay=False, readable=True,
-        help="YAML config; defaults are used when omitted",
     ),
     crs: str | None = typer.Option(
         None, help="Run CRS (the LiDAR's metric CRS). Default: taken from the tile index"
@@ -90,11 +118,16 @@ def run(
     dry_run: bool = typer.Option(False, help="Plan + vintage check only; no compute"),
     resume: bool = typer.Option(
         False,
-        help="Skip groups whose partition file already exists. Crash-recovery only — same inputs/config.",
+        help="Keep partitions already at the output and run the rest. Refused if they "
+             "were made from different inputs, settings or schema.",
     ),
-    name_template: str = typer.Option(
-        "{name}.laz",
-        help="LAZ filename template using {name} from the tile index id column",
+    force_resume: bool = typer.Option(
+        False, help="Resume even if the existing partitions were made from different "
+                    "inputs, settings or schema"
+    ),
+    name_template: str | None = typer.Option(
+        None, help="LAZ filename template using {name} from the tile index id column "
+                   "(default {name}.laz)",
     ),
     tile_id_col: str | None = typer.Option(
         None, help="Tile-id column in the tile index. Default: auto-detect"
@@ -105,65 +138,85 @@ def run(
     ),
 ) -> None:
     """Measure every polygon against the LiDAR and write the dataset."""
-    from pv_geom.pipeline.runner import run_pipeline
+    cfg = api.load_config(config)
+    destination = cfg.resolve(output or cfg.study.output)
+    log_handler = _with_run_log(destination, dry_run)
+    try:
+        result = api.run(
+            cfg,
+            polygons=polygons, lidar_prefix=lidar_prefix, tile_index=tile_index,
+            output=output, footprints=footprints,
+            polygon_vintage=polygon_vintage, polygon_vintage_col=polygon_vintage_col,
+            lidar_date=lidar_date, polygon_id_col=polygon_id_col, tile_id_col=tile_id_col,
+            name_template=name_template, crs=crs,
+            bbox=(bbox[0], bbox[1], bbox[2], bbox[3]) if bbox else None,
+            max_polygons=max_polygons, backend="local" if local else None,
+            use_dask=not no_dask, dry_run=dry_run, resume=resume, force_resume=force_resume,
+        )
+    finally:
+        _close_run_log(log_handler)
+    console.print(f"[green]wrote manifest:[/green] {result.manifest_path}")
 
-    cfg = PVGeomConfig.from_yaml(config) if config else PVGeomConfig()
-    if local:
-        cfg.compute.backend = "local"
-    if polygon_vintage is not None:
-        cfg.vintage.polygon_vintage = polygon_vintage
-    if polygon_vintage_col is not None:
-        cfg.vintage.polygon_vintage_column = polygon_vintage_col
-    if lidar_date is not None:
-        cfg.vintage.lidar_date = lidar_date
-    if crs is not None:
-        cfg.crs.target = crs
-
-    # A local run keeps its own log beside the output, as JSON lines.
-    log_handler = None
-    if not dry_run and not str(output).startswith("s3://"):
-        log_handler = add_file_log(Path(output) / "logs" / "run.jsonl")
-    manifest = run_pipeline(
-        polygons_uri=polygons,
-        tile_index_uri=tile_index,
-        lidar_prefix=lidar_prefix,
-        footprints_uri=footprints,
-        output_uri=output,
-        cfg=cfg,
-        name_template=name_template,
-        tile_id_col=tile_id_col,
-        polygon_id_col=polygon_id_col,
-        max_polygons=max_polygons,
-        bbox=(bbox[0], bbox[1], bbox[2], bbox[3]) if bbox else None,
-        dry_run=dry_run,
-        resume=resume,
-        use_dask=not no_dask,
-    )
-    if log_handler is not None:
-        logging.getLogger("pv_geom").removeHandler(log_handler)
-        log_handler.close()
-    console.print(f"[green]wrote manifest:[/green] {manifest}")
-
-    if report and not dry_run and not str(output).startswith("s3://"):
-        from pv_geom.report import build_report
-
+    if report and not dry_run and not result.output.startswith("s3://"):
         try:
-            result = build_report(output)
+            built = result.report()
         except FileNotFoundError:
             console.print("[yellow]no rows written; skipping report[/yellow]")
         else:
-            console.print(f"[green]wrote report:[/green] {result.html}")
+            console.print(f"[green]wrote report:[/green] {built.html}")
+
+
+@app.command()
+def demo(
+    out: Path = typer.Option(Path("pv_geom_demo"), help="Where to write the demo"),
+) -> None:
+    """Generate a small synthetic study area and run the whole pipeline on it.
+
+    Needs no data and no network: fifteen arrays with known tilt and
+    orientation are written as a LAZ tile and a polygon layer, measured, and
+    reported. A quick way to see every output, and to check an installation.
+    """
+    from pv_geom.sample import write_demo
+
+    cfg_path = write_demo(out)
+    console.print(f"[green]wrote sample study area:[/green] {out / 'inputs'}")
+    console.print(f"[green]wrote config:[/green] {cfg_path}")
+    result = api.run(cfg_path, use_dask=False)
+    built = result.report()
+    console.print(f"[green]dataset:[/green] {result.output}")
+    console.print(f"[green]report:[/green]  {built.html}")
+    console.print(f"\nRun it again yourself with:  pv-geom run --config {cfg_path} --no-dask")
 
 
 @app.command("report")
 def report_cmd(
-    output_uri: str = typer.Argument(..., help="A pv-geom output directory or s3:// prefix"),
+    output_uris: list[str] = typer.Argument(
+        ..., help="A pv-geom output directory or s3:// prefix (several with --compare)"),
     out: Path | None = typer.Option(
         None, help="Where to write the report. Default: <output>/report (local outputs)"
     ),
+    compare: bool = typer.Option(
+        False, "--compare", help="Compare the given runs side by side instead of reporting "
+                                 "on one (needs --out)"),
+    label: list[str] = typer.Option(
+        [], "--label", help="With --compare: a name for each run, in order "
+                            "(default: study.name from each run's config)"),
+    regions: Path | None = typer.Option(
+        None, help="Polygon layer of regions (districts, municipalities) for a "
+                   "per-region table and map"),
+    region_col: str | None = typer.Option(
+        None, help="Column of the region layer holding the region names"),
     title: str | None = typer.Option(None, help="Report title"),
     area_name: str | None = typer.Option(
-        None, help="Name of the study area, used in titles and the methods text"
+        None, help="Name of the study area, used in titles and the methods text "
+                   "(default: study.name from the run's config)"
+    ),
+    headline: str | None = typer.Option(
+        None, help="Stratum the report leads with: panel, all_fitted, surface_unresolved "
+                   "or unscreened (default: panel when there is enough of it)"
+    ),
+    weight: str = typer.Option(
+        "area", help="Weighting of the headline figures: area (array surface) or count"
     ),
     export: bool = typer.Option(
         True, help="Also write the consolidated dataset (GeoParquet + CSV + data dictionary)"
@@ -176,12 +229,24 @@ def report_cmd(
     ),
 ) -> None:
     """Build tables, figures, an HTML/Markdown report and the release dataset
-    from a finished run."""
-    from pv_geom.report import build_report
-
-    result = build_report(output_uri, out_dir=out, title=title, area_name=area_name,
-                          export_dataset=export, polygon_vintage=polygon_vintage,
-                          lidar_date=lidar_date)
+    from a finished run; or, with --compare, set several runs side by side."""
+    if compare:
+        if out is None:
+            raise InputError("--compare needs --out", "say where to write the comparison")
+        cmp = api.compare_runs(output_uris, out, labels=label or None, headline=headline,
+                               weight=weight)
+        console.print(f"[green]comparison:[/green] {cmp.markdown}")
+        console.print(f"[green]tables:[/green]     {cmp.tables_dir}")
+        console.print(f"[green]figures:[/green]    {cmp.figures_dir}")
+        return
+    if len(output_uris) != 1:
+        raise InputError(f"report takes one run, got {len(output_uris)}",
+                         "add --compare to set several runs side by side")
+    result = api.report(
+        output_uris[0], out, title=title, area_name=area_name, headline=headline,
+        weight=weight, export_dataset=export, polygon_vintage=polygon_vintage,
+        lidar_date=lidar_date, regions=regions, region_col=region_col,
+    )
     console.print(f"[green]report:[/green]  {result.html}")
     console.print(f"[green]tables:[/green]  {result.tables_dir}")
     console.print(f"[green]figures:[/green] {result.figures_dir}")
@@ -223,11 +288,10 @@ def inspect_tile(
 @app.command("describe-output")
 def describe_output(output_uri: str = typer.Argument(...)) -> None:
     """Summarise a finished run: counts, vintage, geometry basis, fit quality."""
-    from pv_geom.io.output import read_manifest, read_output_table
-    from pv_geom.summary import summarise_table
+    from pv_geom.io.output import read_manifest
 
     manifest = read_manifest(output_uri)
-    stats = summarise_table(read_output_table(output_uri))
+    stats = api.describe(output_uri)
     console.print(f"[bold]{output_uri}[/bold]  (pv-geom {manifest.get('pkg_version', '?')}, "
                   f"run {str(manifest.get('run_id', '?'))[:8]})")
     v = manifest.get("vintage", {})
@@ -237,8 +301,11 @@ def describe_output(output_uri: str = typer.Argument(...)) -> None:
                   f"gap: {v.get('vintage_gap_days')} days")
     console.print(f"rows: {stats['rows']:,}   fitted: {stats['fitted']:,} "
                   f"({stats['fit_rate']:.1%})")
+    for status, n in stats.get("status_counts", {}).items():
+        if n:
+            console.print(f"  status {status:20s} {n:>9,}")
     for basis, n in stats.get("geometry_basis_counts", {}).items():
-        console.print(f"  {basis:20s} {n:>9,}")
+        console.print(f"  basis  {basis:20s} {n:>9,}")
     if "panel_tilt_deg" in stats:
         t = stats["panel_tilt_deg"]
         console.print(f"tilt p10/p50/p90: {t['p10']:.1f} / {t['p50']:.1f} / {t['p90']:.1f} deg")
@@ -249,5 +316,54 @@ def describe_output(output_uri: str = typer.Argument(...)) -> None:
                       f"{stats['panel_rmse_p90'] * 100:.1f} cm")
 
 
+@app.command("compare-reference")
+def compare_reference_cmd(
+    output_uri: str = typer.Argument(..., help="A finished run's output."),
+    reference: Path = typer.Option(..., "--reference", "-r",
+                                   help="Table of reference mounts (CSV or Parquet)."),
+    out: Path | None = typer.Option(None, "--out", help="Directory for the result tables."),
+    tilt_tolerance: float = typer.Option(3.0, help="Tilt agreement tolerance, degrees."),
+    azimuth_tolerance: float = typer.Option(10.0, help="Azimuth agreement tolerance, degrees."),
+) -> None:
+    """Compare measured geometry with externally reported geometry (e.g. PVDAQ)."""
+    result = api.compare_reference(output_uri, reference, out,
+                                   tilt_tolerance_deg=tilt_tolerance,
+                                   azimuth_tolerance_deg=azimuth_tolerance)
+    table = Table("reference", "scope", "eligibility", "outcome", "facets", "area agreeing",
+                  "tilt err", "azimuth err")
+
+    def _n(v: float, fmt: str) -> str:
+        return "-" if v is None or v != v else format(v, fmt)
+
+    for r in result.references.itertuples(index=False):
+        table.add_row(str(r.reference_id), r.scope, r.eligibility, r.outcome, str(r.n_facets),
+                      _n(r.area_share_agreeing, ".0%"), _n(r.tilt_error_deg, "+.1f"),
+                      _n(r.azimuth_error_deg, "+.1f"))
+    console.print(table)
+    acc = result.summary["mount_scope_accuracy"]
+    if acc:
+        console.print(f"mount-scope references: {acc['n_references']}  facets: {acc['n_facets']}  "
+                      f"tilt MAE {acc['tilt_mae_deg']:.2f} deg (bias {acc['tilt_bias_deg']:+.2f})")
+    control = result.summary["negative_control"]
+    if control["n_references"]:
+        console.print(f"negative control: {control['n_references']} reference(s) not present at "
+                      f"the LiDAR date; {_n(control['area_share_panel_confirmed'], '.0%')} of "
+                      "their area was labelled panel_confirmed")
+    if out is not None:
+        console.print(f"tables written to {out}")
+
+
+def main() -> None:
+    """Entry point: run the app, turning anticipated errors into a message and a
+    remedy instead of a traceback."""
+    try:
+        app()
+    except PVGeomError as exc:
+        console.print(f"[red]error:[/red] {exc.message}")
+        if exc.remedy:
+            console.print(f"  [bold]fix:[/bold] {exc.remedy}")
+        raise SystemExit(1) from None
+
+
 if __name__ == "__main__":
-    app()
+    main()

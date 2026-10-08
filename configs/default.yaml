@@ -5,10 +5,17 @@ crs:
                               # from the tile index; or assert one, e.g. EPSG:6341.
                               # Points are not reprojected and all thresholds are metres.
 
+polygons:
+  min_area_m2: 1.0            # smaller input polygons are flagged below_min_area
+  overlap_flag_frac: 0.2      # share of own area overlapping another polygon that
+                              # earns overlaps_polygon (0 = skip the check)
+
 panel_plane:
   erosion_m: 0.15
   ransac_threshold_m: 0.05
   ransac_threshold_max_m: 0.15   # if a fit fails at 5 cm, refit at 2x the measured scatter
+  envelope_tilt_max_deg: 5.0     # a wide fit flatter than this is flagged envelope_fit:
+                                 # rows of tilted modules on a flat roof, not one plane
                                  # of the returns, up to this cap (flag: wide_tolerance_fit).
                                  # Noisier collections need it: Delaware 2023 scatters
                                  # ~7.5 cm about a roof plane, Phoenix 2020 ~2 cm.
@@ -20,9 +27,12 @@ panel_plane:
   uncertainty_method: bootstrap   # bootstrap | none
   bootstrap_samples: 50
 
-multi_plane:
+multi_plane:                    # polygons holding more than one plane -> segments (facets)
   enabled: true
-  secondary_min_frac: 0.20
+  secondary_min_frac: 0.20      # share of the polygon's returns a facet needs
+  segment_min_angle_deg: 10.0   # and how far its orientation must differ from the others
+  max_segments: 4
+  segment_max_tilt_deg: 70.0    # steeper further facets are walls and roof edges, not arrays
   ew_rack_azimuth_tol_deg: 25
   ew_rack_tilt_tol_deg: 5
 
@@ -47,6 +57,14 @@ roof_plane:
   open_ring: true                # with no footprint layer, or a polygon missing every
                                  # footprint, fit the reference from an unclipped ring
                                  # (rows say which in roof_ref_source)
+  facet_search: true             # when the ring has no dominant plane (hip and cross-gable
+  max_facets: 4                  # roofs), peel off its facets and take the one the collar
+                                 # agrees with, instead of giving up
+  facet_agreement_min: 0.65      # ...which must be a clear majority of the collar: an array
+                                 # straddling a ridge has no single roof plane
+  parallel_angle_max_deg: 10.0   # last resort where the collar is split: the facet parallel
+  parallel_collar_min: 0.25      # to the array plane that also holds this share of the collar
+                                 # (rows say so in roof_ref_method; 0 disables)
   min_overlap_frac: 0.5          # footprint∩polygon / polygon area for on_building=True
                                  # (sliver touches must not become "rooftop")
 
@@ -118,6 +136,7 @@ compute:
     software: pv-geom-2026-05
     region: us-east-2             # where the LiDAR bucket is
     package_source: "git+https://github.com/JobTaminiau/pv_geom.git@main"   # what workers install
+    usd_per_worker_hour: null     # set it to have --dry-run estimate the cost
   local:
     n_workers: 8
     threads_per_worker: 2

@@ -11,6 +11,7 @@ import pandas as pd
 from pv_geom import __version__
 from pv_geom.io.output import read_manifest, read_output
 from pv_geom.report import stats
+from pv_geom.utils.north import GRID_NORTH
 from pv_geom.vintage import parse_vintage
 
 
@@ -44,7 +45,7 @@ def _iso(v) -> str | None:
 
 
 def summarise(df: pd.DataFrame, tables: dict[str, pd.DataFrame], manifest: dict,
-              headline: str) -> dict:
+              headline: str, weight: str = "area") -> dict:
     """The numbers the report text is written from."""
     summ = tables["summary_statistics"]
 
@@ -102,12 +103,15 @@ def summarise(df: pd.DataFrame, tables: dict[str, pd.DataFrame], manifest: dict,
             for b in basis.index
         },
         "headline_stratum": headline,
+        "weight": weight,
         "headline_label": stats.STRATA[headline][0],
         "headline": {"area": _row(headline, "area"), "count": _row(headline, "count")},
         "all_fitted": {"area": _row("all_fitted", "area"), "count": _row("all_fitted", "count")},
         "panel_rmse_m_p50": float(rmse.median()) if len(rmse) else float("nan"),
         "panel_rmse_m_p90": float(rmse.quantile(0.9)) if len(rmse) else float("nan"),
         "point_density_p50": float(df["point_density"].median()),
+        # Outputs from before schema 0.4 report azimuth relative to grid north.
+        "azimuth_reference": manifest.get("azimuth_reference", GRID_NORTH),
         "wide_tolerance_share_of_fitted": (
             float(df.loc[df["fitted"], "flags"]
                   .map(lambda f: f is not None and "wide_tolerance_fit" in f).mean())

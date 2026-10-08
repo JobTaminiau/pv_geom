@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pv-geom"
-version = "0.3.0.dev0"
+version = "0.5.0.dev0"
 description = "Tilt, orientation and height of solar PV polygons measured from LiDAR, with publication-ready datasets, figures and reports."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -30,15 +30,12 @@ dependencies = [
     "pyogrio>=0.9",
     "laspy[lazrs]>=2.5",
     "fsspec>=2024.10",
-    "s3fs>=2024.10",
-    "boto3>=1.35",
     "pydantic>=2.6",
     "pyyaml>=6",
     "typer>=0.12",
     "rich>=13.7",
     "dask>=2025.10",
     "distributed>=2025.10",
-    "coiled>=1.128",
     "matplotlib>=3.8",
 ]
 
@@ -46,7 +43,21 @@ dependencies = [
 # pdal Python bindings need the system PDAL library; install via conda on Windows.
 # Worker images on Coiled should pull this in.
 pdal = ["pdal>=3.4"]
+# Reading inputs from, or writing output to, S3.
+cloud = [
+    "s3fs>=2024.10",
+    "boto3>=1.35",
+]
+# Running on a Coiled cluster (workers read from S3, so it implies `cloud`).
+coiled = [
+    "coiled>=1.128",
+    "s3fs>=2024.10",
+    "boto3>=1.35",
+]
 dev = [
+    "s3fs>=2024.10",
+    "boto3>=1.35",
+    "coiled>=1.128",
     "pytest>=8",
     "pytest-cov>=5",
     "ruff>=0.7",
@@ -57,7 +68,7 @@ dev = [
 ]
 
 [project.scripts]
-pv-geom = "pv_geom.cli:app"
+pv-geom = "pv_geom.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pv_geom"]

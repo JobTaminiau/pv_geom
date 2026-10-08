@@ -16,23 +16,34 @@ import pandas as pd
 from pv_geom import __version__
 from pv_geom.report import figures as figs
 from pv_geom.report.fmt import pct as _p
-from pv_geom.report.text import key_findings, vintage_statement
+from pv_geom.report.text import key_findings, north_note, vintage_statement, weight_phrases
 
 SECTIONS = [
     # (heading, figure names, display-table keys, intro)
-    ("Coverage", [], ["coverage"],
-     "How many input polygons reached each stage."),
+    ("Coverage", [], ["coverage", "status", "fit_failure"],
+     "How many input polygons reached each stage, what happened to each, and why "
+     "covered polygons have no fit."),
     ("Input vintages and geometry basis", ["vintage_timeline", "geometry_basis"],
      ["geometry_basis"], None),
+    ("Facets", [], ["facets"],
+     "A polygon can cover more than one roof face. Each distinct plane in it is a "
+     "facet with its own tilt and azimuth; the figures and tables below describe each "
+     "polygon by its primary (largest) facet, and the release dataset carries every "
+     "facet in pv_geom_segments."),
     ("Array geometry", ["geometry_overview"], ["summary_statistics"],
-     "Statistics are weighted by array surface; per-polygon versions are in "
-     "tables/summary_statistics.csv."),
+     "Statistics are for {unit}; every stratum under both weightings is in "
+     "tables/summary_statistics.csv. Brackets give 95% bootstrap intervals over "
+     "polygons: sampling variability only, not measurement error."),
     ("Tilt profile", ["tilt_distribution"], ["tilt_profile"],
-     "Share of array surface in each tilt class."),
+     "Share of {unit} in each tilt class."),
     ("Orientation profile", ["azimuth_rose", "tilt_azimuth_joint"], ["azimuth_profile"],
-     "Share of array surface facing each compass sector (arrays with a defined azimuth)."),
+     "Share of {unit} facing each compass sector (arrays with a defined azimuth). "
+     "{north}"),
     ("Array against roof", ["roof_relation"], ["roof_relation"], None),
     ("Measurement quality", ["fit_quality"], ["fit_quality", "flags"], None),
+    ("By region", ["regions"], ["regions"],
+     "Each polygon is assigned to the region its centroid falls in. Tilt and facing "
+     "describe the same group of polygons as the headline figures."),
     ("Spatial distribution", ["spatial_distribution"], [], None),
 ]
 
@@ -67,7 +78,7 @@ ul{padding-left:20px;margin:0 0 12px}li{margin-bottom:6px}
 """
 
 
-_TEXT_COLS = {"Step", "Basis", "Meaning", "Stratum", "Measure", "Unit", "Flag", "Facing",
+_TEXT_COLS = {"Region", "Dominant facing", "Facets in polygon", "Status", "No fit because", "Step", "Basis", "Meaning", "Stratum", "Measure", "Unit", "Flag", "Facing",
               "Tilt (°)", "column", "type", "unit", "nullable", "description", "File",
               "Contents"}
 
@@ -95,13 +106,14 @@ def _md_table(df: pd.DataFrame) -> str:
 
 
 def _tiles(s: dict) -> list[tuple[str, str]]:
-    h = s["headline"]["area"]
+    h = s["headline"][s.get("weight", "area")]
+    unit = weight_phrases(s)["unit"]
     gap = s["vintage_gap_days"]
     tiles = [
         (f"{s['n_rows']:,}", "polygons measured"),
         (_p(s["fit_rate"]), "with a fitted plane"),
         (f"{h['tilt_median_deg']:.1f}°", f"median tilt · {s['headline_label'].lower()}"),
-        (_p(h["share_facing_S"]), "of array surface faces south"),
+        (_p(h["share_facing_S"]), f"of {unit} facing south"),
     ]
     if gap is not None and np.isfinite(gap):
         tiles.append((f"{gap / 365.25:+.1f} yr", "polygon vintage minus LiDAR date"))
@@ -124,10 +136,11 @@ def render_html(title: str, subtitle: str, s: dict, specs: dict[str, figs.Figure
              f'<div class="note">{html.escape(vintage_statement(s))}</div>']
     for heading, fig_names, table_keys, intro in SECTIONS:
         present = [n for n in fig_names if n in specs]
-        if not present and not table_keys:
+        if not present and not any(k in disp for k in table_keys):
             continue
         parts.append(f"<h2>{html.escape(heading)}</h2>")
         if intro:
+            intro = intro.replace("{unit}", weight_phrases(s)["unit"]).replace("{north}", north_note(s))
             parts.append(f"<p>{html.escape(intro)}</p>")
         for name in present:
             png = base64.b64encode(fig_paths[name]["png"].read_bytes()).decode("ascii")
@@ -137,7 +150,7 @@ def render_html(title: str, subtitle: str, s: dict, specs: dict[str, figs.Figure
                 f"<figcaption><b>{html.escape(specs[name].title)}.</b> "
                 f"{html.escape(specs[name].caption)}</figcaption></figure>")
         for key in table_keys:
-            if len(disp[key]):
+            if key in disp and len(disp[key]):
                 parts.append(_html_table(disp[key]))
     parts += ["<h2>Methods</h2>", f"<p>{html.escape(methods)}</p>",
               "<h2>Files</h2>", _html_table(files),
@@ -155,16 +168,17 @@ def render_markdown(title: str, subtitle: str, s: dict, specs: dict[str, figs.Fi
     parts += ["", f"> {vintage_statement(s)}", ""]
     for heading, fig_names, table_keys, intro in SECTIONS:
         present = [n for n in fig_names if n in specs]
-        if not present and not table_keys:
+        if not present and not any(k in disp for k in table_keys):
             continue
         parts += [f"## {heading}", ""]
         if intro:
+            intro = intro.replace("{unit}", weight_phrases(s)["unit"]).replace("{north}", north_note(s))
             parts += [intro, ""]
         for name in present:
             parts += [f"![{specs[name].title}](figures/{name}.png)", "",
                       f"**{specs[name].title}.** {specs[name].caption}", ""]
         for key in table_keys:
-            if len(disp[key]):
+            if key in disp and len(disp[key]):
                 parts += [_md_table(disp[key]), ""]
     parts += ["## Methods", "", methods, "", "## Files", "", _md_table(files), "",
               f"_Generated {s['generated_utc']} by pv-geom v{__version__}; run "

@@ -21,7 +21,7 @@ from pv_geom.io.vector import read_vector, reproject
 from pv_geom.vintage import parse_vintage
 
 # Tried in order when the caller does not name the id column.
-_ID_ALIASES = ("polygon_id", "detection_id", "id", "fid", "objectid")
+_ID_ALIASES = ("polygon_id", "detection_id", "cluster_id", "id", "fid", "objectid")
 
 
 def read_polygons(
@@ -117,6 +117,12 @@ def read_polygons(
         arr = gdf.geometry.to_numpy()
         has_geom = ~(shapely.is_missing(arr) | shapely.is_empty(arr))
         parts = gdf[has_geom].explode(index_parts=False, ignore_index=True)
+        # A dissolved geometry can carry stray line or point fragments beside
+        # its polygons. They are debris, not arrays: drop them wherever the
+        # feature has a polygonal part to stand for it.
+        polygonal = parts.geometry.geom_type.isin(_POLYGONAL)
+        keeps_a_polygon = polygonal.groupby(parts["parent_polygon_id"]).transform("any")
+        parts = parts[polygonal | ~keeps_a_polygon].reset_index(drop=True)
         # Suffix ids that now repeat (i.e. came from a MultiPolygon parent).
         is_dup = parts["parent_polygon_id"].duplicated(keep=False)
         cumcount = parts.groupby("parent_polygon_id").cumcount()
@@ -174,15 +180,19 @@ def _screen_geometries(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 
     missing = shapely.is_missing(geoms)
     empty = ~missing & shapely.is_empty(geoms)
-    type_id = shapely.get_type_id(geoms)                    # 3 = Polygon, 6 = MultiPolygon
+    # 3 = Polygon, 6 = MultiPolygon, 7 = GeometryCollection. A collection may
+    # hold polygons beside stray lines and points (a dissolve can produce one),
+    # so it is sifted for its polygonal content rather than rejected outright.
+    type_id = shapely.get_type_id(geoms)
     polygonal = np.isin(type_id, (3, 6))
+    collection = type_id == 7
     issue[missing] = "null_geometry"
     issue[empty] = "empty_geometry"
-    issue[~missing & ~empty & ~polygonal] = "not_polygonal"
+    issue[~missing & ~empty & ~polygonal & ~collection] = "not_polygonal"
 
     # Repairs are rare, so only those features are handled one at a time.
-    candidates = ~missing & ~empty & polygonal
-    for i in np.flatnonzero(candidates & ~shapely.is_valid(geoms)):
+    candidates = ~missing & ~empty & (polygonal | collection)
+    for i in np.flatnonzero(candidates & (collection | ~shapely.is_valid(geoms))):
         fixed = _polygonal_part(shapely.make_valid(geoms[i]))
         if fixed is None:
             issue[i] = "not_polygonal"

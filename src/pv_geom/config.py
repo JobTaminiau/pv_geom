@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, PrivateAttr
 
 
 class CRSConfig(BaseModel):
@@ -33,6 +33,13 @@ class PolygonsConfig(BaseModel):
 
 
 class PanelPlaneConfig(BaseModel):
+    # A fit that needed the wider tolerance AND came out flatter than this is
+    # flagged `envelope_fit`: scatter about a near-flat plane is what rows of
+    # tilted modules on a flat roof look like, and the plane then describes the
+    # envelope of the rows, not the modules. (Validation, 2026-10: a warehouse
+    # roof reported at 10 degrees measured 1.4; 80 of its 82 fits matched this
+    # signature against 0.2-0.3% of residential fits.)
+    envelope_tilt_max_deg: float = 5.0
     erosion_m: float = 0.15
     ransac_threshold_m: float = 0.05
     # Noise-adaptive tolerance. 5 cm suits clean, single-swath data (Phoenix:
@@ -56,8 +63,21 @@ class PanelPlaneConfig(BaseModel):
 
 
 class MultiPlaneConfig(BaseModel):
+    """Polygons that hold more than one plane are split into segments (facets)."""
+
     enabled: bool = True
+    # A plane is a facet when it holds at least this share of the polygon's
+    # returns (and at least panel_plane.min_points of them) ...
     secondary_min_frac: float = 0.20
+    # ... and differs in orientation from every other facet by at least this.
+    # Without it a single noisy surface is sliced into parallel "facets".
+    segment_min_angle_deg: float = 10.0
+    max_segments: int = 4
+    # A further facet steeper than this is not an array: on the benchmarks the
+    # planes found at 87-90 degrees are returns off walls, parapets and roof
+    # edges inside a slightly oversized polygon. (The primary plane is not
+    # subject to this; a genuinely steep array still gets its fit.)
+    segment_max_tilt_deg: float = 70.0
     ew_rack_azimuth_tol_deg: float = 25.0
     ew_rack_tilt_tol_deg: float = 5.0
 
@@ -93,6 +113,31 @@ class RoofPlaneConfig(BaseModel):
     collar_m: float = 1.2
     collar_min_points: int = 40
     collar_agreement_min: float = 0.5
+    # Facet search. On a hip or cross-gabled roof the ring covers several
+    # facets and no single plane holds `min_inlier_frac` of it — on the Phoenix
+    # test block that left 785 of 2,994 fitted polygons without a reference
+    # (`roof_no_consensus`), the largest single cause of unscreened rows. When
+    # the ring has no dominant plane, or its dominant plane is not the one beside
+    # the array, the ring's planes are peeled off one at a time (up to
+    # `max_facets`) and the one the collar agrees with is taken. Set
+    # `facet_search: false` for the pre-0.5 behaviour.
+    facet_search: bool = True
+    max_facets: int = 4
+    # A facet found by the search (or a fit to the collar alone) must explain a
+    # clear majority of the collar. An array straddling a ridge has a collar
+    # split about evenly between two facets; neither is its roof, and at a bare
+    # majority one of them would be picked.
+    facet_agreement_min: float = 0.65
+    # Last resort, for arrays at a ridge or hip (or polygons covering two
+    # facets), whose collar is genuinely split so that no facet holds a clear
+    # majority of it: take the facet that is PARALLEL to the fitted array plane,
+    # provided it also touches the array (holds `parallel_collar_min` of the
+    # collar). A flush array is parallel to its own roof; so is a bare roof to
+    # itself, which the standoff screen then correctly reports as unresolved. A
+    # rack on a flat roof has no parallel facet and stays unscreened. Rows
+    # referenced this way say so in `roof_ref_method`. 0 disables it.
+    parallel_angle_max_deg: float = 10.0
+    parallel_collar_min: float = 0.25
     # Fit a roof reference from an *open* ring (not clipped to a footprint) when
     # no footprint layer was supplied, or the polygon misses every footprint.
     # The ring is then just the elevated returns around the array; the consensus
@@ -247,6 +292,9 @@ class CoiledConfig(BaseModel):
     # environment specs, so it is installed at cluster start). Must be the
     # version the client runs.
     package_source: str = "git+https://github.com/JobTaminiau/pv_geom.git@main"
+    # Optional: what one worker costs per hour, so `--dry-run` can estimate the
+    # bill. Leave unset to get a time estimate only.
+    usd_per_worker_hour: float | None = None
 
 
 class LocalConfig(BaseModel):
@@ -293,10 +341,42 @@ class VintageConfig(BaseModel):
     sample_tiles: int = 25
 
 
+class InputsConfig(BaseModel):
+    """Where the run's inputs are. With these set, a run is just
+    ``pv-geom run --config area.yaml``; command-line options override them.
+    Relative paths are resolved against the config file's folder."""
+
+    polygons: str | None = None          # PV polygon layer (any vector format; path or s3://)
+    polygon_id_col: str | None = None    # id column; None = auto-detect, else synthesize
+    lidar_prefix: str | None = None      # folder or s3:// prefix holding the LAZ tiles
+    tile_index: str | None = None        # tile index layer; None = build it from tile headers
+    tile_id_col: str | None = None       # id column in the tile index; None = auto-detect
+    name_template: str = "{name}.laz"    # tile filename from the tile id
+    footprints: str | None = None        # optional building footprints
+    # Optional scope limits, for trial runs. Polygons outside them are not part
+    # of the run and get no row.
+    bbox: tuple[float, float, float, float] | None = None    # xmin ymin xmax ymax, run CRS
+    max_polygons: int | None = None
+
+
+class StudyConfig(BaseModel):
+    """What this run is of, and where its output goes."""
+
+    name: str | None = None              # used in report titles and the methods text
+    output: str | None = None            # output folder or s3:// prefix
+
+
 class PVGeomConfig(BaseModel):
     # Unknown keys are ignored so configs written for older versions (which
     # carried a never-implemented `output:` block) still load.
     model_config = ConfigDict(extra="ignore")
+
+    # Folder relative paths in the config are resolved against (the config
+    # file's own folder; None for a config built in code).
+    _base_dir: Path | None = PrivateAttr(default=None)
+
+    study: StudyConfig = Field(default_factory=StudyConfig)
+    inputs: InputsConfig = Field(default_factory=InputsConfig)
 
     crs: CRSConfig = Field(default_factory=CRSConfig)
     polygons: PolygonsConfig = Field(default_factory=PolygonsConfig)
@@ -313,7 +393,25 @@ class PVGeomConfig(BaseModel):
     def from_yaml(cls, path: Path | str) -> PVGeomConfig:
         with open(path, encoding="utf-8") as f:
             raw = yaml.safe_load(f) or {}
-        return cls(**raw)
+        cfg = cls(**raw)
+        cfg._base_dir = Path(path).resolve().parent
+        return cfg
+
+    def resolve(self, location: str | None) -> str | None:
+        """A path from the config as an absolute location: remote URIs and
+        absolute paths pass through, a relative path is taken against the
+        config file's folder."""
+        if location is None:
+            return None
+        s = str(location)
+        if "://" in s or Path(s).is_absolute() or self._base_dir is None:
+            return s
+        return str((self._base_dir / s).resolve())
+
+    def model_copy(self, *, update=None, deep: bool = False):
+        copy = super().model_copy(update=update, deep=deep)
+        copy._base_dir = self._base_dir
+        return copy
 
     def result_hash(self) -> str:
         """Like :meth:`hash`, but ignoring how the run is executed.
@@ -323,7 +421,10 @@ class PVGeomConfig(BaseModel):
         different measurement settings. ``--resume`` compares this.
         """
         dump = self.model_dump(mode="json")
-        dump.pop("compute", None)
+        # Not what is computed, but how, on what, and where to: the inputs'
+        # identity is checked separately, by the plan fingerprint.
+        for key in ("compute", "inputs", "study"):
+            dump.pop(key, None)
         if not self.mounting_rules.enabled:
             dump["mounting_rules"] = {"enabled": False}
         return hashlib.sha256(json.dumps(dump, sort_keys=True).encode("utf-8")).hexdigest()
@@ -336,6 +437,7 @@ class PVGeomConfig(BaseModel):
         make two otherwise identical runs look different.
         """
         dump = self.model_dump(mode="json")
+        dump.pop("study", None)            # a label and a destination change nothing
         if not self.mounting_rules.enabled:
             dump["mounting_rules"] = {"enabled": False}
         canonical = json.dumps(dump, sort_keys=True)

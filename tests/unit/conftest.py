@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import geopandas as gpd
@@ -49,3 +50,14 @@ def synth_inputs(tmp_path: Path) -> dict[str, Path]:
         "laz_dir": tmp_path,
         "out": out_dir,
     }
+
+
+@pytest.fixture(autouse=True)
+def _restore_package_logging():
+    """Commands run through the CLI configure the ``pv_geom`` logger (their own
+    handler, no propagation). Put it back after every test, so one test's CLI
+    call cannot hide another's log records from ``caplog``."""
+    pkg = logging.getLogger("pv_geom")
+    saved = (pkg.handlers[:], pkg.level, pkg.propagate)
+    yield
+    pkg.handlers[:], pkg.level, pkg.propagate = saved[0], saved[1], saved[2]

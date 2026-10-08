@@ -9,7 +9,7 @@ from shapely.geometry import Polygon, box
 
 from pv_geom.config import RoofPlaneConfig
 from pv_geom.geometry.plane_fit import fit_plane_ransac
-from pv_geom.geometry.roof_plane import _enforce_collar_agreement, extract_roof_plane
+from pv_geom.geometry.roof_plane import _reference_plane, extract_roof_plane
 
 # --------------------------------------------------------------------------- #
 # Helpers
@@ -250,7 +250,7 @@ def test_collar_overrides_a_ring_fit_from_the_far_facet() -> None:
     cfg = RoofPlaneConfig(collar_m=1.2, collar_min_points=40, ransac_threshold_m=0.15)
     ring_only = fit_plane_ransac(ring, ransac_threshold=cfg.ransac_threshold_m,
                                  min_inlier_frac=cfg.min_inlier_frac, max_iter=200, seed=0)
-    guarded = _enforce_collar_agreement(ring_only, pv, ring, cfg, seed=0)
+    guarded, _ = _reference_plane(pv, ring, cfg, seed=0)
 
     # Unguarded, RANSAC follows the majority to the far (west-facing) facet.
     assert abs(((ring_only.azimuth_deg - 270.0 + 180) % 360) - 180) < 5.0
@@ -286,11 +286,13 @@ def test_looser_consensus_floor_recovers_a_gable_adjacent_array() -> None:
     loose = extract_roof_plane(pv, footprints, others, pts,
                                RoofPlaneConfig(**base, min_inlier_frac=0.4), seed=0)
 
-    assert strict.usable is False
-    assert strict.flag == "roof_no_consensus"
-    assert loose.usable is True
-    assert loose.fit.tilt_deg == pytest.approx(30.0, abs=1.0)
-    assert abs(((loose.fit.azimuth_deg - 90.0 + 180) % 360) - 180) < 5.0
+    # Before 0.5 the strict floor lost this array's reference altogether
+    # (`roof_no_consensus`). The facet search now recovers it at either floor,
+    # and on the correct facet both times.
+    for result in (strict, loose):
+        assert result.usable is True
+        assert result.fit.tilt_deg == pytest.approx(30.0, abs=1.0)
+        assert abs(((result.fit.azimuth_deg - 90.0 + 180) % 360) - 180) < 5.0
 
 
 def test_sliver_overlap_is_off_building() -> None:
@@ -342,3 +344,97 @@ def test_picks_largest_overlapping_footprint() -> None:
     pts = np.column_stack([xy, z])
     result = extract_roof_plane(pv, footprints, others, pts, RoofPlaneConfig(), seed=0)
     assert result.building_id == "big"
+
+
+# --------------------------------------------------------------------------- #
+# Facet search (0.5): a reference on hip and cross-gable roofs
+# --------------------------------------------------------------------------- #
+
+
+def _hip_ring(array_on: str = "south", noise: float = 0.01, seed: int = 5):
+    """Ring points around an array on one facet of a four-facet (hip) roof.
+
+    The ring is wide enough to reach the other three facets, so no single plane
+    holds 40% of it; the collar beside the array lies on the array's own facet.
+    """
+    rng = np.random.default_rng(seed)
+    pv = box(-1.5, -6.0, 1.5, -4.0)                       # on the south facet
+    xy = rng.uniform([-8.0, -8.0], [8.0, 8.0], size=(6000, 2))
+    xy = xy[~((np.abs(xy[:, 0]) < 1.5) & (xy[:, 1] > -6.0) & (xy[:, 1] < -4.0))]
+    # Four facets of a pyramid roof: each point belongs to the facet it faces.
+    south, north = xy[:, 1] < -np.abs(xy[:, 0]), xy[:, 1] > np.abs(xy[:, 0])
+    east = (xy[:, 0] > 0) & ~south & ~north
+    z = np.empty(len(xy))
+    for mask, az in ((south, 180.0), (north, 0.0), (east, 90.0), (~south & ~north & ~east, 270.0)):
+        z[mask] = _plane_z(xy[mask], 25.0, az, 10.0)
+    ring = np.column_stack([xy, z + rng.normal(0, noise, len(xy))])
+    return pv, ring
+
+
+def test_facet_search_finds_the_arrays_own_facet_on_a_hip_roof() -> None:
+    pv, ring = _hip_ring()
+    cfg = RoofPlaneConfig(ransac_threshold_m=0.15)
+    whole_ring = fit_plane_ransac(ring, ransac_threshold=0.15,
+                                  min_inlier_frac=cfg.min_inlier_frac, max_iter=200, seed=0)
+    assert np.isnan(whole_ring.tilt_deg)                  # no plane holds 40% of four facets
+
+    found, method = _reference_plane(pv, ring, cfg, seed=0)
+    assert method == "collar_facet"
+    assert found.tilt_deg == pytest.approx(25.0, abs=1.0)
+    assert abs(((found.azimuth_deg - 180.0 + 180) % 360) - 180) < 3.0     # the south facet
+
+
+def test_facet_search_uses_more_of_the_roof_than_the_collar_alone() -> None:
+    """With the search off, the collar by itself still finds the array's facet;
+    the search finds the same facet from all of that facet's ring points, which
+    is a better-determined plane."""
+    pv, ring = _hip_ring()
+    searched, _ = _reference_plane(pv, ring, RoofPlaneConfig(ransac_threshold_m=0.15), seed=0)
+    collar_only, how = _reference_plane(
+        pv, ring, RoofPlaneConfig(ransac_threshold_m=0.15, facet_search=False), seed=0)
+    assert how == "collar_only"
+    assert collar_only.tilt_deg == pytest.approx(25.0, abs=1.5)
+    assert searched.n_inliers > 2 * collar_only.n_inliers
+
+
+def test_array_straddling_a_ridge_still_has_no_reference() -> None:
+    """Its collar is split between two facets: neither is 'the' roof, and the
+    search must not pick one."""
+    rng = np.random.default_rng(2)
+    pv = box(-2.0, -1.0, 2.0, 1.0)                        # centred on the ridge (x = 0)
+    xy = rng.uniform([-7.0, -6.0], [7.0, 6.0], size=(6000, 2))
+    xy = xy[~((np.abs(xy[:, 0]) < 2.0) & (np.abs(xy[:, 1]) < 1.0))]
+    z = np.where(xy[:, 0] < 0, _plane_z(xy, 30.0, 270.0, 10.0), _plane_z(xy, 30.0, 90.0, 10.0))
+    ring = np.column_stack([xy, z + rng.normal(0, 0.01, len(xy))])
+    cfg = RoofPlaneConfig(ransac_threshold_m=0.15, min_inlier_frac=0.6)
+    fit, method = _reference_plane(pv, ring, cfg, seed=0)
+    assert np.isnan(fit.tilt_deg) and method is None
+
+    # ...unless the array's own plane says which facet it lies on.
+    west = np.array([-np.sin(np.radians(30.0)), 0.0, np.cos(np.radians(30.0))])
+    fit, method = _reference_plane(pv, ring, cfg, panel_normal=west, seed=0)
+    assert method == "panel_parallel_facet"
+    assert abs(((fit.azimuth_deg - 270.0 + 180) % 360) - 180) < 3.0
+
+    # A rack tilted unlike either facet has no parallel facet: still no reference.
+    flat = np.array([0.0, 0.0, 1.0])
+    fit, method = _reference_plane(pv, ring, cfg, panel_normal=flat, seed=0)
+    assert np.isnan(fit.tilt_deg) and method is None
+
+
+def test_sequential_planes_are_disjoint_and_ordered() -> None:
+    from pv_geom.geometry.plane_fit import fit_planes_sequential
+
+    rng = np.random.default_rng(0)
+    a = rng.uniform([0, 0], [10, 10], size=(600, 2))
+    b = rng.uniform([20, 0], [30, 10], size=(300, 2))
+    pts = np.concatenate([
+        np.column_stack([a, _plane_z(a, 20.0, 180.0, 5.0)]),
+        np.column_stack([b, _plane_z(b, 35.0, 90.0, 8.0)]),
+        np.column_stack([rng.uniform(0, 30, (40, 2)), rng.uniform(20, 40, 40)]),   # clutter
+    ])
+    planes = fit_planes_sequential(pts, ransac_threshold=0.05, min_points=100, seed=0)
+    assert [round(p.tilt_deg) for p in planes] == [20, 35]
+    assert planes[0].n_inliers > planes[1].n_inliers
+    assert not (planes[0].inlier_mask & planes[1].inlier_mask).any()
+    assert all(p.n_total == len(pts) and len(p.inlier_mask) == len(pts) for p in planes)

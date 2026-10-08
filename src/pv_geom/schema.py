@@ -13,7 +13,47 @@ import pyarrow as pa
 # Compatibility rule: within a major version, columns are only ever ADDED and
 # added columns are nullable, so a reader written for x.0 reads every x.y.
 # Before 1.0 the major version is 0 and minor versions may still change types.
-SCHEMA_VERSION = "0.3"
+SCHEMA_VERSION = "0.5"
+
+
+# One facet of a polygon (an entry of the `segments` column).
+SEGMENT_FIELDS: list[tuple[str, pa.DataType, str, str]] = [
+    ("segment_index", pa.int8(), "", "0 for the primary (largest) facet, then by size."),
+    ("area_share", pa.float32(), "", "Share of the polygon's fitted returns on this facet."),
+    ("area_m2", pa.float32(), "m2", "Plan area apportioned to the facet: polygon area x share."),
+    ("surface_area_m2", pa.float32(), "m2", "Area along the facet's plane: area_m2 / cos(tilt)."),
+    ("tilt_deg", pa.float32(), "deg", "Tilt of the facet from horizontal."),
+    ("azimuth_deg", pa.float32(), "deg",
+     "Direction the facet faces, clockwise from true north; null below the tilt floor."),
+    ("rmse_m", pa.float32(), "m", "RMSE of the facet's returns about its plane."),
+    ("tilt_unc_deg", pa.float32(), "deg", "Bootstrap 1-sigma uncertainty of the tilt."),
+    ("azimuth_unc_deg", pa.float32(), "deg", "Bootstrap 1-sigma uncertainty of the azimuth."),
+    ("n_points", pa.int32(), "", "LiDAR returns on the facet."),
+    ("height_above_ground_m", pa.float32(), "m", "Median height of the facet above ground."),
+    ("geometry", pa.binary(), "", "Where in the polygon the facet lies (WKB, run CRS)."),
+]
+SEGMENT_TYPE = pa.list_(pa.struct([pa.field(n, t) for n, t, _, _ in SEGMENT_FIELDS]))
+
+
+# The `recommended` column. Provisional until the accuracy work (spec Epic A)
+# says whether wide-tolerance fits and unresolved surfaces belong in or out.
+RECOMMENDED_BASES = frozenset({"panel_confirmed", "panel_by_vintage"})
+RECOMMENDED_EXCLUDING_FLAGS = frozenset({
+    "low_density", "below_min_area", "overlaps_polygon", "duplicate_geometry",
+    "envelope_fit",
+})
+RECOMMENDED_RULE = (
+    "status == 'measured' and geometry_basis in "
+    f"{sorted(RECOMMENDED_BASES)} and none of the flags {sorted(RECOMMENDED_EXCLUDING_FLAGS)}. "
+    "Provisional: wide_tolerance_fit rows are included and surface_unresolved rows excluded "
+    "pending validation."
+)
+
+
+def is_recommended(status: str, basis: str, flags: list[str] | tuple[str, ...]) -> bool:
+    """Whether a row is in the suggested default subset (see RECOMMENDED_RULE)."""
+    return (status == "measured" and basis in RECOMMENDED_BASES
+            and not RECOMMENDED_EXCLUDING_FLAGS.intersection(flags))
 
 
 def _f(name: str, typ: pa.DataType, *, nullable: bool = True, unit: str = "",
@@ -58,6 +98,11 @@ _CORE_FIELDS: list[pa.Field] = [
     _f("vintage_gap_days", pa.int32(), unit="days",
        desc="polygon_vintage minus lidar_date. Positive means the polygon is "
             "newer than the LiDAR, so the installation may be absent from it."),
+    _f("recommended", pa.bool_(), nullable=False,
+       desc="True for rows suggested for analysis of array geometry: measured, on a panel "
+            "basis (panel_confirmed or panel_by_vintage) and free of the flags that mark an "
+            "unreliable or double-counted row. PROVISIONAL rule, to be fixed once accuracy "
+            "is validated; see RECOMMENDED_RULE in the dataset metadata."),
     _f("geometry_basis", pa.string(), nullable=False,
        desc="What the fitted plane represents: panel_confirmed, "
             "panel_by_vintage, surface_unresolved, unscreened, no_fit, or "
@@ -75,8 +120,12 @@ _CORE_FIELDS: list[pa.Field] = [
     _f("panel_tilt_deg", pa.float32(), unit="deg",
        desc="Tilt of the fitted plane from horizontal (0 = flat)."),
     _f("panel_azimuth_deg", pa.float32(), unit="deg",
-       desc="Compass direction the plane faces (0 = N, 90 = E, 180 = S). Null "
-            "below the tilt floor, where it is undefined."),
+       desc="Direction the plane faces, clockwise from TRUE north (0 = N, 90 = E, "
+            "180 = S). Null below the tilt floor, where it is undefined."),
+    _f("grid_convergence_deg", pa.float32(), unit="deg",
+       desc="Meridian convergence at the polygon: the true-north bearing of the "
+            "run CRS's grid north. Already added to every azimuth column; "
+            "subtract it to get the azimuth relative to grid north."),
     _f("panel_rmse_m", pa.float32(), unit="m",
        desc="Perpendicular RMSE of the inliers about the fitted plane."),
     _f("panel_fit_tolerance_m", pa.float32(), unit="m",
@@ -87,19 +136,31 @@ _CORE_FIELDS: list[pa.Field] = [
     _f("panel_azimuth_unc_deg", pa.float32(), unit="deg",
        desc="Bootstrap circular 1-sigma uncertainty of the azimuth."),
     _f("n_planes_detected", pa.int8(),
-       desc="0 = no fit, 1 = one plane, 2 = a second plane found in the outliers."),
+       desc="Number of distinct facets (planes) in the polygon; 0 without a fit. The "
+            "panel_* columns describe the primary (largest) facet; `segments` holds all."),
     _f("secondary_tilt_deg", pa.float32(), unit="deg",
        desc="Tilt of the second plane, when one was found."),
     _f("secondary_azimuth_deg", pa.float32(), unit="deg",
-       desc="Azimuth of the second plane, when one was found."),
+       desc="Azimuth of the second plane (true north), when one was found."),
+    _f("segments", SEGMENT_TYPE,
+       desc="Every facet of the polygon, primary first: one entry for an ordinary "
+            "array, several when the polygon covers more than one roof face. Each "
+            "has its own tilt, true-north azimuth, area share and uncertainty. Null "
+            "without a fit. Exported flat as pv_geom_segments in the release dataset."),
     # --- roof reference -----------------------------------------------------
     _f("roof_ref_source", pa.string(), nullable=False,
        desc="How the roof reference ring was built: footprint_ring (clipped to "
             "a building footprint), open_ring (no footprint) or none."),
+    _f("roof_ref_method", pa.string(),
+       desc="How the roof plane was chosen within the ring: dominant_plane (the "
+            "ring's main plane), collar_facet (the facet the band beside the array "
+            "lies on), panel_parallel_facet (the facet parallel to the array plane, "
+            "where that band is split between facets) or collar_only. Null without "
+            "a usable roof reference."),
     _f("roof_tilt_deg", pa.float32(), unit="deg",
        desc="Tilt of the plane fitted to the ring around the polygon."),
     _f("roof_azimuth_deg", pa.float32(), unit="deg",
-       desc="Azimuth of the plane fitted to the ring around the polygon."),
+       desc="Azimuth of the plane fitted to the ring around the polygon (true north)."),
     _f("roof_rmse_m", pa.float32(), unit="m",
        desc="RMSE of the roof-ring fit."),
     _f("panel_roof_angle_deg", pa.float32(), unit="deg",
@@ -165,12 +226,16 @@ FLAG_DESCRIPTIONS: dict[str, str] = {
     "low_density": "Too few returns in the polygon for a robust fit.",
     "poor_fit": "No plane reached consensus; tilt and azimuth are null.",
     "near_horizontal": "Tilt below the floor; azimuth is undefined and null.",
+    "multi_facet": "The polygon holds more than one distinct plane; see `segments`.",
     "below_min_area": "Input polygon is smaller than polygons.min_area_m2.",
     "overlaps_polygon": "Input polygon substantially overlaps another input polygon.",
     "duplicate_geometry": "Input polygon has the same geometry as an earlier one.",
     "geometry_repaired": "Input geometry was invalid and was repaired before measuring.",
     "wide_tolerance_fit": "Fit accepted only at a wider inlier tolerance than the base "
                           "(noisy returns); see panel_fit_tolerance_m.",
+    "envelope_fit": "Wide-tolerance fit on a near-flat plane: the signature of rows of "
+                    "tilted modules on a flat roof (or rooftop clutter). Tilt and azimuth "
+                    "describe the envelope of the rows, not the modules.",
     "east_west_rack": "Two planes facing ~180 deg apart at similar tilt.",
     "roof_insufficient": "The roof ring never gathered enough returns.",
     "roof_no_consensus": "No single plane described the roof ring.",

@@ -101,6 +101,12 @@ def test_inspect_tile(synth_inputs: dict[str, Path]) -> None:
     assert info["n_points"] > 0 and info["classes"]["6"] > 0
 
 
-def test_missing_required_option_is_a_usage_error() -> None:
+def test_missing_inputs_are_reported_with_where_to_give_them() -> None:
+    """Inputs may come from options or a config, so none is a required option;
+    what is missing after both is an InputError naming option and config key."""
+    from pv_geom.errors import InputError
+
     result = runner.invoke(app, ["run", "--polygons", "p.parquet"])
-    assert result.exit_code == 2
+    assert result.exit_code == 1
+    assert isinstance(result.exception, InputError)
+    assert "inputs.lidar_prefix" in result.exception.remedy

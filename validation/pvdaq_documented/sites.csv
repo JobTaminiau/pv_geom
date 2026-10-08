@@ -1,0 +1,39 @@
+system_id,name,location,latitude,longitude,mount_type,tilt_deg,azimuth_deg,dc_kw,first_data,last_data
+1403,[1403] RTC-FSEC-Baseline,"Cocoa Beach, FL",28.405,-80.7709,unknown,35.0,180.0,6.0,2014-12-01,2020-06-03
+1275,Commercial - NOLA,"New Orleans, LA",29.9649,-90.069,roof,30.0,135.0,25.6,2010-04-28,2013-05-14
+9069,Simon Solar Farm,"Social Circle, GA",33.6762,-83.676,ground,20.0,180.0,33000.0,2016-02-17,2023-11-29
+1429,[1429] RTC-SNL-Baseline,"Albuquerque, NM",35.0549,-106.5433,unknown,35.0,180.0,6.0,2016-02-25,2017-10-31
+1416,[1416] GSA Sanford Federal Building,"Raleigh, NC",35.7793,-78.6341,unknown,10.0,180.0,564.5,2015-11-05,2018-03-26
+1423,[1423] RTC-NV-Baseline,"Henderson, NV",36.0275,-114.9215,unknown,35.0,180.0,6.0,2015-11-24,2025-07-28
+1367,[1367] City of Henderson-NV - Aquatic Complex,"Henderson, NV",36.033,-114.9516,unknown,12.0,172.0,277.16,2013-05-08,2020-05-24
+1418,[1418] Clark County-NV - Desert Breeze,"Clark County, NV",36.1253,-115.2713,roof,10.0,138.0,42.0,2015-06-23,2020-05-28
+1419,[1419] Clark County-NV - Hollywood Rec Center,"Clark County, NV",36.1534,-115.0256,roof,10.0,210.0,40.0,2015-06-23,2020-05-28
+1420,[1420] Clark County-NV - Government Center,"Clark County, NV",36.1654,-115.1534,roof,10.0,180.0,30.0,2015-06-23,2020-05-28
+34,Andre Agassi Preparatory Academy - Building A,"Las Vegas, NV",36.1952,-115.1582,roof,11.2,180.0,146.64,2010-08-23,2020-07-26
+1276,Andre Agassi Preparatory Academy - Building B,"Las Vegas, NV",36.1952,-115.1582,roof,5.0,180.0,68.48,2011-08-30,2020-07-26
+1277,Andre Agassi Preparatory Academy - Building C,"Las Vegas, NV",36.1952,-115.1582,roof,10.0,180.0,40.56,2011-08-30,2020-07-26
+2107,Farm Solar Array,"Arbuckle, CA",38.996306,-122.134111,ground,25.0,180.0,893.0,2017-01-01,2024-11-30
+4902,NIST_Ground_1,Gaithersburg MD,39.1319,-77.2141,ground,20.0,180.0,270.7,2014-07-29,2018-03-14
+4903,NIST_Roof_1,Gaithersburg MD,39.1354,-77.2156,roof,10.0,180.0,73.7,2014-07-29,2018-03-14
+4901,NIST_Canopy_1,Gaithersburg MD,39.1385,-77.2155,carport,5.0,270.0,242.5,2014-07-29,2018-03-14
+4901,NIST_Canopy_1,Gaithersburg MD,39.1385,-77.2155,carport,5.0,90.0,242.5,2014-07-29,2018-03-14
+1200,Distributed Sun - BWI Hilton,"Linthicum Heights, MD",39.1958,-76.6808,roof,10.0,205.0,51.84,2010-10-03,2020-07-26
+1199,Distributed Sun - Hunt Valley,"Cockeysville, MD",39.4856,-76.6636,roof,20.0,180.0,52.92,2010-05-26,2020-07-26
+1203,Distributed Sun - EJ DeSeta,"Wilmington, DE",39.7325,-75.5511,roof,20.0,205.0,197.47,2011-01-19,2020-07-26
+1332,NREL Parking Garage,"Golden, CO",39.7388,-105.1732,roof,16.77,180.0,1153.488,2013-03-29,2024-05-07
+1332,NREL Parking Garage,"Golden, CO",39.7388,-105.1732,roof,60.0,180.0,1153.488,2013-03-29,2024-05-07
+1433,[1433] NREL RSF1,"Golden, CO",39.7404,-105.1719,roof,10.0,180.0,449.28,2010-12-31,2024-05-07
+1283,NREL Research Support Facility II,"Golden, CO",39.7409,-105.1711,roof,10.0,165.0,408.24,1997-02-19,2024-05-07
+51,NREL x-Si 7,"Golden, CO",39.7416,-105.1734,ground,45.0,158.0,6.0,1994-05-13,2025-07-28
+50,NREL x-Si 6,"Golden, CO",39.742,-105.1727,ground,45.0,158.0,6.0,1994-05-13,2025-07-28
+1432,[1432] NREL S and TF,"Golden, CO",39.7422,-105.1719,roof,10.0,175.0,94.05,2009-09-27,2018-01-14
+1204,Distributed Sun - The Wharf,"Chester, PA",39.8256,-75.3828,roof,5.0,140.0,78.645,2011-02-04,2018-03-26
+1201,Distributed Sun - 5 Executive Campus,"Cherry Hill, NJ",39.9283,-75.0481,roof,10.0,230.0,140.14,2011-01-24,2020-07-26
+1202,Distributed Sun - 6 Executive Campus,"Cherry Hill, NJ",39.9292,-75.0472,roof,10.0,230.0,51.84,2010-12-29,2020-07-26
+1216,Mercury Solar Systems - Array 6,"Port Chester, NY",40.995,-73.668,roof,10.0,180.0,8.1,2011-04-21,2015-01-21
+1218,Mercury Solar Systems - Array 7,"Port Chester, NY",40.995,-73.668,roof,5.0,180.0,7.92,2011-04-21,2015-01-21
+1221,Mercury Solar Systems - Array 11,"Port Chester, NY",40.995,-73.668,roof,10.0,180.0,8.28,2011-04-21,2015-01-21
+1222,Mercury Solar Systems - Array 5,"Port Chester, NY",40.995,-73.668,roof,5.0,180.0,8.54,2011-04-21,2015-01-21
+1224,Mercury Solar Systems - Array 9,"Port Chester, NY",40.995,-73.668,roof,10.0,180.0,8.28,2011-04-21,2015-01-21
+1422,[1422] RTC-VT-Baseline,"Burlington, VT",44.4665,-73.1014,unknown,35.0,180.0,6.0,2014-11-17,2018-01-28
+1239,Univ. of Maine - Presque Isle,"Presque Isle, ME",46.6704,-68.0178,roof,10.0,155.0,20.16,2011-09-18,2020-07-26

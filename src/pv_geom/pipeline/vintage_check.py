@@ -12,6 +12,7 @@ from datetime import date
 import pyarrow as pa
 
 from pv_geom.config import PVGeomConfig
+from pv_geom.errors import LidarClassError
 from pv_geom.io.lidar import read_tile_vintage
 from pv_geom.vintage import parse_vintage
 
@@ -25,9 +26,13 @@ def probe_lidar_vintage(cfg: PVGeomConfig, tile_uris: list[str]) -> dict:
     the LiDAR date is declared too if given, otherwise measured from a sample of
     tiles (per-point GPS time). Prints a warning when the polygons postdate the
     LiDAR — the case where installations exist in the input but not in the data
-    used to measure them. Never raises: an unreadable tile costs a sample, not
-    the run. Every row later carries its own tile's exact date; this is the
-    up-front, whole-run view, and what ``--dry-run`` reports.
+    used to measure them. An unreadable tile costs a sample, not the run. Every
+    row later carries its own tile's exact date; this is the up-front, whole-run
+    view, and what ``--dry-run`` reports.
+
+    The same sample is used to check that the LiDAR carries the point classes
+    the run depends on (:func:`check_lidar_classes`), which does raise: without
+    a ground class nothing downstream can be trusted.
     """
     polygon_vintage = parse_vintage(cfg.vintage.polygon_vintage)
     declared_lidar = parse_vintage(cfg.vintage.lidar_date)
@@ -58,6 +63,7 @@ def probe_lidar_vintage(cfg: PVGeomConfig, tile_uris: list[str]) -> dict:
                 n_errors += 1
         out["lidar_tiles_sampled"] = len(samples)
         out["lidar_tiles_unreadable"] = n_errors
+        out.update(check_lidar_classes(cfg, samples))
 
         starts = [s.flight_start for s in samples if s.flight_start]
         ends = [s.flight_end for s in samples if s.flight_end]
@@ -112,6 +118,59 @@ def probe_lidar_vintage(cfg: PVGeomConfig, tile_uris: list[str]) -> dict:
             f"polygons ({polygon_vintage.isoformat()}) are no newer "
             f"than the LiDAR ({latest.isoformat()}); installations were present at capture"
         )
+    return out
+
+
+def check_lidar_classes(cfg: PVGeomConfig, samples: list) -> dict:
+    """Check the sampled tiles against the configured point classes.
+
+    Says which class will supply panel candidates — the building class when the
+    collection has one, otherwise unclassified returns above local ground — and
+    refuses to go on when there is no ground class or no candidate class at all.
+    Also flags a tile CRS that is not the run CRS, since points are used in
+    their native coordinates.
+    """
+    classes = sorted({c for s in samples for c in s.classes_seen})
+    if not classes:
+        return {}
+    cls = cfg.io.classification
+    out: dict = {"lidar_classes_sampled": classes}
+    seen = f"classes present in the sampled tiles: {classes}"
+
+    if cls.ground_class not in classes:
+        raise LidarClassError(
+            f"the LiDAR has no ground returns of class {cls.ground_class} ({seen})",
+            "set io.classification.ground_class to the class your collection uses for "
+            "ground, or classify the tiles first; heights and the panel-candidate cut "
+            "both depend on it",
+        )
+    if cls.panel_class_primary in classes:
+        out["panel_candidate_class"] = cls.panel_class_primary
+        log.info("LiDAR classes %s: panel candidates are class %d returns",
+                 classes, cls.panel_class_primary)
+    elif cls.panel_class_fallback in classes:
+        out["panel_candidate_class"] = cls.panel_class_fallback
+        log.info("LiDAR classes %s: no class %d, so panel candidates are class %d returns "
+                 "more than %.1f m above local ground", classes, cls.panel_class_primary,
+                 cls.panel_class_fallback, cls.fallback_height_above_ground_m)
+    else:
+        raise LidarClassError(
+            f"the LiDAR has neither class {cls.panel_class_primary} nor class "
+            f"{cls.panel_class_fallback} returns to fit arrays to ({seen})",
+            "set io.classification.panel_class_primary / panel_class_fallback to the "
+            "classes your collection uses for buildings / unclassified returns",
+        )
+
+    target = str(cfg.crs.target)
+    others = sorted({s.crs for s in samples if s.crs and s.crs != target})
+    if others and target.lower() != "auto":
+        from pv_geom.utils.crs import _tile_transform
+
+        out["lidar_converted_on_read"] = {
+            c: _tile_transform(c, target)[2] or "same grid; no conversion needed"
+            for c in others}
+        log.info("tiles declare CRS %s, not the run CRS %s; converted on read: %s",
+                 others, target, out["lidar_converted_on_read"])
     return out
 
 

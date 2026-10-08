@@ -227,8 +227,64 @@ def basis_composition(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+BOOTSTRAP_REPLICATES = 200
+BOOTSTRAP_MIN_ROWS = 20
+
+
+def bootstrap_intervals(tilt: np.ndarray, az: np.ndarray, w: np.ndarray,
+                        n_boot: int = BOOTSTRAP_REPLICATES, seed: int = 0) -> dict[str, float]:
+    """95% intervals for the median tilt and the four facing shares.
+
+    A Poisson bootstrap over polygons: each replicate reweights every polygon by
+    an independent Poisson(1) draw, which for these sample sizes is the same as
+    resampling polygons with replacement but needs no re-sorting. The interval
+    reflects *sampling* variability across polygons — how much the statistic
+    would move with a different draw of arrays from the same fleet — and not
+    measurement error in any one polygon, nor the vintage question.
+
+    ``az`` is NaN where a polygon has no defined azimuth. Returns NaN intervals
+    below ``BOOTSTRAP_MIN_ROWS`` polygons.
+    """
+    keys = ["tilt_p50_deg", *[f"share_facing_{q}" for q in QUADRANTS]]
+    out = {f"{k}_ci_{side}": np.nan for k in keys for side in ("lo", "hi")}
+    n = len(tilt)
+    if n < BOOTSTRAP_MIN_ROWS:
+        return out
+    order = np.argsort(tilt)
+    x, w_sorted = tilt[order], w[order]
+    has_az = np.isfinite(az)
+    quad = np.full(n, -1)
+    quad[has_az] = sector_index(az[has_az], 4)
+
+    rng = np.random.default_rng(seed)
+    medians = np.empty(n_boot)
+    shares = np.empty((n_boot, 4))
+    for b in range(n_boot):
+        draw = rng.poisson(1.0, n)
+        ww = w_sorted * draw[order]
+        total = ww.sum()
+        if total <= 0:
+            medians[b] = np.nan
+        else:
+            cdf = (np.cumsum(ww) - 0.5 * ww) / total
+            medians[b] = np.interp(0.5, cdf, x)
+        wa = w * draw
+        denom = wa[has_az].sum()
+        for i in range(4):
+            shares[b, i] = wa[quad == i].sum() / denom if denom > 0 else np.nan
+
+    out["tilt_p50_deg_ci_lo"], out["tilt_p50_deg_ci_hi"] = (
+        float(v) for v in np.nanpercentile(medians, [2.5, 97.5]))
+    for i, q in enumerate(QUADRANTS):
+        if np.isfinite(shares[:, i]).any():
+            lo, hi = np.nanpercentile(shares[:, i], [2.5, 97.5])
+            out[f"share_facing_{q}_ci_lo"], out[f"share_facing_{q}_ci_hi"] = float(lo), float(hi)
+    return out
+
+
 def summary_statistics(df: pd.DataFrame) -> pd.DataFrame:
-    """Headline tilt and azimuth statistics per stratum and weighting."""
+    """Headline tilt and azimuth statistics per stratum and weighting, with 95%
+    bootstrap intervals on the median tilt and the facing shares."""
     rows = []
     for key, (label, _) in STRATA.items():
         sub = df[stratum_mask(df, key)]
@@ -254,6 +310,8 @@ def summary_statistics(df: pd.DataFrame) -> pd.DataFrame:
                 row[f"share_facing_{name}"] = (
                     float(w_az[quad == i].sum() / w_az.sum()) if w_az.sum() > 0 else np.nan
                 )
+            row.update(bootstrap_intervals(
+                tilt, sub["panel_azimuth_deg"].to_numpy(dtype=float), w))
             rows.append(row)
     return pd.DataFrame(rows)
 
@@ -443,12 +501,26 @@ def fit_failure_table(df: pd.DataFrame) -> pd.DataFrame:
     ])
 
 
+def facets_table(df: pd.DataFrame) -> pd.DataFrame:
+    """Measured polygons by the number of distinct facets they hold."""
+    measured = df[df["fitted"]]
+    n = len(measured)
+    planes = measured["n_planes_detected"].fillna(1).astype(int)
+    counts = planes.value_counts().sort_index()
+    return pd.DataFrame([
+        {"facets": int(k), "n": int(v), "share": v / n if n else np.nan,
+         "area_m2": float(measured.loc[planes == k, "w_area"].sum())}
+        for k, v in counts.items()
+    ], columns=["facets", "n", "share", "area_m2"])
+
+
 def all_tables(df: pd.DataFrame, manifest: dict | None = None) -> dict[str, pd.DataFrame]:
     """Every report table, keyed by the file stem it is written under."""
     return {
         "coverage": coverage(df, manifest),
         "status": status_table(df),
         "fit_failure": fit_failure_table(df),
+        "facets": facets_table(df),
         "geometry_basis": basis_composition(df),
         "summary_statistics": summary_statistics(df),
         "tilt_profile": tilt_profile(df),

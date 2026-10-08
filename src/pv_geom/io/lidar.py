@@ -9,6 +9,7 @@ on a 4 GB worker).
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -152,6 +153,10 @@ class TileVintage:
     creation_date: date | None
     flight_start: date | None
     flight_end: date | None
+    # From the same leading sample of points, when the tile was probed rather
+    # than read in full: the ASPRS classes seen, and the tile's horizontal CRS.
+    classes_seen: tuple[int, ...] = ()
+    crs: str | None = None
 
     @property
     def best_estimate(self) -> date | None:
@@ -219,18 +224,30 @@ def _gps_range_to_dates(gps: np.ndarray, header) -> tuple[date | None, date | No
 def _vintage_from_open(src, tile_uri: str) -> TileVintage:
     header = src.header
     start = end = None
-    if "gps_time" in header.point_format.dimension_names and header.point_count:
+    classes: tuple[int, ...] = ()
+    if header.point_count:
         try:
             chunk = next(src.chunk_iterator(min(1_000_000, header.point_count)))
         except StopIteration:
             chunk = None
         if chunk is not None:
-            start, end = _gps_range_to_dates(np.asarray(chunk.gps_time), header)
+            classes = tuple(int(c) for c in np.unique(np.asarray(chunk.classification)))
+            if "gps_time" in header.point_format.dimension_names:
+                start, end = _gps_range_to_dates(np.asarray(chunk.gps_time), header)
+    crs = None
+    with contextlib.suppress(Exception):
+        parsed = header.parse_crs()
+        if parsed is not None:
+            from pv_geom.utils.crs import crs_label
+
+            crs = crs_label(parsed)
     return TileVintage(
         tile_uri=tile_uri,
         creation_date=header.creation_date,
         flight_start=start,
         flight_end=end,
+        classes_seen=classes,
+        crs=crs,
     )
 
 

@@ -86,6 +86,7 @@ def _synthetic_output(out: Path, n: int = 400, *, with_dates: bool = True) -> No
         "lidar_date_source": ["gps_time" if with_dates else None] * n,
         "vintage_gap_days": [1220 if with_dates else None] * n,
         "geometry_basis": basis,
+        "recommended": [b in ("panel_confirmed", "panel_by_vintage") for b in basis],
         "n_points_panel": [200] * n,
         "n_inliers_panel": [190] * n,
         "point_density": [10.0] * n,
@@ -192,3 +193,68 @@ def test_report_falls_back_to_all_fitted_when_few_panel_rows(tmp_path: Path) -> 
     _synthetic_output(out, n=40)                       # 24 panel-basis rows < 30
     s = build_report(out, export_dataset=False).summary
     assert s["headline_stratum"] == "all_fitted"
+
+
+# --------------------------------------------------------------------------- #
+# F7: bootstrap intervals;  G2: the self-describing dataset
+# --------------------------------------------------------------------------- #
+
+
+def test_bootstrap_interval_brackets_the_estimate_and_narrows_with_n() -> None:
+    rng = np.random.default_rng(3)
+
+    def interval(n: int) -> tuple[float, float, float, float]:
+        tilt = rng.normal(20.0, 5.0, n)
+        az = np.where(rng.random(n) < 0.6, 180.0, 270.0)
+        ci = stats.bootstrap_intervals(tilt, az, np.ones(n))
+        return (ci["tilt_p50_deg_ci_lo"], ci["tilt_p50_deg_ci_hi"],
+                ci["share_facing_S_ci_lo"], ci["share_facing_S_ci_hi"])
+
+    lo, hi, s_lo, s_hi = interval(400)
+    assert lo < 20.0 < hi and s_lo < 0.6 < s_hi
+    lo2, hi2, _, _ = interval(40_000)
+    assert (hi2 - lo2) < (hi - lo) / 5            # ~ 1/sqrt(100)
+
+
+def test_bootstrap_interval_is_reproducible_and_absent_for_tiny_samples() -> None:
+    tilt = np.linspace(5, 35, 200)
+    az = np.full(200, 180.0)
+    a = stats.bootstrap_intervals(tilt, az, np.ones(200))
+    b = stats.bootstrap_intervals(tilt, az, np.ones(200))
+    assert a == b
+    assert a["share_facing_S_ci_lo"] == a["share_facing_S_ci_hi"] == 1.0
+    tiny = stats.bootstrap_intervals(tilt[:5], az[:5], np.ones(5))
+    assert all(np.isnan(v) for v in tiny.values())
+
+
+def test_summary_table_carries_intervals(run_dir: Path) -> None:
+    r = build_report(run_dir, export_dataset=False)
+    summ = pd.read_csv(r.tables_dir / "summary_statistics.csv")
+    row = summ[(summ["stratum"] == "all_fitted") & (summ["weight"] == "count")].iloc[0]
+    assert row["tilt_p50_deg_ci_lo"] <= row["tilt_p50_deg"] <= row["tilt_p50_deg_ci_hi"]
+    assert row["share_facing_S_ci_lo"] < row["share_facing_S"] < row["share_facing_S_ci_hi"]
+    assert "95% bootstrap intervals" in r.markdown.read_text(encoding="utf-8")
+
+
+def test_release_dataset_describes_and_verifies_itself(run_dir: Path) -> None:
+    import hashlib
+
+    r = build_report(run_dir)
+    d = r.dataset_dir
+    for name in ("README.md", "metadata.json", "SHA256SUMS.txt", "status_definitions.csv"):
+        assert (d / name).exists(), name
+
+    meta = json.loads((d / "metadata.json").read_text(encoding="utf-8"))
+    assert meta["rows"] == 400 and meta["rows_by_status"]["measured"] == 360
+    assert meta["creators"] == [] and meta["license"] is None      # left for a person
+    assert len(meta["spatial"]["bbox_wgs84"]) == 4
+
+    readme = (d / "README.md").read_text(encoding="utf-8")
+    assert "one per input polygon" in readme and "`panel_tilt_deg`" in readme
+
+    raw = (d / "SHA256SUMS.txt").read_bytes()
+    assert b"\r" not in raw                       # sha256sum -c needs LF line endings
+    listed = dict(line.split("  ")[::-1] for line in raw.decode().splitlines())
+    assert set(listed) == {p.name for p in d.iterdir()} - {"SHA256SUMS.txt"}
+    for name, digest in listed.items():
+        assert hashlib.sha256((d / name).read_bytes()).hexdigest() == digest, name

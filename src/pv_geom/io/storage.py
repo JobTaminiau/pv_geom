@@ -26,6 +26,32 @@ class RemoteFileMissing(FileNotFoundError):
     rather than crashing the whole pipeline on a single missing LAZ tile."""
 
 
+def object_sizes(uris: list[str]) -> dict[str, int]:
+    """Size in bytes of each object, local or on S3 (one listing per S3 prefix).
+    Objects that cannot be found are left out."""
+    sizes: dict[str, int] = {}
+    by_prefix: dict[str, list[str]] = {}
+    for uri in uris:
+        if uri.startswith("s3://"):
+            by_prefix.setdefault(uri.rsplit("/", 1)[0], []).append(uri)
+        elif not is_remote(uri) and Path(uri).exists():
+            sizes[uri] = Path(uri).stat().st_size
+    if by_prefix:
+        boto3 = require("boto3", "cloud", "reading from S3")
+        client = boto3.client("s3")
+        for prefix, wanted in by_prefix.items():
+            bucket, _, key_prefix = prefix[len("s3://"):].partition("/")
+            want = set(wanted)
+            with _storage_errors(prefix):
+                for page in client.get_paginator("list_objects_v2").paginate(
+                        Bucket=bucket, Prefix=key_prefix):
+                    for obj in page.get("Contents", []):
+                        uri = f"s3://{bucket}/{obj['Key']}"
+                        if uri in want:
+                            sizes[uri] = int(obj["Size"])
+    return sizes
+
+
 def list_s3_uris(prefix_uri: str) -> set[str]:
     """List all object URIs under an ``s3://bucket/prefix`` with one paginated
     LIST. Lets the runner drop tiles absent from the bucket before dispatch

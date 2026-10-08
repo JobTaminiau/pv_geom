@@ -9,6 +9,7 @@ from typing import Any
 
 from pv_geom import __version__
 from pv_geom.schema import SCHEMA_VERSION
+from pv_geom.utils.north import TRUE_NORTH
 
 
 def write_manifest(
@@ -26,6 +27,7 @@ def write_manifest(
     crs: str | None = None,
     plan_fingerprint: str | None = None,
     result_hash: str | None = None,
+    estimate: dict[str, Any] | None = None,
 ) -> None:
     """Write the run manifest JSON sidecar at the output prefix root.
 
@@ -37,6 +39,10 @@ def write_manifest(
     manifest = {
         "pkg_version": __version__,
         "schema_version": SCHEMA_VERSION,
+        # Azimuth columns are measured from true north (grid azimuth plus the
+        # meridian convergence in grid_convergence_deg). Outputs written before
+        # schema 0.4 have no such key: theirs are relative to grid north.
+        "azimuth_reference": TRUE_NORTH,
         "config_hash": config_hash,
         "result_hash": result_hash,
         "plan_fingerprint": plan_fingerprint,
@@ -50,6 +56,7 @@ def write_manifest(
         "aggregate_stats": aggregate_stats,
         "tiles_touched": tiles_touched,
         "run_id": run_id,
+        "estimate": estimate or {},
     }
     payload = json.dumps(manifest, indent=2, default=str)
     if str(output_path).startswith("s3://"):

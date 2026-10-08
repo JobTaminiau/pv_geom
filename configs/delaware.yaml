@@ -1,13 +1,27 @@
-# Delaware overrides; unset keys take the defaults in default.yaml.
+# Delaware. Run with:  pv-geom run --config configs/delaware.yaml
+# Unset keys take the defaults in default.yaml.
 #
-# Polygons: delaware-pv-detection v1, detected on the DE 2024 state ortho.
-# LiDAR:    DE/MD 2023 statewide collection (QL1, ~20 pts/m2), tiles at
-#           s3://free-research-data-raw/US/delaware/top-level/lidar/point_cloud/tilecls/
-#           index s3://de-database/data/lidar_support/DE_Statewide_1_B23_MTI.zip (id column NAME)
+# >>> The `inputs` below are the layers used during development. Point them at
+# >>> the layers chosen for the final analysis before the release run (a third of
+# >>> the polygons in the test block overlap another polygon).
 #
 # Verified on tile 4875004290000 with `pv-geom inspect-tile` (2026-10-07):
 # classes 1/2/7/9/18/20 — no class 6, so the class-1 fallback applies, exactly
 # as in Phoenix; flown 2023-03-29/31 by GPS time (the header says 2024-10-12).
+study:
+  name: Delaware
+  output: ../out/delaware           # relative to this file; or an s3:// prefix
+
+inputs:
+  # delaware-pv-detection v1: 13,982 polygons detected on the DE 2024 state
+  # ortho. It has no id column, so ids are synthesized (input_row joins back).
+  polygons: ../../delaware-pv-detection/data/processed/de_pv_polygons_v1_de_ortho_2024.parquet
+  # DE/MD 2023 statewide collection (QL1, ~20 pts/m2), 1.5 km tiles.
+  lidar_prefix: s3://free-research-data-raw/US/delaware/top-level/lidar/point_cloud/tilecls
+  tile_index: s3://de-database/data/lidar_support/DE_Statewide_1_B23_MTI.zip
+  # FEMA USA Structures, Delaware. Optional.
+  footprints: s3://de-database/data/delaware/pv_tep/inputs-de/footprints.parquet
+
 crs:
   target: EPSG:6347             # NAD83(2011) / UTM zone 18N, metres
 

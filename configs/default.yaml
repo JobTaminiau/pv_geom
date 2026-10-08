@@ -127,15 +127,21 @@ io:
 
 compute:
   backend: local               # local | coiled
+  memory_budget_gb: 6.0        # LiDAR returns one task may hold; a denser tile group is
+                               # measured in spatial batches (results unchanged). About
+                               # half a worker's memory; null = unbounded
+  lidar_chunk_points: 2000000  # returns decoded at a time
   coiled:
-    name: pv-geom
+    name: auto                    # auto = pv-geom-<study.name>
     n_workers: 40
     worker_memory: "16GiB"        # densest Phoenix tiles need >8 GiB; verified
                                   # via 10k Coiled bench, 2026-05-02.
     worker_cpu: 4
-    software: pv-geom-2026-05
-    region: us-east-2             # where the LiDAR bucket is
-    package_source: "git+https://github.com/JobTaminiau/pv_geom.git@main"   # what workers install
+    worker_threads: 1             # tasks per worker; memory, not CPU, is what binds
+    software: auto                # auto = an environment named after pv-geom's dependency list
+    region: auto                  # auto = where the LiDAR bucket is
+    package_source: auto          # auto = the exact commit this machine runs (must be pushed);
+                                  # workers are checked after install
     usd_per_worker_hour: null     # set it to have --dry-run estimate the cost
   local:
     n_workers: 8

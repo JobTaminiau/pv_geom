@@ -282,18 +282,26 @@ treat them as unvalidated. The code and its tests remain in `classify/`.
 ## Compute
 
 **Local** (default): `--local` for a `LocalCluster`, `--no-dask` for serial.
-Each task holds one tile group's points in memory — roughly 1–3 GB for 10
-pts/m² 1 km tiles, more for denser or larger tiles.
 
-**Coiled**: set `compute.backend: coiled`. One-time setup:
+**Memory is bounded.** Tiles are decoded a chunk at a time and only returns
+near a polygon are kept, so a 44-million-return tile peaks at about 0.3 GB
+instead of 3.9 GB. If a tile group's kept returns would still exceed
+`compute.memory_budget_gb` (default 6), its polygons are measured in spatial
+batches. The rows are identical either way. Set the budget to about half a
+worker's memory.
 
-```bash
-coiled login
-uv run python -c "from pv_geom.coiled_env import ensure_software_env; ensure_software_env()"
-```
+**Coiled**: `pip install "pv-geom[coiled]"`, `coiled login`, and set
+`compute.backend: coiled`. The rest is worked out unless you set it under
+`compute.coiled`:
 
-Workers install `pv_geom` from the GitHub repo, so the version you want must be
-pushed. Outputs can go straight to `s3://`; partitions are written as each tile
+| Setting | `auto` means |
+| --- | --- |
+| `package_source` | The exact commit this machine is running. It must be committed and pushed; a run stops before starting a cluster if it is not. After install every worker is asked what it has, and the run stops on a mismatch. |
+| `region` | Where the LiDAR bucket is, so tiles are read in-region. |
+| `software` | An environment named after pv-geom's dependency list, built on first use. |
+| `name` | `pv-geom-<study.name>`. |
+
+Worker count, memory and CPU are plain settings. Outputs can go straight to `s3://`; partitions are written as each tile
 group finishes, and `--resume` retries only what is missing. Workers need read
 access to the LiDAR bucket; for a bucket in another account grant the Coiled
 role `s3:GetObject`, `s3:ListBucket` and `s3:GetBucketLocation` in the bucket

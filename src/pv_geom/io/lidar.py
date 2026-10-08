@@ -10,6 +10,7 @@ on a 4 GB worker).
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -63,6 +64,64 @@ def read_tile(
 
     pts, crs, vintage = _read_via_laspy(local, classes, tile_uri=s)
     return TileData(points=pts, crs=crs, vintage=vintage)
+
+
+class TileStream:
+    """A LAZ tile decoded a chunk at a time.
+
+    Iterating yields ``(N, 4)`` ``[x, y, z, classification]`` blocks of at most
+    ``chunk_points`` returns, so a tile of any size passes through a bounded
+    amount of memory. ``vintage`` is complete once iteration has finished: the
+    flight dates are taken from the GPS time of every return on the way past.
+    """
+
+    def __init__(self, tile_uri: str | Path, *, chunk_points: int = 2_000_000,
+                 cache_dir: Path | None = None) -> None:
+        import laspy
+
+        self.uri = str(tile_uri)
+        local = localize(self.uri, cache_dir) if is_remote(self.uri) else Path(self.uri)
+        if not local.exists():
+            raise FileNotFoundError(self.uri)
+        self._chunk_points = int(chunk_points)
+        self._reader = laspy.open(str(local))
+        header = self._reader.header
+        try:
+            crs = header.parse_crs()
+            self.crs: str | None = crs.to_string() if crs else None
+        except Exception:
+            self.crs = None
+        self._has_gps = "gps_time" in header.point_format.dimension_names
+        self._start: date | None = None
+        self._end: date | None = None
+        self.n_points = int(header.point_count)
+
+    def __iter__(self) -> Iterator[np.ndarray]:
+        header = self._reader.header
+        try:
+            for chunk in self._reader.chunk_iterator(self._chunk_points):
+                if not len(chunk):
+                    continue
+                if self._has_gps:
+                    start, end = _gps_range_to_dates(np.asarray(chunk.gps_time), header)
+                    if start is not None and (self._start is None or start < self._start):
+                        self._start = start
+                    if end is not None and (self._end is None or end > self._end):
+                        self._end = end
+                yield np.column_stack([
+                    np.asarray(chunk.x, dtype=np.float64),
+                    np.asarray(chunk.y, dtype=np.float64),
+                    np.asarray(chunk.z, dtype=np.float64),
+                    np.asarray(chunk.classification, dtype=np.int16),
+                ])
+        finally:
+            self._reader.close()
+
+    @property
+    def vintage(self) -> TileVintage:
+        return TileVintage(tile_uri=self.uri,
+                           creation_date=self._reader.header.creation_date,
+                           flight_start=self._start, flight_end=self._end)
 
 
 def _read_via_laspy(

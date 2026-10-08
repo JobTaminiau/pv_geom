@@ -9,6 +9,7 @@ indexes — so peak memory tracks what is used rather than what the tiles hold.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
@@ -17,7 +18,7 @@ import numpy as np
 
 from pv_geom.config import PVGeomConfig
 from pv_geom.geometry.point_index import GroundModel, PointGrid
-from pv_geom.io.lidar import TileVintage, read_tile
+from pv_geom.io.lidar import TileStream, TileVintage, read_tile
 from pv_geom.utils.crs import to_run_crs
 
 log = logging.getLogger(__name__)
@@ -35,7 +36,9 @@ class NearMask:
             return
         lo = bounds[:, :2] - pad_m
         hi = bounds[:, 2:] + pad_m
-        self.x0, self.y0 = lo.min(axis=0)
+        # On absolute multiples of the cell, so which returns are kept near a
+        # polygon does not depend on the other polygons in the batch.
+        self.x0, self.y0 = np.floor(lo.min(axis=0) / self.cell) * self.cell
         nx = int(np.floor((hi[:, 0].max() - self.x0) / self.cell)) + 1
         ny = int(np.floor((hi[:, 1].max() - self.y0) / self.cell)) + 1
         self.mask = np.zeros((nx, ny), dtype=bool)
@@ -114,6 +117,35 @@ class GroupPoints:
     ground_pad_m: float                 # how far the ground search can reach
 
 
+# What a kept return costs while a group is measured: its coordinates, the
+# copy made when the chunks are joined, and the spatial index over them.
+BYTES_PER_KEPT_POINT = 120
+
+
+class GroupOverBudget(Exception):
+    """A tile group's kept returns would exceed the memory budget."""
+
+
+def budget_points(cfg: PVGeomConfig) -> int | None:
+    """How many returns one task may keep, from ``compute.memory_budget_gb``
+    (less what a chunk needs while it is being filtered); None = unbounded."""
+    gb = cfg.compute.memory_budget_gb
+    if gb is None:
+        return None
+    decode = 150 * int(cfg.compute.lidar_chunk_points)
+    return max(int((gb * 1e9 - decode) / BYTES_PER_KEPT_POINT), 100_000)
+
+
+def _tile_chunks(uri: str, cfg: PVGeomConfig) -> tuple[Iterator[np.ndarray], Any]:
+    """A tile as ``(chunks, source)``; ``source`` has ``.crs`` and, once the
+    chunks are consumed, ``.vintage``. PDAL reads whole tiles."""
+    if cfg.io.lidar_reader == "pdal":
+        data = read_tile(uri, reader="pdal")
+        return iter([data.points]), data
+    stream = TileStream(uri, chunk_points=cfg.compute.lidar_chunk_points)
+    return iter(stream), stream
+
+
 def _cat(chunks: list[np.ndarray]) -> np.ndarray:
     return np.concatenate(chunks, axis=0) if chunks else np.zeros((0, 3))
 
@@ -124,8 +156,14 @@ def load_group_points(
     fetch_tile_ids: tuple[str, ...],
     geometries: Any,
     cfg: PVGeomConfig,
+    *,
+    max_points: int | None = None,
 ) -> GroupPoints | None:
     """Read a tile group's tiles into indexed ground and panel-candidate pools.
+
+    Tiles are decoded a chunk at a time and only returns near a polygon are
+    kept. Raises ``GroupOverBudget`` as soon as more than ``max_points`` have
+    been kept, so the caller can measure fewer polygons at once.
 
     Returns ``None`` when the *primary* tile is unavailable: a group's polygons
     live on its primary tile by construction, so there is nothing to measure.
@@ -147,29 +185,40 @@ def load_group_points(
     ground_chunks: list[np.ndarray] = []
     primary_chunks: list[np.ndarray] = []
     fallback_chunks: list[np.ndarray] = []
+    kept = 0
     for tid in fetch_tile_ids:
         uri = tile_uri_map.get(tid)
         if uri is None:
             continue
         try:
-            data = read_tile(uri, reader=cfg.io.lidar_reader)
+            blocks, source = _tile_chunks(uri, cfg)
         except FileNotFoundError:           # includes RemoteFileMissing
             log.warning("%s missing; skipping", uri)
             continue
-        pts, converted = to_run_crs(data.points, data.crs, str(cfg.crs.target))
-        if converted:
-            log.info("%s: %s", tid, converted)
-        pts = pts[near_ground(pts[:, 0], pts[:, 1])]
-        cls = pts[:, 3].astype(np.int16)
-        ground_chunks.append(pts[cls == classes.ground_class][:, :3])
-        for chunks, klass in ((primary_chunks, classes.panel_class_primary),
-                              (fallback_chunks, classes.panel_class_fallback)):
-            cand = pts[cls == klass][:, :3]
-            chunks.append(cand[near_panel(cand[:, 0], cand[:, 1])])
+        told = False
+        for block in blocks:
+            pts, converted = to_run_crs(block, source.crs, str(cfg.crs.target))
+            if converted and not told:
+                log.info("%s: %s", tid, converted)
+                told = True
+            pts = pts[near_ground(pts[:, 0], pts[:, 1])]
+            cls = pts[:, 3].astype(np.int16)
+            ground_chunks.append(pts[cls == classes.ground_class][:, :3])
+            kept += len(ground_chunks[-1])
+            for chunks, klass in ((primary_chunks, classes.panel_class_primary),
+                                  (fallback_chunks, classes.panel_class_fallback)):
+                cand = pts[cls == klass][:, :3]
+                chunks.append(cand[near_panel(cand[:, 0], cand[:, 1])])
+                kept += len(chunks[-1])
+            del pts, cls, block
+            if max_points is not None and kept > max_points:
+                close = getattr(blocks, "close", None)
+                if close is not None:
+                    close()                      # stop decoding; releases the file
+                raise GroupOverBudget(f"{kept:,} returns kept, budget {max_points:,}")
         if tid == primary_tile_id:
             primary_loaded = True
-            primary_vintage = data.vintage
-        del pts, cls, data              # release the raw tile before the next read
+            primary_vintage = source.vintage
 
     if not primary_loaded:
         return None

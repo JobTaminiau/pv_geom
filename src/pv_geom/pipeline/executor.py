@@ -45,9 +45,15 @@ def cluster_for(cfg: PVGeomConfig) -> Iterator[Any]:
         )
     elif backend == "coiled":
         require("coiled", "coiled", "the coiled compute backend")
-        from pv_geom.coiled_env import ensure_software_env, make_cluster
+        from pv_geom.coiled_env import (
+            ensure_software_env,
+            make_cluster,
+            resolve_package_source,
+        )
 
-        ensure_software_env()
+        # Resolve what the workers will install before paying for a cluster.
+        package_source = resolve_package_source(cfg)
+        ensure_software_env(cfg)
         cluster = make_cluster(cfg)
     else:
         raise ValueError(f"unknown compute backend {backend!r}")
@@ -58,7 +64,7 @@ def cluster_for(cfg: PVGeomConfig) -> Iterator[Any]:
         if backend == "coiled":
             from pv_geom.coiled_env import install_pv_geom_on_workers
 
-            install_pv_geom_on_workers(client, cfg.compute.coiled.package_source)
+            install_pv_geom_on_workers(client, package_source)
         yield client
     finally:
         client.close()

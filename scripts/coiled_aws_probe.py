@@ -65,24 +65,31 @@ def _probe() -> dict[str, Any]:
 
 def main() -> None:
     import json
+    import sys
 
     import coiled
     from dask.distributed import Client
 
-    from pv_geom.coiled_env import REGION, SOFTWARE_ENV, install_pv_geom_on_workers
+    from pv_geom.api import load_config
+    from pv_geom.coiled_env import (
+        cluster_region,
+        ensure_software_env,
+        install_pv_geom_on_workers,
+        resolve_package_source,
+    )
 
-    print(f"[probe] spinning up 1-worker probe cluster in {REGION}")
+    # Usage: python scripts/coiled_aws_probe.py [config.yaml]
+    cfg = load_config(sys.argv[1] if len(sys.argv) > 1 else None)
+    source = resolve_package_source(cfg)
+    region = cluster_region(cfg)
+    print(f"[probe] spinning up 1-worker probe cluster in {region or 'the default region'}")
     cluster = coiled.Cluster(
-        name="pv-geom-aws-probe",
-        n_workers=1,
-        worker_cpu=2,
-        worker_memory="4GiB",
-        software=SOFTWARE_ENV,
-        region=REGION,
+        name="pv-geom-aws-probe", n_workers=1, worker_cpu=2, worker_memory="4GiB",
+        software=ensure_software_env(cfg), **({"region": region} if region else {}),
     )
     client = Client(cluster)
     try:
-        install_pv_geom_on_workers(client)
+        install_pv_geom_on_workers(client, source)
         result = client.submit(_probe).result()
         print("[probe] result:")
         print(json.dumps(result, indent=2, default=str))

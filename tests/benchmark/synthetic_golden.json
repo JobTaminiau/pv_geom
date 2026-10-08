@@ -13,7 +13,7 @@
   "panel_azimuth_deg":180.0278167725,
   "panel_rmse_m":0.0101462789,
   "panel_fit_tolerance_m":0.0500000007,
-  "panel_tilt_unc_deg":0.0266270358,
+  "panel_tilt_unc_deg":0.0232426785,
   "roof_tilt_deg":19.9985122681,
   "height_above_roof_m":0.099970445,
   "height_above_ground_m":5.4039998055,

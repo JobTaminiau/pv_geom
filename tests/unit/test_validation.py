@@ -27,13 +27,13 @@ from pv_geom.validation import (
 
 def _poly(pid: str, tilt: float | None, az: float | None, area: float = 10.0,
           basis: str = "panel_confirmed", segments: list | None = None) -> dict:
-    return {"polygon_id": pid, "panel_tilt_deg": tilt, "panel_azimuth_deg": az,
+    return {"polygon_id": pid, "tilt_deg": tilt, "azimuth_deg": az,
             "area_m2": area, "geometry_basis": basis, "lidar_date": date(2020, 11, 26),
-            "segments": segments}
+            "facets": segments}
 
 
 def _seg(i: int, tilt: float, az: float, area: float) -> dict:
-    return {"segment_index": i, "tilt_deg": tilt, "azimuth_deg": az, "area_m2": area}
+    return {"facet_index": i, "tilt_deg": tilt, "azimuth_deg": az, "area_m2": area}
 
 
 def _ref(**kw) -> dict:
@@ -165,11 +165,11 @@ def test_end_to_end_on_the_demo_scene(tmp_path: Path) -> None:
     (rounded as a reporting source would): the CLI scores them as consistent."""
     result = pv_geom.run(write_demo(tmp_path / "demo"), use_dask=False)
     gdf = result.load()
-    measured = gdf[(gdf["status"] == "measured") & (gdf["panel_tilt_deg"] > 5)].head(3)
+    measured = gdf[(gdf["status"] == "measured") & (gdf["tilt_deg"] > 5)].head(3)
     refs = pd.DataFrame([{
         "reference_id": f"ref-{i}", "polygon_ids": r.polygon_id,
-        "tilt_deg": round(float(r.panel_tilt_deg)),
-        "azimuth_deg": round(float(r.panel_azimuth_deg) / 45) * 45 % 360,
+        "tilt_deg": round(float(r.tilt_deg)),
+        "azimuth_deg": round(float(r.azimuth_deg) / 45) * 45 % 360,
         "azimuth_resolution_deg": 45, "scope": "mount", "present_by": "2020-01-01",
     } for i, r in enumerate(measured.itertuples())])
     ref_path = tmp_path / "refs.csv"

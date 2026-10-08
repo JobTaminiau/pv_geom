@@ -71,7 +71,7 @@ def summarise(df: pd.DataFrame, tables: dict[str, pd.DataFrame], manifest: dict,
     poly = df["polygon_vintage"].dropna()
     gaps = pd.to_numeric(df["vintage_gap_days"], errors="coerce").dropna()
     n_fit = int(df["fitted"].sum())
-    rmse = df.loc[df["fitted"], "panel_rmse_m"].dropna()
+    rmse = df.loc[df["fitted"], "fit_rmse_m"].dropna()
     return {
         "pkg_version": manifest.get("pkg_version") or __version__,
         "run_id": manifest.get("run_id"),
@@ -107,8 +107,8 @@ def summarise(df: pd.DataFrame, tables: dict[str, pd.DataFrame], manifest: dict,
         "headline_label": stats.STRATA[headline][0],
         "headline": {"area": _row(headline, "area"), "count": _row(headline, "count")},
         "all_fitted": {"area": _row("all_fitted", "area"), "count": _row("all_fitted", "count")},
-        "panel_rmse_m_p50": float(rmse.median()) if len(rmse) else float("nan"),
-        "panel_rmse_m_p90": float(rmse.quantile(0.9)) if len(rmse) else float("nan"),
+        "fit_rmse_m_p50": float(rmse.median()) if len(rmse) else float("nan"),
+        "fit_rmse_m_p90": float(rmse.quantile(0.9)) if len(rmse) else float("nan"),
         "point_density_p50": float(df["point_density"].median()),
         # Outputs from before schema 0.4 report azimuth relative to grid north.
         "azimuth_reference": manifest.get("azimuth_reference", GRID_NORTH),

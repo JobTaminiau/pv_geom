@@ -51,7 +51,7 @@ def is_tracker_suspected(
     on_building: bool,
     aspect_ratio: float,
     height_above_ground_m: float,
-    panel_tilt_deg: float,
+    tilt_deg: float,
     aspect_min: float = 4.0,
     height_above_ground_max_m: float = 2.0,
     tilt_max_deg: float = 35.0,
@@ -64,12 +64,12 @@ def is_tracker_suspected(
     """
     if on_building:
         return False
-    if np.isnan(aspect_ratio) or np.isnan(panel_tilt_deg) or np.isnan(height_above_ground_m):
+    if np.isnan(aspect_ratio) or np.isnan(tilt_deg) or np.isnan(height_above_ground_m):
         return False
     return (
         aspect_ratio >= aspect_min
         and height_above_ground_m < height_above_ground_max_m
-        and panel_tilt_deg < tilt_max_deg
+        and tilt_deg < tilt_max_deg
     )
 
 
@@ -109,7 +109,7 @@ def mounting_columns(m: Measurement, pts: LocalPoints, cfg: PVGeomConfig) -> dic
         on_building=on_building,
         aspect_ratio=m.aspect_ratio,
         height_above_ground_m=hag,
-        panel_tilt_deg=fit.tilt_deg,
+        tilt_deg=fit.tilt_deg,
     ):
         m.flags.append("tracker_suspected")
 
@@ -118,9 +118,9 @@ def mounting_columns(m: Measurement, pts: LocalPoints, cfg: PVGeomConfig) -> dic
     use_roof = m.roof.usable and on_building
     feats = MountingFeatures(
         on_building=on_building,
-        panel_tilt_deg=fit.tilt_deg,
-        panel_azimuth_deg=fit.azimuth_deg,
-        panel_roof_angle_deg=m.panel_roof_angle_deg if use_roof else float("nan"),
+        tilt_deg=fit.tilt_deg,
+        azimuth_deg=fit.azimuth_deg,
+        angle_to_roof_deg=m.angle_to_roof_deg if use_roof else float("nan"),
         height_above_roof_m=m.height_above_roof_m if use_roof else float("nan"),
         height_above_ground_m=hag,
         area_m2=m.area_m2,
@@ -130,7 +130,7 @@ def mounting_columns(m: Measurement, pts: LocalPoints, cfg: PVGeomConfig) -> dic
         east_west_rack="east_west_rack" in m.flags,
         n_ground_under=n_ground_under,
         ground_under_gap_m=ground_under_gap,
-        no_panel_standoff=use_roof and "no_panel_standoff" in m.flags,
+        no_standoff=use_roof and "no_standoff" in m.flags,
     )
     result = classify_mounting(feats, rules)
     return {

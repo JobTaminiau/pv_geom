@@ -87,18 +87,18 @@ def _synthetic_output(out: Path, n: int = 400, *, with_dates: bool = True) -> No
         "vintage_gap_days": [1220 if with_dates else None] * n,
         "geometry_basis": basis,
         "recommended": [b in ("panel_confirmed", "panel_by_vintage") for b in basis],
-        "n_points_panel": [200] * n,
-        "n_inliers_panel": [190] * n,
+        "n_points": [200] * n,
+        "n_inliers": [190] * n,
         "point_density": [10.0] * n,
-        "panel_tilt_deg": _opt(tilt),
-        "panel_azimuth_deg": _opt(az),
-        "panel_rmse_m": [None if np.isnan(t) else 0.02 for t in tilt],
-        "panel_tilt_unc_deg": [None if np.isnan(t) else 0.1 for t in tilt],
-        "panel_azimuth_unc_deg": [None if np.isnan(t) else 0.5 for t in tilt],
-        "n_planes_detected": [0 if np.isnan(t) else 1 for t in tilt],
+        "tilt_deg": _opt(tilt),
+        "azimuth_deg": _opt(az),
+        "fit_rmse_m": [None if np.isnan(t) else 0.02 for t in tilt],
+        "tilt_unc_deg": [None if np.isnan(t) else 0.1 for t in tilt],
+        "azimuth_unc_deg": [None if np.isnan(t) else 0.5 for t in tilt],
+        "n_facets": [0 if np.isnan(t) else 1 for t in tilt],
         "roof_ref_source": ["none" if np.isnan(h) else "footprint_ring" for h in har],
         "height_above_roof_m": _opt(har),
-        "panel_roof_angle_deg": [None if np.isnan(h) else 1.0 for h in har],
+        "angle_to_roof_deg": [None if np.isnan(h) else 1.0 for h in har],
         "on_building": [True] * n,
         "flags": [["poor_fit"] if np.isnan(t) else [] for t in tilt],
         "lidar_tile_ids": [["t1"]] * n,
@@ -250,7 +250,7 @@ def test_release_dataset_describes_and_verifies_itself(run_dir: Path) -> None:
     assert len(meta["spatial"]["bbox_wgs84"]) == 4
 
     readme = (d / "README.md").read_text(encoding="utf-8")
-    assert "one per input polygon" in readme and "`panel_tilt_deg`" in readme
+    assert "one per input polygon" in readme and "`tilt_deg`" in readme
 
     raw = (d / "SHA256SUMS.txt").read_bytes()
     assert b"\r" not in raw                       # sha256sum -c needs LF line endings

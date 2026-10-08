@@ -65,9 +65,9 @@ def test_synthetic_recovers_the_truth(synthetic_run: pd.DataFrame) -> None:
             assert "low_density" in row["flags"], a.name
             continue
         tol = 1.5 if a.noise > 0.05 else 0.5
-        assert row["panel_tilt_deg"] == pytest.approx(a.panel_tilt, abs=tol), a.name
+        assert row["tilt_deg"] == pytest.approx(a.panel_tilt, abs=tol), a.name
         if a.panel_tilt >= 5:
-            d = abs(row["panel_azimuth_deg"] - a.panel_az) % 360
+            d = abs(row["azimuth_deg"] - a.panel_az) % 360
             assert min(d, 360 - d) < (6.0 if a.noise > 0.05 else 2.0), a.name
         if a.kind == "bare_roof":
             assert row["geometry_basis"] == "surface_unresolved", a.name

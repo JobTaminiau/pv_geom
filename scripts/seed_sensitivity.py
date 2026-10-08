@@ -42,8 +42,8 @@ def sensitivity(bench: Path, n_seeds: int = 3) -> dict:
     runs = [run_with_seed_offset(bench, k) for k in range(n_seeds)]
     seconds = (time.time() - start) / n_seeds
     base = runs[0]
-    tilt = np.column_stack([r["panel_tilt_deg"].to_numpy(dtype=float) for r in runs])
-    az = np.column_stack([r["panel_azimuth_deg"].to_numpy(dtype=float) for r in runs])
+    tilt = np.column_stack([r["tilt_deg"].to_numpy(dtype=float) for r in runs])
+    az = np.column_stack([r["azimuth_deg"].to_numpy(dtype=float) for r in runs])
     fitted = ~np.isnan(tilt).any(axis=1)
     d_tilt = (tilt.max(axis=1) - tilt.min(axis=1))[fitted]
     # Azimuth spread on the circle, where every run reports one.
@@ -66,7 +66,7 @@ def sensitivity(bench: Path, n_seeds: int = 3) -> dict:
         "azimuth_spread_p95": q(d_az, 0.95),
         "azimuth_over_1": int((d_az > 1.0).sum()),
         "status_differs": differs("status"), "basis_differs": differs("geometry_basis"),
-        "facets_differ": differs("n_planes_detected"),
+        "facets_differ": differs("n_facets"),
         "seconds_per_run": round(seconds, 1),
     }
 

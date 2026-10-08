@@ -73,10 +73,10 @@ def height_above_roof(
     return pz - z_roof
 
 
-def panel_roof_angle_deg(panel: PlaneFit, roof: PlaneFit) -> float:
+def angle_to_roof_deg(panel: PlaneFit, roof: PlaneFit) -> float:
     """Angle between the panel and roof normals, in degrees [0, 180].
 
-    Used by the M5 mounting classifier (PRD §7.5: ``panel_roof_angle_deg``).
+    Used by the M5 mounting classifier (PRD §7.5: ``angle_to_roof_deg``).
     Returns NaN if either fit is degenerate.
     """
     if (

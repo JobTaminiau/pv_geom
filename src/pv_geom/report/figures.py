@@ -137,7 +137,7 @@ def _draw_tilt(ax, df: pd.DataFrame, headline: str, weight: str, *, max_deg: flo
     ymax = 0.0
     legend_loc = "upper right"
     for i, (_key, label, sub) in enumerate(series):
-        tilt = np.clip(sub["panel_tilt_deg"].to_numpy(dtype=float), 0, max_deg - 1e-6)
+        tilt = np.clip(sub["tilt_deg"].to_numpy(dtype=float), 0, max_deg - 1e-6)
         w = _w(sub, weight)
         if w.sum() <= 0:
             continue
@@ -152,7 +152,7 @@ def _draw_tilt(ax, df: pd.DataFrame, headline: str, weight: str, *, max_deg: flo
             if len(series) == 1:
                 ax.stairs(share, edges, fill=True, color=BLUE, alpha=0.18, zorder=1)
             ax.stairs(share, edges, color=BLUE, linewidth=1.2, label=label, zorder=3)
-            med = float(weighted_quantile(sub["panel_tilt_deg"], w, 0.5)[0])
+            med = float(weighted_quantile(sub["tilt_deg"], w, 0.5)[0])
             ax.axvline(med, color=BLUE, linewidth=0.6, zorder=2)
             # Legend and median label take opposite sides of the median line.
             if med > 0.4 * max_deg:
@@ -178,11 +178,11 @@ def _draw_rose(ax, df: pd.DataFrame, headline: str, weight: str, *, n_sectors: i
     series = _series(df, headline)
     rmax = 0.0
     for i, (_key, label, sub) in enumerate(series):
-        sub = sub[sub["panel_azimuth_deg"].notna()]
+        sub = sub[sub["azimuth_deg"].notna()]
         w = _w(sub, weight)
         if w.sum() <= 0:
             continue
-        idx = (np.floor(((sub["panel_azimuth_deg"].to_numpy(dtype=float) + 180.0 / n_sectors)
+        idx = (np.floor(((sub["azimuth_deg"].to_numpy(dtype=float) + 180.0 / n_sectors)
                          % 360.0) / (360.0 / n_sectors))).astype(int)
         share = 100.0 * np.bincount(idx, weights=w, minlength=n_sectors) / w.sum()
         rmax = max(rmax, float(share.max()))
@@ -212,13 +212,13 @@ def _draw_rose(ax, df: pd.DataFrame, headline: str, weight: str, *, n_sectors: i
 
 def _draw_heatmap(ax, fig: Figure, df: pd.DataFrame, headline: str, weight: str, *,
                   max_deg: float = 60.0) -> None:
-    sub = df[stratum_mask(df, headline) & df["panel_azimuth_deg"].notna()]
+    sub = df[stratum_mask(df, headline) & df["azimuth_deg"].notna()]
     az_edges = np.arange(0.0, 360.0 + 15.0, 15.0)
     tilt_edges = np.arange(0.0, max_deg + 5.0, 5.0)
     w = _w(sub, weight)
     hist, _, _ = np.histogram2d(
-        sub["panel_azimuth_deg"].to_numpy(dtype=float),
-        np.clip(sub["panel_tilt_deg"].to_numpy(dtype=float), 0, max_deg - 1e-6),
+        sub["azimuth_deg"].to_numpy(dtype=float),
+        np.clip(sub["tilt_deg"].to_numpy(dtype=float), 0, max_deg - 1e-6),
         bins=[az_edges, tilt_edges], weights=w,
     )
     share = 100.0 * hist / w.sum() if w.sum() > 0 else hist
@@ -416,9 +416,9 @@ def fig_fit_quality(df: pd.DataFrame) -> FigureSpec:
     with matplotlib.rc_context(RC):
         fig = _figure(FULL_WIDTH_MM, 52)
         axes = fig.subplots(1, 3)
-        _hist_panel(axes[0], 100.0 * fitted["panel_rmse_m"].to_numpy(dtype=float),
+        _hist_panel(axes[0], 100.0 * fitted["fit_rmse_m"].to_numpy(dtype=float),
                     np.linspace(0, 10, 41), "Plane-fit RMSE (cm)", "{:.1f} cm")
-        _hist_panel(axes[1], fitted["panel_tilt_unc_deg"].to_numpy(dtype=float),
+        _hist_panel(axes[1], fitted["tilt_unc_deg"].to_numpy(dtype=float),
                     np.linspace(0, 3, 31), "Tilt uncertainty, 1σ (°)", "{:.2f}°")
         _hist_panel(axes[2], df["point_density"].to_numpy(dtype=float),
                     np.linspace(0, 40, 41), "LiDAR returns per m² of polygon", "{:.1f}")
@@ -436,7 +436,7 @@ def fig_fit_quality(df: pd.DataFrame) -> FigureSpec:
 def fig_roof_relation(df: pd.DataFrame, standoff_m: float = 0.05) -> FigureSpec | None:
     fitted = df[df["fitted"]]
     har = 100.0 * fitted["height_above_roof_m"].dropna().to_numpy(dtype=float)
-    pra = fitted["panel_roof_angle_deg"].dropna().to_numpy(dtype=float)
+    pra = fitted["angle_to_roof_deg"].dropna().to_numpy(dtype=float)
     if len(har) < 10:
         return None
     with matplotlib.rc_context(RC):
@@ -491,7 +491,7 @@ def fig_spatial(df: pd.DataFrame) -> FigureSpec | None:
         cb = fig.colorbar(hb, cax=axes[0].inset_axes([1.03, 0.0, 0.035, 1.0]))
         cb.set_label("Polygons per cell")
         hb2 = axes[1].hexbin(x[fitted], y[fitted],
-                             C=df["panel_tilt_deg"].to_numpy(dtype=float)[fitted],
+                             C=df["tilt_deg"].to_numpy(dtype=float)[fitted],
                              reduce_C_function=np.median, gridsize=gridsize, cmap=SEQUENTIAL,
                              mincnt=1, vmin=0, vmax=40, linewidths=0.1, edgecolors=SURFACE)
         cb2 = fig.colorbar(hb2, cax=axes[1].inset_axes([1.03, 0.0, 0.035, 1.0]),

@@ -96,7 +96,7 @@ def write_golden(bench_dir: Path) -> None:
         df = golden_frame(run_benchmark(bench_dir, Path(tmp) / "out"))
     df.to_parquet(bench_dir / "golden.parquet", index=False)
     print(f"{bench_dir.name}: golden written, {len(df)} rows, "
-          f"{int(df['panel_tilt_deg'].notna().sum())} fitted")
+          f"{int(df['tilt_deg'].notna().sum())} fitted")
 
 
 def main() -> None:

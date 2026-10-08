@@ -79,7 +79,7 @@ def key_findings(s: dict) -> list[str]:
     out = [
         f"{s['n_rows']:,} polygons were covered by LiDAR and a plane was fitted to "
         f"{s['n_fitted']:,} of them ({_p(s['fit_rate'])}), with a median fit residual of "
-        f"{100 * s['panel_rmse_m_p50']:.1f} cm.",
+        f"{100 * s['fit_rmse_m_p50']:.1f} cm.",
         f"{_p(panel_share)} of polygons are on a panel basis — the fitted plane is known to "
         f"be the array — and the statistics below lead with that group "
         f"({h['n']:,} polygons)." if s["headline_stratum"] == "panel" else
@@ -146,7 +146,7 @@ def methods_text(s: dict, manifest: dict, area_name: str | None) -> str:
         f"{pp.get('tilt_floor_deg', 1.0):g}° of tilt. Uncertainties are the standard "
         f"deviation over {pp.get('bootstrap_samples', 50)} bootstrap resamples of the "
         f"inliers. The median point density was {s['point_density_p50']:.1f} returns per m² "
-        f"and the median fit residual {100 * s['panel_rmse_m_p50']:.1f} cm{lid}. "
+        f"and the median fit residual {100 * s['fit_rmse_m_p50']:.1f} cm{lid}. "
         f"A reference plane for the surrounding roof was fitted to returns in a "
         f"{rp.get('buffer_m', 3.0):g}–{rp.get('buffer_max_m', 5.0):g} m ring around each "
         f"polygon, {ring}; a polygon whose fitted plane stood at least "

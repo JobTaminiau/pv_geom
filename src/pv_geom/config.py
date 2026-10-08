@@ -111,7 +111,7 @@ class RoofPlaneConfig(BaseModel):
     # necessarily the one the array sits on. Measured on real Phoenix polygons:
     # at min_inlier_frac=0.4 with no guard, 3 of 7 newly-recovered rows picked a
     # facet 20-45 deg away from the roof directly beside the array, which would
-    # corrupt panel_roof_angle_deg and height_above_roof_m far worse than having
+    # corrupt angle_to_roof_deg and height_above_roof_m far worse than having
     # no roof fit at all. So the collar — ring points within `collar_m` of the
     # polygon, i.e. the roof the array is physically resting against — is the
     # authority: if the wide-ring plane does not explain at least
@@ -172,7 +172,7 @@ class HeightsConfig(BaseModel):
     # Minimum panel-above-roof separation that a plane fit can resolve. Panel
     # and roof fits each carry ~2 cm RMSE, so a smaller gap does not establish
     # that a panel is physically present above the roof surface; below it the
-    # row gets the `no_panel_standoff` flag. See README (Quality flags).
+    # row gets the `no_standoff` flag. See README (Quality flags).
     min_panel_standoff_m: float = 0.05
 
 
@@ -193,12 +193,12 @@ class FreeStandingConfig(BaseModel):
 
 
 class MountingRule1(BaseModel):
-    panel_roof_angle_deg_max: float = 5.0
+    angle_to_roof_deg_max: float = 5.0
     height_above_roof_m_max: float = 0.5
 
 
 class MountingRule2(BaseModel):
-    panel_roof_angle_deg_min: float = 5.0
+    angle_to_roof_deg_min: float = 5.0
     height_above_roof_m_max: float = 1.5
     fallback_tilt_deg_min: float = 5.0
     fallback_height_above_ground_m_min: float = 2.5
@@ -272,7 +272,7 @@ class MountingRulesConfig(BaseModel):
     # possible_missing_footprint (the R3/R8 height caps then usually route the
     # polygon to ambiguous rather than a confident canopy label).
     missing_footprint_hag_m: float = 6.0
-    # Confidence ceiling for a labelled row carrying `no_panel_standoff`. Such a
+    # Confidence ceiling for a labelled row carrying `no_standoff`. Such a
     # row satisfies R1 maximally (panel-roof angle ~0, height above roof ~0) —
     # on the v0.1.0 Phoenix run 34,873 of them scored >= 0.999 — even though the
     # evidence is equally consistent with there being no panel in the cloud at
@@ -281,7 +281,7 @@ class MountingRulesConfig(BaseModel):
     # was observed) while marking it as no better than borderline. Set to 1.0 to
     # disable. Does not apply to `ambiguous`, whose confidence means the
     # opposite thing.
-    no_panel_standoff_confidence_max: float = 0.5
+    no_standoff_confidence_max: float = 0.5
 
 
 class ClassificationConfig(BaseModel):

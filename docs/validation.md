@@ -36,7 +36,7 @@ One row per **reported mount**. Only the first four columns are required.
 
 **Mounts against facets, not systems against polygons.** A monitoring record
 often gives one tilt and azimuth for a system that has several subarrays. Every
-facet (the `segments` column) of every matched polygon is compared, and the
+facet (the `facets` column) of every matched polygon is compared, and the
 result for a reference is the **share of measured area it describes**:
 `consistent` (at least 90%), `partly_consistent`, or `inconsistent`. The
 comparison never picks the facet that agrees best; that would manufacture

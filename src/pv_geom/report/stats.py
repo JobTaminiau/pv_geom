@@ -84,18 +84,18 @@ def prepare(df: pd.DataFrame, manifest: dict | None = None, *,
     ``height_above_roof_m`` and the vintage recorded in the manifest, if any.
     """
     df = df.copy()
-    df["fitted"] = df["panel_tilt_deg"].notna()
+    df["fitted"] = df["tilt_deg"].notna()
     if "status" not in df.columns:
         df["status"] = np.where(df["fitted"], MEASURED, NO_FIT_STATUS)
 
     if "surface_area_m2" not in df.columns:
         with np.errstate(invalid="ignore"):
-            df["surface_area_m2"] = df["area_m2"] / np.cos(np.radians(df["panel_tilt_deg"]))
+            df["surface_area_m2"] = df["area_m2"] / np.cos(np.radians(df["tilt_deg"]))
     if "point_density" not in df.columns:
-        df["point_density"] = df["n_points_panel"] / df["area_m2"].where(df["area_m2"] > 0)
+        df["point_density"] = df["n_points"] / df["area_m2"].where(df["area_m2"] > 0)
 
     for col in ("polygon_vintage", "lidar_date", "vintage_gap_days", "lidar_date_source",
-                "roof_ref_source", "panel_fit_tolerance_m"):
+                "roof_ref_source", "fit_tolerance_m"):
         if col not in df.columns:
             df[col] = None
     supplied_gap = None
@@ -295,15 +295,15 @@ def summary_statistics(df: pd.DataFrame) -> pd.DataFrame:
             w = _weights(sub, weight)
             row: dict = {"stratum": key, "stratum_label": label, "weight": weight,
                          "n": len(sub), "area_m2": float(sub["w_area"].sum())}
-            tilt = sub["panel_tilt_deg"].to_numpy(dtype=float)
+            tilt = sub["tilt_deg"].to_numpy(dtype=float)
             mean, sd = weighted_mean_sd(tilt, w)
             q = weighted_quantile(tilt, w, [0.05, 0.25, 0.5, 0.75, 0.95])
             row.update({"tilt_mean_deg": mean, "tilt_sd_deg": sd, "tilt_p05_deg": q[0],
                         "tilt_p25_deg": q[1], "tilt_p50_deg": q[2], "tilt_p75_deg": q[3],
                         "tilt_p95_deg": q[4]})
 
-            has_az = sub["panel_azimuth_deg"].notna().to_numpy()
-            az = sub["panel_azimuth_deg"].to_numpy(dtype=float)[has_az]
+            has_az = sub["azimuth_deg"].notna().to_numpy()
+            az = sub["azimuth_deg"].to_numpy(dtype=float)[has_az]
             w_az = w[has_az]
             total = w.sum()
             row["azimuth_defined_share"] = float(w_az.sum() / total) if total > 0 else np.nan
@@ -314,7 +314,7 @@ def summary_statistics(df: pd.DataFrame) -> pd.DataFrame:
                     float(w_az[quad == i].sum() / w_az.sum()) if w_az.sum() > 0 else np.nan
                 )
             row.update(bootstrap_intervals(
-                tilt, sub["panel_azimuth_deg"].to_numpy(dtype=float), w))
+                tilt, sub["azimuth_deg"].to_numpy(dtype=float), w))
             rows.append(row)
     return pd.DataFrame(rows)
 
@@ -327,7 +327,7 @@ def tilt_profile(df: pd.DataFrame, bin_deg: float = TILT_BIN_DEG,
     rows = []
     for key, (label, _) in STRATA.items():
         sub = df[stratum_mask(df, key)]
-        tilt = sub["panel_tilt_deg"].to_numpy(dtype=float)
+        tilt = sub["tilt_deg"].to_numpy(dtype=float)
         idx = np.minimum((tilt // bin_deg).astype(int), len(edges) - 1)
         for weight in WEIGHTS:
             w = _weights(sub, weight)
@@ -353,8 +353,8 @@ def azimuth_profile(df: pd.DataFrame, n_sectors: int = 16) -> pd.DataFrame:
     width = 360.0 / n_sectors
     rows = []
     for key, (label, _) in STRATA.items():
-        sub = df[stratum_mask(df, key) & df["panel_azimuth_deg"].notna()]
-        idx = sector_index(sub["panel_azimuth_deg"], n_sectors)
+        sub = df[stratum_mask(df, key) & df["azimuth_deg"].notna()]
+        idx = sector_index(sub["azimuth_deg"], n_sectors)
         for weight in WEIGHTS:
             w = _weights(sub, weight)
             total = w.sum()
@@ -381,9 +381,9 @@ def tilt_azimuth_joint(df: pd.DataFrame) -> pd.DataFrame:
     edges = np.asarray(JOINT_TILT_EDGES)
     rows = []
     for key, (label, _) in STRATA.items():
-        sub = df[stratum_mask(df, key) & df["panel_azimuth_deg"].notna()]
-        s_idx = sector_index(sub["panel_azimuth_deg"], 8)
-        t_idx = np.clip(np.searchsorted(edges, sub["panel_tilt_deg"].to_numpy(dtype=float),
+        sub = df[stratum_mask(df, key) & df["azimuth_deg"].notna()]
+        s_idx = sector_index(sub["azimuth_deg"], 8)
+        t_idx = np.clip(np.searchsorted(edges, sub["tilt_deg"].to_numpy(dtype=float),
                                         side="right") - 1, 0, len(edges) - 2)
         for weight in WEIGHTS:
             w = _weights(sub, weight)
@@ -412,12 +412,12 @@ def fit_quality(df: pd.DataFrame) -> pd.DataFrame:
     """Distribution of the per-polygon quality measures."""
     fitted = df[df["fitted"]]
     specs = [
-        ("panel_rmse_m", "Plane-fit RMSE", "m", fitted),
-        ("panel_fit_tolerance_m", "Fit tolerance used", "m", fitted),
-        ("panel_tilt_unc_deg", "Tilt uncertainty (1 sigma)", "deg", fitted),
-        ("panel_azimuth_unc_deg", "Azimuth uncertainty (1 sigma)", "deg", fitted),
+        ("fit_rmse_m", "Plane-fit RMSE", "m", fitted),
+        ("fit_tolerance_m", "Fit tolerance used", "m", fitted),
+        ("tilt_unc_deg", "Tilt uncertainty (1 sigma)", "deg", fitted),
+        ("azimuth_unc_deg", "Azimuth uncertainty (1 sigma)", "deg", fitted),
         ("point_density", "Point density in polygon", "pts/m2", df),
-        ("n_points_panel", "Points in polygon", "count", df),
+        ("n_points", "Points in polygon", "count", df),
         ("area_m2", "Polygon plan area", "m2", df),
     ]
     rows = []
@@ -435,7 +435,7 @@ def roof_relation(df: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for col, label, unit in [
         ("height_above_roof_m", "Height of panel plane above roof plane", "m"),
-        ("panel_roof_angle_deg", "Angle between panel and roof planes", "deg"),
+        ("angle_to_roof_deg", "Angle between panel and roof planes", "deg"),
         ("roof_tilt_deg", "Roof tilt", "deg"),
         ("height_above_ground_m", "Height above ground", "m"),
     ]:
@@ -508,7 +508,7 @@ def facets_table(df: pd.DataFrame) -> pd.DataFrame:
     """Measured polygons by the number of distinct facets they hold."""
     measured = df[df["fitted"]]
     n = len(measured)
-    planes = measured["n_planes_detected"].fillna(1).astype(int)
+    planes = measured["n_facets"].fillna(1).astype(int)
     counts = planes.value_counts().sort_index()
     return pd.DataFrame([
         {"facets": int(k), "n": int(v), "share": v / n if n else np.nan,

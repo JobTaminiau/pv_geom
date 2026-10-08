@@ -101,14 +101,14 @@ def test_phoenix_bbox_end_to_end(tmp_path: Path) -> None:
     assert len(df) <= 20
 
     # Physical-plausibility checks on successfully fit panels.
-    fit_ok = df.dropna(subset=["panel_tilt_deg"])
+    fit_ok = df.dropna(subset=["tilt_deg"])
     assert len(fit_ok) > 0, "expected at least one successful panel fit"
     # AZ residential PV: tilts <= ~35 deg, azimuth in southern half (90-270 deg)
-    assert (fit_ok["panel_tilt_deg"] <= 45.0).mean() > 0.9
-    south = (fit_ok["panel_azimuth_deg"].between(90, 270)).mean()
+    assert (fit_ok["tilt_deg"] <= 45.0).mean() > 0.9
+    south = (fit_ok["azimuth_deg"].between(90, 270)).mean()
     assert south > 0.8, f"expected most azimuths in southern half, got {south:.1%}"
     # RMSE should mostly be sub-10 cm
-    assert (fit_ok["panel_rmse_m"] <= 0.10).mean() > 0.9
+    assert (fit_ok["fit_rmse_m"] <= 0.10).mean() > 0.9
 
     # Manifest sanity
     manifest = json.loads(manifest_path.read_text())

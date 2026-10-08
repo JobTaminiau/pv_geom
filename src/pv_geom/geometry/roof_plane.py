@@ -55,7 +55,7 @@ class RoofPlaneResult:
 
         A flagged result still carries its ``fit`` (it is informative for QC and
         is written to the ``roof_*`` columns), but it must not feed
-        ``height_above_roof_m``, ``panel_roof_angle_deg``, the mounting rules,
+        ``height_above_roof_m``, ``angle_to_roof_deg``, the mounting rules,
         or the panel-standoff screen: a ``roof_complex`` fit has RMSE above
         ``rmse_max_m``, which is coarser than the 5 cm standoff those consumers
         need to resolve.

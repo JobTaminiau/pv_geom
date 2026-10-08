@@ -1,4 +1,4 @@
-reference_id,polygon_id,segment_index,area_m2,geometry_basis,lidar_date,tilt_deg,azimuth_deg,reference_tilt_deg,reference_azimuth_deg,tilt_error_deg,azimuth_error_deg,tilt_error_beyond_resolution_deg,azimuth_error_beyond_resolution_deg,tilt_agrees,azimuth_agrees,agrees
+reference_id,polygon_id,facet_index,area_m2,geometry_basis,lidar_date,tilt_deg,azimuth_deg,reference_tilt_deg,reference_azimuth_deg,tilt_error_deg,azimuth_error_deg,tilt_error_beyond_resolution_deg,azimuth_error_beyond_resolution_deg,tilt_agrees,azimuth_agrees,agrees
 pvdaq-1283-m0,1283-north-wing,0,1463.199951171875,panel_by_vintage,2020-06-07,10.078198432922363,164.99996948242188,10.0,165.0,0.07819843292236328,-3.0517578125e-05,0.0,0.0,True,True,True
 pvdaq-1283-m0,1283-middle-wing-west,0,815.2999877929688,panel_by_vintage,2020-06-07,10.03488540649414,164.95526123046875,10.0,165.0,0.034885406494140625,-0.04473876953125,0.0,0.0,True,True,True
 pvdaq-1283-m0,1283-middle-wing-east,0,359.79998779296875,panel_by_vintage,2020-06-07,10.039855003356934,165.0208282470703,10.0,165.0,0.039855003356933594,0.0208282470703125,0.0,0.0,True,True,True

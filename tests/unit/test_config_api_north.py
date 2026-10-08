@@ -86,8 +86,8 @@ def test_one_physical_plane_measures_the_same_in_every_crs(true_azimuth: float) 
             contributing_tile_ids=("t",), grid_convergence_deg=conv,
         )
         assert row["grid_convergence_deg"] == pytest.approx(conv, abs=1e-4)
-        assert row["panel_tilt_deg"] == pytest.approx(tilt, abs=0.05)     # tilt needs no correction
-        measured.append(row["panel_azimuth_deg"])
+        assert row["tilt_deg"] == pytest.approx(tilt, abs=0.05)     # tilt needs no correction
+        measured.append(row["azimuth_deg"])
 
     for az in measured:
         d = abs(az - true_azimuth) % 360
@@ -112,8 +112,8 @@ def test_pipeline_reports_true_north_and_says_so(tmp_path: Path) -> None:
     for i, a in enumerate(ARRAYS):
         if a.kind != "roof" or a.noise > 0.02 or a.panel_tilt < 5:
             continue
-        d = abs(rows[i]["panel_azimuth_deg"] - a.panel_az) % 360
-        assert min(d, 360 - d) < 0.3, (a.name, rows[i]["panel_azimuth_deg"])
+        d = abs(rows[i]["azimuth_deg"] - a.panel_az) % 360
+        assert min(d, 360 - d) < 0.3, (a.name, rows[i]["azimuth_deg"])
         assert rows[i]["grid_convergence_deg"] == pytest.approx(grid_convergence(), abs=0.01)
         checked += 1
     assert checked >= 5
@@ -452,7 +452,7 @@ def test_lidar_in_feet_or_another_crs_measures_the_same(crs: str, tmp_path: Path
     b = other.load().set_index("polygon_id").loc[a.index]
     assert list(a["status"]) == list(b["status"])
     assert CRS.from_user_input(b.crs).axis_info[0].unit_name == "metre"
-    ok = a["panel_tilt_deg"].notna().to_numpy()
+    ok = a["tilt_deg"].notna().to_numpy()
     assert ok.sum() >= 5
     # The points land on a different grid (rotated by the convergence, rounded
     # to the tile's own millimetre), so the returns inside each polygon and the
@@ -460,12 +460,12 @@ def test_lidar_in_feet_or_another_crs_measures_the_same(crs: str, tmp_path: Path
     # non-native cases also work in a UTM zone the scene lies outside of, whose
     # grid scale (about 1.001 there) shifts tilt by a few hundredths of a degree;
     # the in-zone foot case agrees to a thousandth.
-    d_tilt = np.abs(a["panel_tilt_deg"] - b["panel_tilt_deg"])[ok]
+    d_tilt = np.abs(a["tilt_deg"] - b["tilt_deg"])[ok]
     assert d_tilt.median() < 0.08 and d_tilt.max() < 0.6
     if crs == "EPSG:2223":
         assert d_tilt.max() < 0.01
-    both = ok & a["panel_azimuth_deg"].notna().to_numpy() & b["panel_azimuth_deg"].notna().to_numpy()
-    d_az = np.abs((a["panel_azimuth_deg"] - b["panel_azimuth_deg"] + 180.0) % 360.0 - 180.0)[both]
+    both = ok & a["azimuth_deg"].notna().to_numpy() & b["azimuth_deg"].notna().to_numpy()
+    d_az = np.abs((a["azimuth_deg"] - b["azimuth_deg"] + 180.0) % 360.0 - 180.0)[both]
     assert d_az.median() < 0.2 and d_az.max() < 1.5
     for col in ("height_above_ground_m", "area_m2"):
         assert np.allclose(a[col][ok], b[col][ok], rtol=0.02, atol=0.02), col

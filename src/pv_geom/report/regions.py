@@ -68,11 +68,11 @@ def regions_table(df: pd.DataFrame, region: np.ndarray, headline: str,
             "sufficient": len(sub) >= MIN_REGION_ROWS,
         }
         if len(sub) >= MIN_REGION_ROWS and w.sum() > 0:
-            tilt = sub["panel_tilt_deg"].to_numpy(dtype=float)
+            tilt = sub["tilt_deg"].to_numpy(dtype=float)
             q = stats.weighted_quantile(tilt, w, [0.25, 0.5, 0.75])
             row.update({"tilt_p25_deg": q[0], "tilt_p50_deg": q[1], "tilt_p75_deg": q[2]})
-            has_az = sub["panel_azimuth_deg"].notna().to_numpy()
-            az, w_az = sub["panel_azimuth_deg"].to_numpy(dtype=float)[has_az], w[has_az]
+            has_az = sub["azimuth_deg"].notna().to_numpy()
+            az, w_az = sub["azimuth_deg"].to_numpy(dtype=float)[has_az], w[has_az]
             quad = stats.sector_index(az, 4)
             shares = {q_: (float(w_az[quad == i].sum() / w_az.sum()) if w_az.sum() > 0
                            else np.nan) for i, q_ in enumerate(stats.QUADRANTS)}

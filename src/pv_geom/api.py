@@ -160,12 +160,23 @@ def run(
     return RunResult(output=str(out), manifest_path=str(manifest))
 
 
-def load(output: str | Path) -> gpd.GeoDataFrame:
+def load(output: str | Path, *, legacy_names: bool = False) -> gpd.GeoDataFrame:
     """A run's rows as a GeoDataFrame in the run CRS — one row per input
-    polygon, with outputs from older schema versions upgraded on the way."""
-    from pv_geom.io.output import read_output
+    polygon, with outputs from older schema versions upgraded on the way.
 
-    return read_output(output)
+    ``legacy_names`` also adds the column names used before schema 0.6
+    (``panel_tilt_deg`` and the rest; see ``pv_geom.schema.RENAMED_COLUMNS``),
+    as copies, for code that has not been updated. It will be removed in 1.0.
+    """
+    from pv_geom.io.output import read_output
+    from pv_geom.schema import RENAMED_COLUMNS
+
+    gdf = read_output(output)
+    if legacy_names:
+        for old, new in RENAMED_COLUMNS.items():
+            if new in gdf.columns and old not in gdf.columns:
+                gdf[old] = gdf[new]
+    return gdf
 
 
 def report(output: str | Path, out_dir: str | Path | None = None, **kwargs: Any) -> ReportResult:

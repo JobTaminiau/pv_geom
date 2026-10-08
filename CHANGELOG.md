@@ -1,6 +1,36 @@
 # Changelog
 
-## Unreleased — 0.5.0
+## Unreleased — 0.6.0
+
+### Changed — column names (schema 0.6)
+
+The measured columns were called `panel_*`, but what is measured is the surface
+inside the polygon, which `geometry_basis` may or may not establish as a panel.
+They now say what they are, and match the names the facet table already used.
+
+| Was | Is |
+| --- | --- |
+| `panel_tilt_deg`, `panel_azimuth_deg` | `tilt_deg`, `azimuth_deg` |
+| `panel_tilt_unc_deg`, `panel_azimuth_unc_deg` | `tilt_unc_deg`, `azimuth_unc_deg` |
+| `panel_rmse_m`, `panel_fit_tolerance_m` | `fit_rmse_m`, `fit_tolerance_m` |
+| `panel_rival_share`, `panel_rival_angle_deg` | `fit_rival_share`, `fit_rival_angle_deg` |
+| `n_points_panel`, `n_inliers_panel` | `n_points`, `n_inliers` |
+| `panel_roof_angle_deg` | `angle_to_roof_deg` |
+| `n_planes_detected` | `n_facets` |
+| `segments` (and `segment_index`, `rmse_m` within it) | `facets` (`facet_index`, `fit_rmse_m`) |
+| `pv_geom_segments.parquet` / `.csv`, `segment_id` | `pv_geom_facets.parquet` / `.csv`, `facet_id` |
+| flag `no_panel_standoff` | flag `no_standoff` |
+
+- **Old outputs still work.** Anything written under the old names is renamed
+  as it is read, so `pv-geom report` and `pv_geom.load` need nothing from you.
+- **Old code can ask for the old names**: `pv_geom.load(output,
+  legacy_names=True)` adds them back as copies. This is for one release and
+  goes in 1.0. The mapping is `pv_geom.schema.RENAMED_COLUMNS`.
+- Unchanged on purpose: the `geometry_basis` values `panel_confirmed` and
+  `panel_by_vintage` (they do assert a panel), the `roof_*` and `secondary_*`
+  columns, and configuration keys such as `panel_plane:`.
+
+## 0.5.0
 
 Measurement depth, and a first outside check. Schema version 0.5.
 

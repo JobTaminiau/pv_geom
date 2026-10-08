@@ -49,10 +49,10 @@ def test_runner_end_to_end(synth_inputs: dict[str, Path]) -> None:
     assert len(table) == 1
     row = table.to_pylist()[0]
     assert row["polygon_id"] == "panel_1"
-    assert row["panel_tilt_deg"] == pytest.approx(20.0, abs=1.0)
-    diff = ((row["panel_azimuth_deg"] - 180.0 + 180) % 360) - 180
+    assert row["tilt_deg"] == pytest.approx(20.0, abs=1.0)
+    diff = ((row["azimuth_deg"] - 180.0 + 180) % 360) - 180
     assert abs(diff) < 1.5
-    assert row["panel_rmse_m"] < 0.05
+    assert row["fit_rmse_m"] < 0.05
     assert row["on_building"] is True
     assert row["building_id"] == "b1"
     # roof was at 5 deg tilt; panel-roof angle ~15 deg → tilted_rack
@@ -267,7 +267,7 @@ def test_build_row_nan_hag_stays_unknown() -> None:
 def test_build_row_flags_no_panel_standoff_when_panels_absent() -> None:
     """Imagery postdating the LiDAR: the polygon is real but its panels were
     not in the cloud, so the "panel" plane is the bare roof. The row still
-    looks like a clean flush mount, so it must carry `no_panel_standoff`."""
+    looks like a clean flush mount, so it must carry `no_standoff`."""
     from pv_geom.pipeline.worker import build_row
 
     scene = rooftop_scene(standoff_m=0.0)
@@ -276,7 +276,7 @@ def test_build_row_flags_no_panel_standoff_when_panels_absent() -> None:
         partition_id=0, contributing_tile_ids=("t1",), **scene,
     )
     assert row["on_building"] is True
-    assert "no_panel_standoff" in row["flags"]
+    assert "no_standoff" in row["flags"]
 
 
 def test_build_row_no_standoff_flag_for_real_flush_array() -> None:
@@ -290,7 +290,7 @@ def test_build_row_no_standoff_flag_for_real_flush_array() -> None:
         partition_id=0, contributing_tile_ids=("t1",), **scene,
     )
     assert row["on_building"] is True
-    assert "no_panel_standoff" not in row["flags"]
+    assert "no_standoff" not in row["flags"]
 
 
 def test_seed_for_polygon_is_process_stable() -> None:
@@ -418,7 +418,7 @@ def test_build_row_marks_unscreenable_when_no_roof_reference() -> None:
     assert row["on_building"] is False
     assert row["height_above_roof_m"] is None
     assert "standoff_unscreenable" in row["flags"]
-    assert "no_panel_standoff" not in row["flags"]
+    assert "no_standoff" not in row["flags"]
 
 
 def test_standoff_screen_states_are_mutually_exclusive() -> None:
@@ -426,7 +426,7 @@ def test_standoff_screen_states_are_mutually_exclusive() -> None:
     (neither flag) screened and passed."""
     from pv_geom.pipeline.worker import build_row
 
-    for standoff, expect in ((0.0, "no_panel_standoff"), (0.10, None)):
+    for standoff, expect in ((0.0, "no_standoff"), (0.10, None)):
         scene = rooftop_scene(standoff_m=standoff)
         row = build_row(
             polygon_id=f"s{standoff}", cfg=PVGeomConfig(), config_hash="x",
@@ -434,7 +434,7 @@ def test_standoff_screen_states_are_mutually_exclusive() -> None:
         )
         flags = set(row["flags"])
         assert "standoff_unscreenable" not in flags       # a roof fit existed
-        assert ("no_panel_standoff" in flags) is (expect == "no_panel_standoff")
+        assert ("no_standoff" in flags) is (expect == "no_standoff")
 
 
 def test_absent_panels_do_not_earn_full_confidence() -> None:
@@ -452,7 +452,7 @@ def test_absent_panels_do_not_earn_full_confidence() -> None:
 
     assert absent["mounting_type"].startswith("flush_mount")
     assert real["mounting_type"].startswith("flush_mount")
-    assert absent["mounting_confidence"] <= cfg.mounting_rules.no_panel_standoff_confidence_max
+    assert absent["mounting_confidence"] <= cfg.mounting_rules.no_standoff_confidence_max
     assert real["mounting_confidence"] > absent["mounting_confidence"]
 
 
@@ -521,18 +521,18 @@ def test_aggregate_reports_the_standoff_screen() -> None:
         "mounting_rule": ["R1", "R1", "R2", "R3"],
         "mounting_confidence": [0.5, 1.0, 1.0, 1.0],
         "on_building": [True, True, True, False],
-        "panel_tilt_deg": [5.0, 5.0, 20.0, 8.0],
-        "panel_azimuth_deg": [180.0, 180.0, 180.0, 90.0],
-        "panel_rmse_m": [0.02, 0.02, 0.03, 0.04],
+        "tilt_deg": [5.0, 5.0, 20.0, 8.0],
+        "azimuth_deg": [180.0, 180.0, 180.0, 90.0],
+        "fit_rmse_m": [0.02, 0.02, 0.03, 0.04],
         "height_above_roof_m": [0.0, 0.12, None, None],
-        "flags": [["no_panel_standoff"], [], ["standoff_unscreenable"],
+        "flags": [["no_standoff"], [], ["standoff_unscreenable"],
                   ["standoff_unscreenable"]],
     })
     out = _aggregate(tbl)["standoff_screen"]
-    assert out["no_panel_standoff"] == 1
+    assert out["no_standoff"] == 1
     assert out["passed"] == 1
     assert out["unscreenable"] == 2
     assert out["screened_frac"] == pytest.approx(0.5)
     assert out["failed_frac_of_screened"] == pytest.approx(0.5)
-    assert out["by_mounting_type"]["flush_mount_flat_roof"]["no_panel_standoff"] == 1
+    assert out["by_mounting_type"]["flush_mount_flat_roof"]["no_standoff"] == 1
     assert out["by_mounting_type"]["flush_mount_flat_roof"]["passed"] == 1

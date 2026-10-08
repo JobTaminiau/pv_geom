@@ -174,7 +174,7 @@ def environment() -> dict[str, Any]:
 class Comparison:
     """How two outputs differ."""
 
-    identical: bool
+    identical: bool                 # bit for bit
     hash_a: str
     hash_b: str
     rows_a: int
@@ -182,11 +182,17 @@ class Comparison:
     only_in_a: int = 0
     only_in_b: int = 0
     columns: dict[str, dict[str, Any]] = field(default_factory=dict)   # differing columns
+    tolerance: float = 0.0
+    # True when the outputs hold the same rows, every non-numeric value is the
+    # same, and every number agrees to within ``tolerance``.
+    equivalent: bool = False
 
     def summary(self) -> str:
         if self.identical:
             return f"identical: {self.rows_a:,} rows, content hash {self.hash_a[:16]}"
-        lines = [f"DIFFERENT: {self.rows_a:,} rows vs {self.rows_b:,}"]
+        head = (f"equivalent within {self.tolerance:g} (not bit for bit)" if self.equivalent
+                else "DIFFERENT")
+        lines = [f"{head}: {self.rows_a:,} rows vs {self.rows_b:,}"]
         if self.only_in_a or self.only_in_b:
             lines.append(f"  polygons only in the first: {self.only_in_a:,}; "
                          f"only in the second: {self.only_in_b:,}")
@@ -196,10 +202,43 @@ class Comparison:
         return "\n".join(lines)
 
 
-def compare_tables(a: pa.Table, b: pa.Table) -> Comparison:
+def _facet_difference(x: pd.Series, y: pd.Series) -> dict[str, Any]:
+    """Difference between two facet columns: numeric where the facets line up
+    (same count per polygon, same footprints), structural otherwise."""
+    rows, worst, structural = 0, 0.0, False
+    for fa, fb in zip(x, y, strict=True):
+        la = [] if fa is None else list(fa)
+        lb = [] if fb is None else list(fb)
+        if _canonical(la) == _canonical(lb):
+            continue
+        rows += 1
+        if len(la) != len(lb):
+            structural = True
+            continue
+        for sa, sb in zip(la, lb, strict=True):
+            for key in sa:
+                va, vb = sa[key], sb[key]
+                if isinstance(va, float | np.floating) or isinstance(vb, float | np.floating):
+                    if va is None or vb is None or np.isnan(va) != np.isnan(vb):
+                        structural = True
+                    elif not np.isnan(va):
+                        worst = max(worst, abs(float(va) - float(vb)))
+                elif key != "geometry" and va != vb:
+                    structural = True
+    if not rows:
+        return {}
+    return {"rows": rows, "note": "facet structure differs"} if structural else {
+        "rows": rows, "max_abs_diff": worst}
+
+
+def compare_tables(a: pa.Table, b: pa.Table, tolerance: float = 0.0) -> Comparison:
+    """Compare two outputs. They are ``identical`` when their content hashes
+    match, and ``equivalent`` when the only differences are numbers that agree
+    to within ``tolerance`` (in each column's own unit)."""
     hash_a, hash_b = content_digest(a), content_digest(b)
     if hash_a == hash_b:
-        return Comparison(True, hash_a, hash_b, len(a), len(b))
+        return Comparison(True, hash_a, hash_b, len(a), len(b), tolerance=tolerance,
+                          equivalent=True)
 
     def frame(t: pa.Table) -> pd.DataFrame:
         t = t.drop_columns([c for c in VOLATILE_COLUMNS if c in t.column_names])
@@ -222,18 +261,26 @@ def compare_tables(a: pa.Table, b: pa.Table) -> Comparison:
                 if both.any():
                     d["max_abs_diff"] = float(np.abs(xv - yv)[both].max())
                 columns[name] = d
+        elif name == "facets":
+            d = _facet_difference(x, y)
+            if d:
+                columns[name] = d
         else:
             differ = x.map(_canonical).to_numpy() != y.map(_canonical).to_numpy()
             if differ.any():
                 columns[name] = {"rows": int(differ.sum())}
-    return Comparison(False, hash_a, hash_b, len(a), len(b),
-                      only_in_a=len(fa.index.difference(fb.index)),
-                      only_in_b=len(fb.index.difference(fa.index)), columns=columns)
+    only_a, only_b = len(fa.index.difference(fb.index)), len(fb.index.difference(fa.index))
+    numeric_only = all(set(d) == {"rows", "max_abs_diff"} for d in columns.values())
+    equivalent = (only_a == 0 and only_b == 0 and numeric_only
+                  and all(d["max_abs_diff"] <= tolerance for d in columns.values()))
+    return Comparison(False, hash_a, hash_b, len(a), len(b), only_in_a=only_a,
+                      only_in_b=only_b, columns=columns, tolerance=tolerance,
+                      equivalent=equivalent)
 
 
-def compare_outputs(a: str | Path, b: str | Path) -> Comparison:
+def compare_outputs(a: str | Path, b: str | Path, tolerance: float = 0.0) -> Comparison:
     """How two finished runs differ, row by row and column by column."""
-    return compare_tables(read_output_table(a), read_output_table(b))
+    return compare_tables(read_output_table(a), read_output_table(b), tolerance)
 
 
 def verify(output: str | Path) -> dict[str, Any]:

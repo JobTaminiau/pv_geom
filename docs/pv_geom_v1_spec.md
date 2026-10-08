@@ -353,6 +353,11 @@ before 1.0.
 6. **Mounting classification.** Stays archived through 1.0 (assumed here). Confirm.
 7. **Third study area (D1).** Which one? Ideally unlike both existing areas: foot-based
    LiDAR, or with class 6 present, or satellite-derived polygons.
+   *Owner, 2026-10-08:* New York City. Its LiDAR (uncompressed LAS, State Plane feet),
+   tile catalog and footprints exist in `nyc-solarcity`, but there is no installed-PV layer,
+   only rooftop technical-potential segments. The owner is building one in the new sister
+   repo `../nyc-pv-detection` (scaffolded 2026-10-08). D1 waits on that layer and on its
+   imagery capture date.
 8. **Sample data licence (I1).** A clip of public 3DEP LiDAR is unencumbered; the polygon
    sample must be one we may redistribute.
 

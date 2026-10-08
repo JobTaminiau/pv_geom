@@ -2,6 +2,27 @@
 
 ## Unreleased — 0.6.0
 
+### Added — reproducibility (G5)
+
+- Every manifest now has a `reproducibility` block: a **content hash** of the
+  rows (independent of run id, partitioning, row order and package version),
+  the **inputs** read (size and SHA-256 of the polygon and footprint layers;
+  names and sizes of the LiDAR tiles), and the **environment** (Python,
+  platform, library and PROJ versions).
+- `pv-geom verify OUTPUT` checks an output against its manifest;
+  `--against OTHER` compares two outputs and says which columns differ, in how
+  many rows and by how much.
+- `pv-geom reproduce OUTPUT --out NEW` reruns a finished run from its manifest
+  and compares, noting environment differences and inputs that have changed.
+- **What is promised.** On one machine and environment: bit for bit (equal
+  content hashes). Across platforms: every row, label and count identical and
+  every number within 1e-4; measured in CI between Linux and Windows the
+  largest differences are 1.5e-5 degrees and 1e-8 metres. Bit-for-bit across
+  platforms, which the specification asked for, is not attainable:
+  linear-algebra libraries differ in their last bits by platform and processor
+  (two Windows CI machines differed from each other).
+- CI enforces both on the synthetic benchmark.
+
 ### Changed — column names (schema 0.6)
 
 The measured columns were called `panel_*`, but what is measured is the surface

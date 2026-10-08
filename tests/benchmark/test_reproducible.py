@@ -27,7 +27,7 @@ from pv_geom.testing import run_benchmark
 
 REFERENCE = Path(__file__).with_name("synthetic_reference.parquet")
 # Degrees for angles, metres for lengths, square metres for areas.
-TOLERANCE = 0.0
+TOLERANCE = 1e-4          # measured across CI platforms: 1.5e-5 deg, 1e-8 m
 
 
 def _run(tmp_path: Path, name: str):

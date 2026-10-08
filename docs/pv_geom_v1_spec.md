@@ -400,5 +400,13 @@ neighbouring PV polygons excluded. School canopies: 50 of 51 polygons now on an 
 (was 0 usable). Warehouse roof: none. Residential benchmarks: 1 of 100 (Phoenix, a 489 m2
 structure 4 m up) and 0 of 63 (Delaware). Limit recorded in the README: it shows the
 structure was present, not that modules were on it. **E7** (row tilt on flat roofs) remains.
+
+**G5 (2026-10-08, branch `v0.6-repro`):** done, with the acceptance criterion amended.
+The manifest records a content hash, input fingerprints and the environment; `pv-geom
+verify` and `pv-geom reproduce` check them. Bit-for-bit holds on one machine. Across CI
+platforms it does not and cannot (BLAS last-bit differences, even between two Windows
+runners): measured differences are at most 1.5e-5 deg and 1e-8 m with every row, label and
+count identical, so the cross-platform criterion is "equivalent within 1e-4", enforced in CI
+against a committed reference output.
 One observation for later: a run CRS used far outside its zone (grid scale ~1.001) shifts
 tilt by a few hundredths of a degree; in-zone the effect is below 0.01 degrees.

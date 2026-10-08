@@ -15,6 +15,12 @@ the LiDAR tiles read.
 **What it ran on.** ``environment`` records the Python, platform and library
 versions. The repository's ``uv.lock`` pins them; this says which were used.
 
+How exact "the same" is: on one machine and environment, bit for bit (equal
+content hashes). Across platforms the numbers agree to about 1e-5 degrees and
+1e-8 metres and everything else exactly; linear-algebra libraries differ in the
+last bits by platform and processor, so equal hashes cannot be promised there
+and ``compare_outputs`` takes a tolerance.
+
 All three are written to the manifest. ``verify`` checks an output against its
 own manifest; ``compare_outputs`` says how two outputs differ; ``reproduce``
 reruns a manifest and compares.
@@ -305,8 +311,8 @@ def environment_differences(then: dict[str, Any], now: dict[str, Any]) -> list[s
     return out
 
 
-def reproduce(output: str | Path, out_dir: str | Path, *, use_dask: bool = False
-              ) -> tuple[Comparison, list[str]]:
+def reproduce(output: str | Path, out_dir: str | Path, *, use_dask: bool = False,
+              tolerance: float = 0.0) -> tuple[Comparison, list[str]]:
     """Rerun a finished run from its manifest into ``out_dir`` and compare.
 
     Returns the comparison and any notes: environment differences, and inputs
@@ -341,4 +347,4 @@ def reproduce(output: str | Path, out_dir: str | Path, *, use_dask: bool = False
     if (then.get("lidar") or {}).get("names_and_sizes_sha256") != \
             (now.get("lidar") or {}).get("names_and_sizes_sha256"):
         notes.append("input changed: the LiDAR tiles differ in name or size")
-    return compare_outputs(output, result.output), notes
+    return compare_outputs(output, result.output, tolerance), notes

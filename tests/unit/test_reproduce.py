@@ -108,3 +108,27 @@ def test_environment_differences_are_listed() -> None:
     assert any(line.startswith("python") for line in lines)
     assert any(line.startswith("numpy") for line in lines)
     assert rp.environment_differences(now, now) == []
+
+
+def test_last_bit_differences_are_equivalent_but_not_identical(demo) -> None:
+    """What another platform produces: the same rows and labels, numbers off in
+    the last bits. That is the same result, and is reported as such."""
+    import numpy as np
+    import pyarrow as pa
+
+    a = read_output_table(demo.output)
+    tilt = np.array(a.column("tilt_deg").to_pylist(), dtype=np.float32)
+    nudged = np.nextafter(tilt, np.float32(np.inf))
+    b = a.set_column(a.column_names.index("tilt_deg"), "tilt_deg",
+                     pa.array([None if np.isnan(v) else float(v) for v in nudged], pa.float32()))
+    strict = rp.compare_tables(a, b)
+    assert not strict.identical and not strict.equivalent
+    loose = rp.compare_tables(a, b, tolerance=1e-4)
+    assert loose.equivalent and not loose.identical
+    assert "equivalent within" in loose.summary()
+    # A changed label is never within tolerance.
+    basis = a.column("geometry_basis").to_pylist()
+    basis[0] = "unscreened" if basis[0] != "unscreened" else "no_fit"
+    c = a.set_column(a.column_names.index("geometry_basis"), "geometry_basis",
+                     pa.array(basis, pa.string()))
+    assert not rp.compare_tables(a, c, tolerance=1.0).equivalent

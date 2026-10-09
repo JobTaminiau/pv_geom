@@ -2,7 +2,7 @@
 
 # Output columns
 
-Schema version **0.6**. One row per input polygon. Angles are in degrees, lengths in metres. Azimuth is clockwise from true north.
+Schema version **1.0**. One row per input polygon. Angles are in degrees, lengths in metres. Azimuth is clockwise from true north.
 
 | Column | Type | Unit | Meaning |
 | --- | --- | --- | --- |
@@ -15,11 +15,13 @@ Schema version **0.6**. One row per input polygon. Angles are in degrees, length
 | `surface_area_m2` | float | m2 | Area along the fitted plane: area_m2 / cos(tilt). Null without a fit. |
 | `aspect_ratio` | float |  | Long/short side of the minimum rotated rectangle. |
 | `polygon_vintage` | date32[day] | date | Capture date of the imagery the polygon was derived from (latest day of the declared window). |
+| `installed_by` | date32[day] | date | Date by which the installation is known to have been complete, from the polygon layer (vintage.installed_by_column). Null when not supplied. |
+| `not_installed_before` | date32[day] | date | Date before which the installation is known not to have existed, from the polygon layer (vintage.not_installed_before_column). Null when not supplied. |
 | `lidar_date` | date32[day] | date | LiDAR capture date for this row's tile: declared, or measured from per-point GPS time. |
 | `lidar_date_source` | string |  | Where lidar_date came from: declared, gps_time (measured flight date) or header_date (LAS header; a delivery date, can lag the flight). |
 | `vintage_gap_days` | int32 | days | polygon_vintage minus lidar_date. Positive means the polygon is newer than the LiDAR, so the installation may be absent from it. |
-| `recommended` | bool |  | True for rows suggested for analysis of array geometry: measured, on a panel basis (panel_confirmed, panel_by_vintage or free_standing) and free of the flags that mark an unreliable or double-counted row. PROVISIONAL rule, to be fixed once accuracy is validated; see RECOMMENDED_RULE in the dataset metadata. |
-| `geometry_basis` | string |  | What the fitted plane represents: panel_confirmed, panel_by_vintage, surface_unresolved, unscreened, no_fit, or not_measured when the polygon never reached the LiDAR. |
+| `recommended` | bool |  | True for rows suggested for analysis of array geometry: measured, on a panel basis (panel_confirmed, panel_by_install_date, panel_by_vintage or free_standing) and free of the flags that mark an unreliable or double-counted row. PROVISIONAL rule, to be fixed once accuracy is validated; see RECOMMENDED_RULE in the dataset metadata. |
+| `geometry_basis` | string |  | What the fitted plane represents: panel_confirmed, panel_by_install_date, panel_by_vintage, free_standing, surface_unresolved, surface_before_install, unscreened, no_fit, or not_measured when the polygon never reached the LiDAR. |
 | `n_points` | int32 |  | LiDAR returns inside the (eroded) polygon. Null when not measured. |
 | `n_inliers` | int32 |  | Returns within the RANSAC threshold of the fitted plane. |
 | `fit_failure` | string |  | Why there is no fit, when status is no_fit: too_few_points, ground_level_only or no_consensus. |

@@ -39,7 +39,7 @@ from pv_geom.geometry.plane_fit import (
 from pv_geom.geometry.roof_plane import RoofPlaneResult, extract_roof_plane
 from pv_geom.geometry.segments import further_facets, is_east_west_pair, split_into_facets
 from pv_geom.schema import MEASURED, NO_FIT
-from pv_geom.vintage import geometry_basis, vintage_gap_days
+from pv_geom.vintage import geometry_basis, installed_at_lidar, vintage_gap_days
 
 NAN = float("nan")
 
@@ -57,6 +57,8 @@ class PolygonTask:
     parent_polygon_id: str | None = None      # defaults to polygon_id
     input_row: int = 0
     polygon_vintage: date | None = None       # imagery capture date
+    installed_by: date | None = None          # installation known complete by this date
+    not_installed_before: date | None = None  # installation known absent before this date
     input_flags: tuple[str, ...] = ()         # quality flags settled when the layer was read
     # True-north bearing of grid north at the polygon (see pv_geom.utils.north).
     # Fits are made in grid coordinates; this turns their azimuths into true ones.
@@ -254,6 +256,8 @@ class StandoffScreen:
 
     screened: bool
     passed: bool
+    # Why a row with a usable roof plane was still not screened.
+    not_parallel: bool = False
 
     @property
     def flag(self) -> str | None:
@@ -290,10 +294,21 @@ def open_ground_share(polygon: Any, pts: LocalPoints, cfg: FreeStandingConfig) -
     return ground / (ground + raised)
 
 
+def reference_not_parallel(angle_to_roof_deg: float, roof_tilt_deg: float,
+                           cfg: Any) -> bool:
+    """True where the roof reference is a pitched plane at an angle to the
+    array: another facet of the roof, not the one the array is on."""
+    if np.isnan(angle_to_roof_deg) or np.isnan(roof_tilt_deg):
+        return False
+    return bool(angle_to_roof_deg > cfg.reference_max_angle_deg
+                and roof_tilt_deg >= cfg.reference_flat_max_tilt_deg)
+
+
 def screen_standoff(height_above_roof_m: float, roof_usable: bool,
-                    min_standoff_m: float) -> StandoffScreen:
-    screened = roof_usable and not np.isnan(height_above_roof_m)
-    return StandoffScreen(screened, screened and height_above_roof_m >= min_standoff_m)
+                    min_standoff_m: float, not_parallel: bool = False) -> StandoffScreen:
+    screened = roof_usable and not np.isnan(height_above_roof_m) and not not_parallel
+    return StandoffScreen(screened, screened and height_above_roof_m >= min_standoff_m,
+                          not_parallel=bool(roof_usable and not_parallel))
 
 
 # Ground returns inside a polygon that mark it as lying at ground level.
@@ -439,7 +454,11 @@ def measure_polygon(
     else:
         har, angle = NAN, NAN
 
-    screen = screen_standoff(har, roof.usable, cfg.heights.min_panel_standoff_m)
+    roof_tilt = float(roof.fit.tilt_deg) if roof.usable and roof.fit is not None else NAN
+    screen = screen_standoff(har, roof.usable, cfg.heights.min_panel_standoff_m,
+                             reference_not_parallel(angle, roof_tilt, cfg.heights))
+    if screen.not_parallel:
+        flags.append("roof_reference_not_parallel")
     if screen.flag:
         flags.append(screen.flag)
 
@@ -453,9 +472,15 @@ def measure_polygon(
         cfg.free_standing.enabled and panel.ok
         and not np.isnan(open_share) and open_share >= cfg.free_standing.min_open_share
         and not np.isnan(hag) and hag >= cfg.free_standing.min_height_above_ground_m)
+    at_lidar = installed_at_lidar(task.installed_by, task.not_installed_before, lidar_date)
+    if screen.passed and at_lidar is False:
+        # Something stands above the roof where the record says no array yet
+        # existed. The LiDAR is believed; the disagreement is worth knowing.
+        flags.append("standoff_before_install_date")
     basis = geometry_basis(
         fit_ok=panel.ok, standoff_passed=screen.passed,
         standoff_screened=screen.screened, gap_days=gap_days, free_standing=free_standing,
+        installed_at_lidar=at_lidar,
     )
 
     return Measurement(

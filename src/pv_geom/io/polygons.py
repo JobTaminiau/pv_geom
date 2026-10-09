@@ -20,6 +20,17 @@ from pv_geom.errors import InputError, MissingCRSError, PolygonIdError
 from pv_geom.io.vector import read_vector, reproject
 from pv_geom.vintage import parse_vintage
 
+
+def _record_date(value, *, earliest: bool):
+    """A per-polygon installation date. A bare year or month is a window: its
+    last day for "complete by", its first for "not before", so that neither
+    claims more than the record says."""
+    s = str(value).strip()
+    if earliest and len(s) in (4, 7) and s[:4].isdigit():
+        return parse_vintage(f"{s}-01-01" if len(s) == 4 else f"{s}-01")
+    return parse_vintage(value)
+
+
 # Tried in order when the caller does not name the id column.
 _ID_ALIASES = ("polygon_id", "detection_id", "cluster_id", "id", "fid", "objectid")
 
@@ -33,6 +44,8 @@ def read_polygons(
     bbox: tuple[float, float, float, float] | None = None,
     max_polygons: int | None = None,
     vintage_col: str | None = None,
+    installed_by_col: str | None = None,
+    not_installed_before_col: str | None = None,
     min_area_m2: float = 0.0,
     overlap_flag_frac: float = 0.0,
 ) -> gpd.GeoDataFrame:
@@ -109,6 +122,20 @@ def read_polygons(
         gdf["polygon_vintage"] = [
             None if pd.isna(v) else parse_vintage(v) for v in gdf[vintage_col]
         ]
+    for out_col, src_col in (("installed_by", installed_by_col),
+                             ("not_installed_before", not_installed_before_col)):
+        if src_col is None:
+            continue
+        if src_col not in gdf.columns:
+            raise InputError(
+                f"polygon layer has no '{src_col}' column (vintage.{out_col}_column)",
+                f"columns are {list(gdf.columns)[:12]}",
+            )
+        # Read before any output-named column is written: the source column may
+        # itself be called installed_by.
+        earliest = out_col == "not_installed_before"
+        gdf[out_col] = [None if pd.isna(v) else _record_date(v, earliest=earliest)
+                        for v in gdf[src_col]]
 
     gdf = reproject(gdf, target_crs).assign(parent_polygon_id=gdf["polygon_id"])
     if explode_multipolygons:

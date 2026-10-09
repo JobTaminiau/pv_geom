@@ -78,4 +78,4 @@ when given. Keyword arguments set the tolerances.
 
 A finished (or dry) run.
 
-Package version: `pv_geom.__version__` (this page was built from 0.6.0.dev0).
+Package version: `pv_geom.__version__` (this page was built from 1.0.0.dev0).

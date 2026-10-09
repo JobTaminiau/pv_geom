@@ -28,8 +28,10 @@ from pv_geom.vintage import (
     GEOMETRY_BASIS,
     NO_FIT,
     NOT_MEASURED,
+    PANEL_BY_INSTALL_DATE,
     PANEL_BY_VINTAGE,
     PANEL_CONFIRMED,
+    SURFACE_BEFORE_INSTALL,
     SURFACE_UNRESOLVED,
     UNSCREENED,
     geometry_basis,
@@ -38,16 +40,20 @@ from pv_geom.vintage import (
 # Report strata: key -> (label, set of geometry_basis values).
 STRATA: dict[str, tuple[str, frozenset[str]]] = {
     "all_fitted": ("All fitted polygons",
-                   frozenset({PANEL_CONFIRMED, PANEL_BY_VINTAGE, FREE_STANDING,
-                              SURFACE_UNRESOLVED, UNSCREENED})),
+                   frozenset({PANEL_CONFIRMED, PANEL_BY_INSTALL_DATE, PANEL_BY_VINTAGE,
+                              FREE_STANDING, SURFACE_UNRESOLVED, SURFACE_BEFORE_INSTALL,
+                              UNSCREENED})),
     "panel": ("Panel basis", ARRAY_BASES),
-    "surface_unresolved": ("Surface unresolved", frozenset({SURFACE_UNRESOLVED})),
+    "surface_unresolved": ("Surface unresolved",
+                           frozenset({SURFACE_UNRESOLVED, SURFACE_BEFORE_INSTALL})),
     "unscreened": ("Unscreened", frozenset({UNSCREENED})),
 }
 
 BASIS_LABELS: dict[str, str] = {
     PANEL_CONFIRMED: "Panel confirmed",
     PANEL_BY_VINTAGE: "Panel by vintage",
+    PANEL_BY_INSTALL_DATE: "Panel by install date",
+    SURFACE_BEFORE_INSTALL: "Surface before install",
     FREE_STANDING: "Free-standing structure",
     SURFACE_UNRESOLVED: "Surface unresolved",
     UNSCREENED: "Unscreened",

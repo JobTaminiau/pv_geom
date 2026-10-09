@@ -124,6 +124,8 @@ def process_tile_group(
     has_parent = "parent_polygon_id" in polygons.columns
     has_row = "input_row" in polygons.columns
     has_vintage = "polygon_vintage" in polygons.columns
+    has_installed_by = "installed_by" in polygons.columns
+    has_not_before = "not_installed_before" in polygons.columns
     has_flags = "input_flags" in polygons.columns
     records = list(polygons.to_dict("records"))
 
@@ -164,6 +166,11 @@ def process_tile_group(
                 parent_polygon_id=str(rec["parent_polygon_id"]) if has_parent else None,
                 input_row=int(rec["input_row"]) if has_row else int(i),
                 polygon_vintage=vintage,
+                installed_by=(rec["installed_by"] if has_installed_by
+                              and not _is_missing(rec["installed_by"]) else None),
+                not_installed_before=(rec["not_installed_before"] if has_not_before
+                                      and not _is_missing(rec["not_installed_before"])
+                                      else None),
                 input_flags=tuple(rec["input_flags"]) if has_flags else (),
                 grid_convergence_deg=float(convergence[i]),
             )

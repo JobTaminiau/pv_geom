@@ -12,8 +12,13 @@ import pyarrow as pa
 # Version of the output schema, stamped into every partition and the manifest.
 # Compatibility rule: within a major version, columns are only ever ADDED and
 # added columns are nullable, so a reader written for x.0 reads every x.y.
-# Before 1.0 the major version is 0 and minor versions may still change types.
-SCHEMA_VERSION = "0.6"
+# Before 1.0 the major version was 0 and minor versions could still change types.
+#
+# 1.0 (2026-10) FREEZES the schema: from here a column is never removed,
+# renamed or retyped within major version 1, and the values a column can take
+# (status, geometry_basis, the flag vocabulary) are only ever added to.
+# tests/unit/test_schema.py holds the frozen column list.
+SCHEMA_VERSION = "1.0"
 
 # Names changed in schema 0.6 (old -> new). The measured columns used to be
 # called panel_*, but what is measured is the surface inside the polygon, which
@@ -60,7 +65,8 @@ SEGMENT_TYPE = pa.list_(pa.struct([pa.field(n, t) for n, t, _, _ in SEGMENT_FIEL
 
 # The `recommended` column. Provisional until the accuracy work (spec Epic A)
 # says whether wide-tolerance fits and unresolved surfaces belong in or out.
-RECOMMENDED_BASES = frozenset({"panel_confirmed", "panel_by_vintage", "free_standing"})
+RECOMMENDED_BASES = frozenset({"panel_confirmed", "panel_by_install_date", "panel_by_vintage",
+                               "free_standing"})
 RECOMMENDED_EXCLUDING_FLAGS = frozenset({
     "low_density", "below_min_area", "overlaps_polygon", "duplicate_geometry",
     "envelope_fit",
@@ -112,6 +118,12 @@ _CORE_FIELDS: list[pa.Field] = [
     _f("polygon_vintage", pa.date32(), unit="date",
        desc="Capture date of the imagery the polygon was derived from (latest "
             "day of the declared window)."),
+    _f("installed_by", pa.date32(), unit="date",
+       desc="Date by which the installation is known to have been complete, from the "
+            "polygon layer (vintage.installed_by_column). Null when not supplied."),
+    _f("not_installed_before", pa.date32(), unit="date",
+       desc="Date before which the installation is known not to have existed, from the "
+            "polygon layer (vintage.not_installed_before_column). Null when not supplied."),
     _f("lidar_date", pa.date32(), unit="date",
        desc="LiDAR capture date for this row's tile: declared, or measured "
             "from per-point GPS time."),
@@ -123,12 +135,14 @@ _CORE_FIELDS: list[pa.Field] = [
             "newer than the LiDAR, so the installation may be absent from it."),
     _f("recommended", pa.bool_(), nullable=False,
        desc="True for rows suggested for analysis of array geometry: measured, on a panel "
-            "basis (panel_confirmed, panel_by_vintage or free_standing) and free of the flags that mark an "
+            "basis (panel_confirmed, panel_by_install_date, panel_by_vintage or free_standing) "
+            "and free of the flags that mark an "
             "unreliable or double-counted row. PROVISIONAL rule, to be fixed once accuracy "
             "is validated; see RECOMMENDED_RULE in the dataset metadata."),
     _f("geometry_basis", pa.string(), nullable=False,
-       desc="What the fitted plane represents: panel_confirmed, "
-            "panel_by_vintage, surface_unresolved, unscreened, no_fit, or "
+       desc="What the fitted plane represents: panel_confirmed, panel_by_install_date, "
+            "panel_by_vintage, free_standing, surface_unresolved, "
+            "surface_before_install, unscreened, no_fit, or "
             "not_measured when the polygon never reached the LiDAR."),
     # --- panel plane --------------------------------------------------------
     _f("n_points", pa.int32(),
@@ -278,6 +292,12 @@ FLAG_DESCRIPTIONS: dict[str, str] = {
     "roof_complex": "A roof plane was found but was too rough to measure against.",
     "no_standoff": "Panel plane is not resolvably above the roof plane.",
     "standoff_unscreenable": "No usable roof reference, so no standoff test was possible.",
+    "roof_reference_not_parallel": "The roof reference is a pitched plane at an angle to the "
+                                   "fitted plane (another facet of the roof), so height above "
+                                   "it says nothing and the standoff test was not applied.",
+    "standoff_before_install_date": "The plane stands above the roof although the layer's "
+                                    "not_installed_before date is after the LiDAR. The LiDAR "
+                                    "is believed; the record and the point cloud disagree.",
     # Only emitted when the experimental mounting classifier is enabled.
     "tracker_suspected": "EXPERIMENTAL single-axis tracker heuristic fired.",
     "possible_missing_footprint": "EXPERIMENTAL elevated, off-footprint, no canopy evidence.",

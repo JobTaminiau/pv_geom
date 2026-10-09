@@ -174,6 +174,17 @@ class HeightsConfig(BaseModel):
     # that a panel is physically present above the roof surface; below it the
     # row gets the `no_standoff` flag. See README (Quality flags).
     min_panel_standoff_m: float = 0.05
+    # The standoff is only meaningful against the plane the array sits on. On a
+    # hip or cross-gable roof the reference can be a neighbouring facet: pitched,
+    # and at an angle to the array. "Height above" such a plane is tens of
+    # centimetres either way and says nothing (measured on New York City, 2026:
+    # it confirmed 14% of real arrays and 16% of bare roofs). Where the
+    # reference is pitched by at least reference_flat_max_tilt_deg and more than
+    # reference_max_angle_deg from the array plane, the test is not applied and
+    # the row is flagged roof_reference_not_parallel. A flat reference under a
+    # tilted plane is a rack on a flat roof, and is tested as before.
+    reference_max_angle_deg: float = 6.0
+    reference_flat_max_tilt_deg: float = 7.0
 
 
 class FreeStandingConfig(BaseModel):
@@ -373,6 +384,18 @@ class VintageConfig(BaseModel):
     # Optional per-polygon date column in the polygon file (mosaics, permit
     # dates). Rows where it is null fall back to `polygon_vintage`.
     polygon_vintage_column: str | None = None
+    # Optional per-polygon installation dates in the polygon file, from permits
+    # or an interconnection record. Each stands in where the LiDAR cannot say
+    # whether the array was there when it was flown:
+    #   installed_by_column: a date by which the installation was complete (an
+    #     inspection sign-off). On or before the LiDAR date, the row's basis is
+    #     panel_by_install_date.
+    #   not_installed_before_column: a date before which it did not exist (a
+    #     first permit). After the LiDAR date, the row's basis is
+    #     surface_before_install: the fitted plane is the roof without the array.
+    # Height above the roof, where it can be measured, still wins over both.
+    installed_by_column: str | None = None
+    not_installed_before_column: str | None = None
     # Declared LiDAR capture date (same formats). Leave unset to have it
     # *measured* per tile from per-point GPS time, which is the flight date; the
     # LAS header date is the delivery date and can lag by more than a year.

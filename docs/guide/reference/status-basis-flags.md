@@ -35,6 +35,8 @@ What the tilt and azimuth rest on, most to least trustworthy as a measurement of
 | --- | --- |
 | `panel_confirmed` | The fitted plane sits resolvably above the surrounding roof plane, so panels were physically present in the point cloud. |
 | `panel_by_vintage` | Not separable from the roof by height, or no roof reference, but the polygon vintage is on or before the LiDAR date, so the installation existed when the LiDAR was flown. |
+| `panel_by_install_date` | Not separable from the roof by height, or no roof reference, but the layer says this installation was complete on or before the LiDAR date (the installed_by column), so it was there when the LiDAR was flown. |
+| `surface_before_install` | The layer says this installation did not exist until after the LiDAR was flown (the not_installed_before column), and the LiDAR shows nothing standing above the roof: the fitted plane is the roof before the array. Tilt and azimuth are valid for the array only if it was then mounted flush. |
 | `free_standing` | The fitted plane is an elevated structure standing in open ground, not on a building: a ground mount or a canopy. It was there when the LiDAR was flown. There is no roof beneath it to test a standoff against, so whether it already carried modules is not established; since modules lie flush on such structures, its tilt and azimuth are the array's either way. |
 | `surface_unresolved` | The polygons postdate the LiDAR (or a date is unknown) and the fitted plane coincides with the roof plane: either a flush-mounted array or the bare roof before installation. Tilt and azimuth are valid for the array only if it is flush-mounted. |
 | `unscreened` | The polygons postdate the LiDAR (or a date is unknown) and there is no usable roof reference to test against, so panel presence is unverified. |
@@ -64,9 +66,11 @@ Quality notes; a row can carry several.
 | `roof_complex` | A roof plane was found but was too rough to measure against. |
 | `no_standoff` | Panel plane is not resolvably above the roof plane. |
 | `standoff_unscreenable` | No usable roof reference, so no standoff test was possible. |
+| `roof_reference_not_parallel` | The roof reference is a pitched plane at an angle to the fitted plane (another facet of the roof), so height above it says nothing and the standoff test was not applied. |
+| `standoff_before_install_date` | The plane stands above the roof although the layer's not_installed_before date is after the LiDAR. The LiDAR is believed; the record and the point cloud disagree. |
 | `tracker_suspected` | EXPERIMENTAL single-axis tracker heuristic fired. |
 | `possible_missing_footprint` | EXPERIMENTAL elevated, off-footprint, no canopy evidence. |
 
 ## The `recommended` column
 
-`recommended` is true when: status == 'measured' and geometry_basis in ['free_standing', 'panel_by_vintage', 'panel_confirmed'] and none of the flags ['below_min_area', 'duplicate_geometry', 'envelope_fit', 'low_density', 'overlaps_polygon']. Provisional: wide_tolerance_fit rows are included and surface_unresolved rows excluded pending validation.
+`recommended` is true when: status == 'measured' and geometry_basis in ['free_standing', 'panel_by_install_date', 'panel_by_vintage', 'panel_confirmed'] and none of the flags ['below_min_area', 'duplicate_geometry', 'envelope_fit', 'low_density', 'overlaps_polygon']. Provisional: wide_tolerance_fit rows are included and surface_unresolved rows excluded pending validation.

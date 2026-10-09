@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pv-geom"
-version = "0.6.0.dev0"
+version = "1.0.0.dev0"
 description = "Tilt, orientation and height of solar PV polygons measured from LiDAR, with publication-ready datasets, figures and reports."
 readme = "README.md"
 requires-python = ">=3.11"

@@ -255,7 +255,8 @@ Definitions are in `status_definitions.csv` and `geometry_basis_definitions.csv`
 ## Using it
 
 - For array geometry, start from `recommended == True`: measured, on a panel basis
-  (`panel_confirmed`, `panel_by_vintage` or `free_standing`) and not flagged as sparse, undersized or
+  (`panel_confirmed`, `panel_by_install_date`, `panel_by_vintage` or `free_standing`) and not
+  flagged as sparse, undersized or
   double-counted. The rule is provisional and is recorded in `metadata.json`.
 - Polygons covering more than one roof face have one row here, describing the
   largest face, and one row per face in `pv_geom_facets`.

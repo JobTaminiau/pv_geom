@@ -77,6 +77,10 @@ heights:
   min_panel_standoff_m: 0.05     # below this the panel plane is not resolvably above the
                                  # roof -> `no_standoff`; at or above it the row is
                                  # geometry_basis = panel_confirmed
+  reference_max_angle_deg: 6.0   # the standoff is tested only against the array's own roof
+  reference_flat_max_tilt_deg: 7.0   # plane: a reference pitched by at least this, and more
+                                 # than the angle above from the array plane, is another
+                                 # facet -> `roof_reference_not_parallel`, not screened
 
 free_standing:                   # presence evidence for ground mounts and canopies, which
   enabled: true                  # have no roof beneath them for the standoff screen
@@ -94,6 +98,10 @@ vintage:
   polygon_vintage: null          # imagery the polygons came from: YYYY, YYYY-MM or
                                  # YYYY-MM-DD (a year/month counts as its last day)
   polygon_vintage_column: null   # optional per-polygon date column in the polygon layer
+  installed_by_column: null      # optional per-polygon installation record (permits):
+  not_installed_before_column: null   # a date the array was complete by, and a date it did
+                                 # not exist before. Where the LiDAR cannot decide, they
+                                 # give panel_by_install_date / surface_before_install
   lidar_date: null               # declare it, or leave null to measure each tile's flight
                                  # date from per-point GPS time (the LAS header date is a
                                  # delivery date and can lag by more than a year)

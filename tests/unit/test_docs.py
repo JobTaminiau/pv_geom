@@ -74,7 +74,11 @@ def test_commands_and_options_in_the_pages_exist() -> None:
 
 
 def test_columns_named_in_the_pages_exist() -> None:
-    known = set(output_schema(False).names) | {"region", "facet_index", "facet_id"}
+    from pv_geom.schema import QUALITY_FLAGS
+
+    # Flag names share these prefixes (roof_no_consensus, ...) and are as checkable.
+    known = (set(output_schema(False).names) | {"region", "facet_index", "facet_id"}
+             | set(QUALITY_FLAGS))
     text = "\n".join(p.read_text(encoding="utf-8") for p in HAND_WRITTEN)
     named = set(re.findall(r"`((?:tilt|azimuth|fit|n|height|angle|grid|geometry|open|roof)"
                            r"_[a-z_0-9]+)`", text))

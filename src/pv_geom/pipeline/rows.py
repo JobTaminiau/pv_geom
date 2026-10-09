@@ -54,6 +54,8 @@ def to_row(m: Measurement, prov: Provenance) -> dict[str, Any]:
         "surface_area_m2": _f32(m.surface_area_m2),
         "aspect_ratio": _f32(m.aspect_ratio),
         "polygon_vintage": m.task.polygon_vintage,
+        "installed_by": m.task.installed_by,
+        "not_installed_before": m.task.not_installed_before,
         "lidar_date": m.lidar_date,
         "lidar_date_source": m.lidar_date_source,
         "vintage_gap_days": None if m.gap_days is None else np.int32(m.gap_days),
@@ -128,6 +130,8 @@ def unmeasured_row(
     polygon_vintage: date | None,
     flags: tuple[str, ...],
     prov: Provenance,
+    installed_by: date | None = None,
+    not_installed_before: date | None = None,
 ) -> dict[str, Any]:
     """The row for a polygon that never reached measurement. It carries what is
     known from the input — identity, geometry, area, vintage — and its status;
@@ -142,6 +146,8 @@ def unmeasured_row(
         "geometry": wkb.dumps(polygon) if has_geom else None,
         "area_m2": np.float32(polygon.area) if polygonal else None,
         "polygon_vintage": polygon_vintage,
+        "installed_by": installed_by,
+        "not_installed_before": not_installed_before,
         "recommended": False,
         "geometry_basis": NOT_MEASURED,
         "roof_ref_source": "none",

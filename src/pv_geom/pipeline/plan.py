@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 # Columns of the polygon layer the workers need. Detector outputs drag along
 # wide attribute columns that would otherwise be pickled into every task.
 _WORKER_COLUMNS = ("polygon_id", "parent_polygon_id", "input_row", "polygon_vintage",
-                   "input_flags", "input_issue")
+                   "installed_by", "not_installed_before", "input_flags", "input_issue")
 
 PendingGroup = tuple[int, TileGroup]          # (partition_id, group)
 
@@ -153,6 +153,8 @@ def build_plan(inputs: RunInputs, cfg: PVGeomConfig) -> Plan:
         inputs.polygons_uri, target_crs=crs, id_col=inputs.polygon_id_col,
         bbox=inputs.bbox, max_polygons=inputs.max_polygons,
         vintage_col=cfg.vintage.polygon_vintage_column,
+        installed_by_col=cfg.vintage.installed_by_column,
+        not_installed_before_col=cfg.vintage.not_installed_before_column,
         min_area_m2=cfg.polygons.min_area_m2,
         overlap_flag_frac=cfg.polygons.overlap_flag_frac,
     )

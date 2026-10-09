@@ -139,6 +139,13 @@ def _concat(tables: list[pa.Table]) -> pa.Table | None:
     return pa.concat_tables(tables, promote_options="default") if tables else None
 
 
+def _date_or_none(value: Any) -> Any:
+    """A date from a polygon-layer cell, or None for a missing one."""
+    if value is None or value != value:
+        return None
+    return value
+
+
 def _unmeasured_table(plan: Plan, measured_ids: set[str], failed: dict[int, str],
                       run_id: str) -> pa.Table:
     """Rows for every in-scope polygon that has no measured row, with the reason.
@@ -163,6 +170,8 @@ def _unmeasured_table(plan: Plan, measured_ids: set[str], failed: dict[int, str]
                 input_row=int(rec.input_row), polygon=rec.geometry, status=status,
                 polygon_vintage=vintage,
                 flags=tuple(rec.input_flags) if has_flags else (), prov=prov,
+                installed_by=_date_or_none(getattr(rec, "installed_by", None)),
+                not_installed_before=_date_or_none(getattr(rec, "not_installed_before", None)),
             ))
 
     _add(plan.invalid, INVALID_GEOMETRY)

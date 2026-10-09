@@ -42,6 +42,8 @@ def probe_lidar_vintage(cfg: PVGeomConfig, tile_uris: list[str]) -> dict:
             str(cfg.vintage.polygon_vintage) if cfg.vintage.polygon_vintage is not None else None
         ),
         "polygon_vintage_column": cfg.vintage.polygon_vintage_column,
+        "installed_by_column": cfg.vintage.installed_by_column,
+        "not_installed_before_column": cfg.vintage.not_installed_before_column,
         "lidar_date_declared": declared_lidar.isoformat() if declared_lidar else None,
         "lidar_tiles_sampled": 0,
     }

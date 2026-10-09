@@ -1,5 +1,46 @@
 # Changelog
 
+## Unreleased — 1.0.0
+
+### Schema 1.0: frozen
+
+The output schema is now version 1.0 and frozen: within major version 1 a
+column is never removed, renamed or retyped, added columns are nullable, and
+the values of `status`, `geometry_basis` and `flags` are only added to.
+`tests/unit/test_install_date_and_screen.py` holds the frozen column list.
+
+### Changed — the panel-presence test is applied only against the array's own roof plane
+
+`panel_confirmed` means the fitted plane stands 5 cm or more above the roof
+reference. Tested on New York City against permit records of which arrays
+existed when the LiDAR was flown, that works when the reference is parallel to
+the array (56% of real arrays confirmed, 4% of bare roofs) and is noise when
+the reference is a different, pitched facet of the roof (14% and 16%).
+
+- The standoff test is no longer applied where the reference is pitched (at
+  least `heights.reference_flat_max_tilt_deg`, 7 degrees) and more than
+  `heights.reference_max_angle_deg` (6 degrees) from the fitted plane. Such
+  rows get the new flag `roof_reference_not_parallel` with
+  `standoff_unscreenable`, and their basis is `unscreened` unless a date
+  decides it. A flat reference under a tilted plane (a rack on a flat roof) is
+  tested as before.
+- **Results change:** some rows that were `panel_confirmed` or
+  `surface_unresolved` are now `unscreened`. Benchmark goldens regenerated.
+
+### Added — per-polygon installation dates
+
+- `vintage.installed_by_column` and `vintage.not_installed_before_column` name
+  optional date columns in the polygon layer (an inspection sign-off; a first
+  permit). They are carried to the output as `installed_by` and
+  `not_installed_before`.
+- Where the LiDAR cannot decide, they do: `geometry_basis` gains
+  `panel_by_install_date` (complete on or before the LiDAR date; counted as
+  `recommended`) and `surface_before_install` (did not exist until after it:
+  the fitted plane is the roof without the array).
+- Height above the roof still wins. A row confirmed by standoff although its
+  `not_installed_before` is after the LiDAR keeps `panel_confirmed` and gets
+  the flag `standoff_before_install_date`.
+
 ## Unreleased — 0.6.0
 
 ### Fixed — found on the first New York City trial (foot-based, uncompressed LAS)

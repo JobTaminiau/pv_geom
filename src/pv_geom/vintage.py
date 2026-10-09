@@ -21,6 +21,8 @@ from pv_geom.errors import VintageFormatError
 # measurement of the *panel* surface.
 PANEL_CONFIRMED = "panel_confirmed"
 PANEL_BY_VINTAGE = "panel_by_vintage"
+PANEL_BY_INSTALL_DATE = "panel_by_install_date"
+SURFACE_BEFORE_INSTALL = "surface_before_install"
 FREE_STANDING = "free_standing"
 SURFACE_UNRESOLVED = "surface_unresolved"
 UNSCREENED = "unscreened"
@@ -29,16 +31,19 @@ NOT_MEASURED = "not_measured"
 
 GEOMETRY_BASIS: tuple[str, ...] = (
     PANEL_CONFIRMED,
+    PANEL_BY_INSTALL_DATE,
     PANEL_BY_VINTAGE,
     FREE_STANDING,
     SURFACE_UNRESOLVED,
+    SURFACE_BEFORE_INSTALL,
     UNSCREENED,
     NO_FIT,
     NOT_MEASURED,
 )
 
 # Bases under which the fitted plane is known to be the panel itself.
-PANEL_BASES: frozenset[str] = frozenset({PANEL_CONFIRMED, PANEL_BY_VINTAGE})
+PANEL_BASES: frozenset[str] = frozenset(
+    {PANEL_CONFIRMED, PANEL_BY_INSTALL_DATE, PANEL_BY_VINTAGE})
 # Bases under which the fitted plane is the array's geometry: the panel itself,
 # or the free-standing structure that carries it.
 ARRAY_BASES: frozenset[str] = PANEL_BASES | {FREE_STANDING}
@@ -52,6 +57,18 @@ BASIS_DESCRIPTIONS: dict[str, str] = {
         "Not separable from the roof by height, or no roof reference, but the "
         "polygon vintage is on or before the LiDAR date, so the installation "
         "existed when the LiDAR was flown."
+    ),
+    PANEL_BY_INSTALL_DATE: (
+        "Not separable from the roof by height, or no roof reference, but the "
+        "layer says this installation was complete on or before the LiDAR date "
+        "(the installed_by column), so it was there when the LiDAR was flown."
+    ),
+    SURFACE_BEFORE_INSTALL: (
+        "The layer says this installation did not exist until after the LiDAR "
+        "was flown (the not_installed_before column), and the LiDAR shows "
+        "nothing standing above the roof: the fitted plane is the roof before "
+        "the array. Tilt and azimuth are valid for the array only if it was "
+        "then mounted flush."
     ),
     FREE_STANDING: (
         "The fitted plane is an elevated structure standing in open ground, not on "
@@ -111,6 +128,25 @@ def parse_vintage(value: str | int | date | datetime | None) -> date | None:
         ) from exc
 
 
+def installed_at_lidar(installed_by: date | None, not_installed_before: date | None,
+                       lidar_date: date | None) -> bool | None:
+    """Whether a per-polygon installation record places the array on the roof
+    when the LiDAR was flown.
+
+    ``installed_by`` is a date by which the installation is known to have been
+    complete (an inspection sign-off); ``not_installed_before`` a date before
+    which it is known not to have existed (a first permit). Either may be
+    missing, and between the two the record says nothing.
+    """
+    if lidar_date is None:
+        return None
+    if installed_by is not None and installed_by <= lidar_date:
+        return True
+    if not_installed_before is not None and not_installed_before > lidar_date:
+        return False
+    return None
+
+
 def vintage_gap_days(polygon_vintage: date | None, lidar_date: date | None) -> int | None:
     """Days by which the polygon vintage postdates the LiDAR (positive = newer
     polygons, i.e. installations may be missing from the point cloud)."""
@@ -126,18 +162,25 @@ def geometry_basis(
     standoff_screened: bool,
     gap_days: int | None,
     free_standing: bool = False,
+    installed_at_lidar: bool | None = None,
 ) -> str:
     """Classify what a row's tilt and azimuth actually rest on.
 
     ``standoff_passed`` is direct physical evidence and wins outright. Failing
-    that, the declared dates decide: if the polygons are no newer than the
-    LiDAR the installation was there to be measured. Otherwise the row is only
-    as good as the screen could make it.
+    that, dates decide. A per-polygon installation record (``installed_at_lidar``:
+    True, False, or None when the layer carries none or it does not settle the
+    matter) speaks first, since it is about this array; then the imagery date,
+    which is about the whole layer. Otherwise the row is only as good as the
+    screen could make it.
     """
     if not fit_ok:
         return NO_FIT
     if standoff_passed:
         return PANEL_CONFIRMED
+    if installed_at_lidar is True:
+        return PANEL_BY_INSTALL_DATE
+    if installed_at_lidar is False:
+        return SURFACE_BEFORE_INSTALL
     if gap_days is not None and gap_days <= 0:
         return PANEL_BY_VINTAGE
     if free_standing:

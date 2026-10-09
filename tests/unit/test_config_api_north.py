@@ -514,3 +514,31 @@ def test_web_mercator_is_never_the_working_crs() -> None:
         resolve_target_crs("EPSG:3857")
     with pytest.raises(CRSResolutionError):          # world-wide: no zone to choose
         resolve_target_crs("auto", "EPSG:3857")
+
+
+def test_metric_crs_is_found_for_a_crs_read_from_wkt1() -> None:
+    """LAS tiles often carry their CRS as WKT1, which matches its EPSG code but
+    has no area of use; choosing the run CRS used to fail on it (New York City
+    2021, EPSG:6539)."""
+    from pv_geom.utils.crs import metric_equivalent
+
+    as_delivered = CRS.from_wkt(CRS.from_epsg(6539).to_wkt("WKT1_GDAL"))
+    assert as_delivered.area_of_use is None and as_delivered.to_epsg() == 6539
+    chosen = CRS.from_user_input(metric_equivalent(as_delivered))
+    assert chosen.axis_info[0].unit_name == "metre" and "18N" in chosen.name
+
+
+def test_inspect_tile_reports_a_foot_based_tile_in_metres(tmp_path: Path) -> None:
+    """Extent and density are in metres whatever the tile's unit: a State Plane
+    tile in feet used to look a tenth as dense as it is."""
+    from pv_geom.io.lidar import inspect_tile
+    from pv_geom.sample import write_demo
+
+    write_demo(tmp_path / "metric")
+    metric = inspect_tile(next((tmp_path / "metric").rglob("*.laz")))
+    _demo_in("EPSG:2223", tmp_path / "metric", tmp_path / "ft")
+    feet = inspect_tile(next((tmp_path / "ft").rglob("*.laz")))
+    assert feet["horizontal_units"] != "metre"
+    assert feet["extent_native"][0] > 3 * feet["extent_m"][0]
+    assert feet["extent_m"][0] == pytest.approx(metric["extent_m"][0], rel=0.01)
+    assert feet["density_pts_per_m2"] == pytest.approx(metric["density_pts_per_m2"], rel=0.02)

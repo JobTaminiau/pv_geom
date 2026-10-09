@@ -2,6 +2,20 @@
 
 ## Unreleased — 0.6.0
 
+### Fixed — found on the first New York City trial (foot-based, uncompressed LAS)
+
+- `crs.target: auto` failed on tiles whose CRS is stored as WKT1 ("declares
+  no area of use"), which is how many State Plane collections are delivered.
+  The area of use is now taken from the EPSG registry when the tile's own
+  record lacks it.
+- `inspect-tile` reported a foot-based tile's extent in feet under `extent_m`,
+  and so a density about a tenth of the true one. `extent_m` and
+  `density_pts_per_m2` are now in metres whatever the tile's unit;
+  `extent_native` keeps the tile's own units.
+- A local run ended with a failed-heartbeat traceback from every worker as the
+  cluster shut down, although the run had succeeded. Workers are now stopped
+  before the scheduler.
+
 ### Added — documentation site (I5)
 
 - `docs/guide/`: a tutorial on the bundled demo, how-to guides (a new study

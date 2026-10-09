@@ -28,6 +28,14 @@ OnDone = Callable[[int, pa.Table], None]
 OnError = Callable[[int, TileGroup, BaseException], None]
 
 
+def _quiet_worker_shutdown() -> None:
+    """Run on each local worker once the work is done: a heartbeat that races
+    the shutdown is not an error worth a traceback."""
+    import logging
+
+    logging.getLogger("distributed.worker").setLevel(logging.CRITICAL)
+
+
 @contextlib.contextmanager
 def cluster_for(cfg: PVGeomConfig) -> Iterator[Any]:
     """Yield a Dask ``Client`` for ``cfg.compute.backend`` (``local`` or
@@ -67,6 +75,13 @@ def cluster_for(cfg: PVGeomConfig) -> Iterator[Any]:
             install_pv_geom_on_workers(client, package_source)
         yield client
     finally:
+        if backend == "local":
+            # Stop the workers before the scheduler. Closing the cluster outright
+            # takes the scheduler away first, and every worker then logs a failed
+            # heartbeat with a traceback: a finished run that reads like a crash.
+            with contextlib.suppress(Exception):
+                client.run(_quiet_worker_shutdown)
+                client.retire_workers(close_workers=True, remove=True)
         client.close()
         cluster.close()
 

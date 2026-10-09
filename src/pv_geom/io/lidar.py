@@ -361,17 +361,25 @@ def inspect_tile(tile_uri: str | Path, cache_dir: Path | None = None) -> dict:
         start, end = _gps_range_to_dates(np.asarray(las.gps_time), header)
 
     horiz = units = None
+    to_metre = None                       # None: the extent cannot be put in metres
     if crs is not None:
         h = crs.sub_crs_list[0] if crs.is_compound else crs
         horiz = h.to_string() if h.to_epsg() is None else f"EPSG:{h.to_epsg()}"
         units = h.axis_info[0].unit_name if h.axis_info else None
+        if h.is_projected and h.axis_info:
+            to_metre = float(h.axis_info[0].unit_conversion_factor)
+    # Extent and density are reported in metres whatever the tile is delivered
+    # in: a State Plane tile in feet would otherwise look a tenth as dense.
+    extent_m = [dx * to_metre, dy * to_metre] if to_metre is not None else None
+    area_m2 = extent_m[0] * extent_m[1] if extent_m else 0.0
     return {
         "tile": s,
         "las_version": str(header.version),
         "point_format": int(header.point_format.id),
         "n_points": n,
-        "extent_m": [dx, dy],
-        "density_pts_per_m2": n / (dx * dy) if dx > 0 and dy > 0 else None,
+        "extent_native": [dx, dy],
+        "extent_m": extent_m,
+        "density_pts_per_m2": n / area_m2 if area_m2 > 0 else None,
         "z_range": [float(header.mins[2]), float(header.maxs[2])],
         "classes": {int(c): int(k) for c, k in zip(cls, counts, strict=True)},
         "has_building_class_6": bool((cls == 6).any()),

@@ -84,6 +84,10 @@ def metric_equivalent(crs) -> str:
     zone at the centre of its area of use, on the same datum where one exists."""
     c = horizontal(crs)
     aou = c.area_of_use
+    if aou is None and c.to_epsg() is not None:
+        # A CRS read from a tile's WKT1 record matches its EPSG code but carries no
+        # area of use (WKT1 has nowhere to put one); the registry entry does.
+        aou = CRS.from_epsg(c.to_epsg()).area_of_use
     if is_web_mercator(c):
         raise CRSResolutionError(
             f"the LiDAR is in Web Mercator ({crs_label(c)}), which covers the whole world, "

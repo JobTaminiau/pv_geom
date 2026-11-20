@@ -25,6 +25,11 @@ Measurement depth, and a first outside check. Schema version 0.5.
 
 ### Added
 
+- **`pv_geom.io._localize` works again** as a deprecated alias of
+  `pv_geom.io.storage` (`localize`, `is_remote`, `RemoteFileMissing`,
+  `DEFAULT_CACHE`), with a `DeprecationWarning`, so building-lod2's
+  `l1-energy-contract` branch imports against current pv_geom. Removed in 0.6.
+
 - **`recommended` column**: measured, on a panel basis, and not flagged sparse,
   undersized, double-counted or an envelope fit. The rule is provisional and is
   written into the dataset metadata.
